@@ -285,7 +285,7 @@ const Sidebar = () => {
               <NavItem to="/Brands"     icon={SlDiamond}     label="Brands"     collapsed={collapsed} />
 
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
-              <NavItem to="/Order"  icon={MdShoppingCart} label="Orders" collapsed={collapsed} />
+              {/* <NavItem to="/Order"  icon={MdShoppingCart} label="Orders" collapsed={collapsed} /> */}
               <NavItem to="/Banner" icon={MdImage}         label="Banner" collapsed={collapsed} />
             </>
           )}
@@ -317,7 +317,7 @@ const Sidebar = () => {
 
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
               <NavItem to="/Cities" icon={MdLocationOn}   label="Locations" collapsed={collapsed} />
-              <NavItem to="/Order"  icon={MdShoppingCart} label="Orders"    collapsed={collapsed} />
+              {/* <NavItem to="/Order"  icon={MdShoppingCart} label="Orders"    collapsed={collapsed} /> */}
 
               <SectionLabel collapsed={collapsed}>Legal</SectionLabel>
               <NavItem to="/PrivacyPolicy" icon={MdPrivacyTip} label="Privacy Policy"     collapsed={collapsed} />
