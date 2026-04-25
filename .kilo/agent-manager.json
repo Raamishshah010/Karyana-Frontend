@@ -1,0 +1,17 @@
+{
+  "worktrees": {
+    "wt-1776859324150-1": {
+      "branch": "adorable-rise",
+      "path": "c:\\Users\\Affan Laptops\\Desktop\\forntend-karyana-dev\\.kilo\\worktrees\\adorable-rise",
+      "parentBranch": "main",
+      "createdAt": "2026-04-22T12:02:04.150Z",
+      "remote": "origin"
+    }
+  },
+  "sessions": {
+    "ses_24aee5c37ffe6W10fmWhUlFxMQ": {
+      "worktreeId": "wt-1776859324150-1",
+      "createdAt": "2026-04-22T12:02:05.411Z"
+    }
+  }
+}

@@ -1,0 +1,272 @@
+import { NavLink } from 'react-router-dom';
+import { CiLogout } from 'react-icons/ci';
+import { SlDiamond } from "react-icons/sl";
+import { FaBook } from "react-icons/fa";
+import { FaRegUser } from "react-icons/fa";
+import { MdCalendarMonth } from 'react-icons/md';
+import { RiCoupon3Line } from 'react-icons/ri';
+import { FaBullseye } from 'react-icons/fa';
+import {
+  MdDashboard,
+  MdInventory2,
+  MdLocationOn,
+  MdShoppingCart,
+  MdPrivacyTip,
+  MdArticle,
+  MdCategory,
+  MdChevronLeft,
+  MdImage,
+} from 'react-icons/md';
+import { useSelector } from 'react-redux';
+import { ROLES } from '../utils';
+import { useMemo, useState } from 'react';
+
+/* ─────────────────────────────────────────
+   Reusable nav item
+───────────────────────────────────────── */
+const NavItem = ({ to, icon: Icon, label, badge, collapsed }) => (
+  <NavLink
+    to={to}
+    title={collapsed ? label : undefined}
+    className={({ isActive }) =>
+      `group flex items-center gap-3 px-3 py-[9px] rounded-xl mx-2 my-[2px] transition-all duration-200 text-sm font-medium
+      ${isActive
+        ? 'bg-[#FF5934]/10 text-[#FF5934]'
+        : 'text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]'
+      }`
+    }
+  >
+    {({ isActive }) => (
+      <>
+        <Icon
+          size={18}
+          className={`flex-shrink-0 transition-colors duration-200
+            ${isActive ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`}
+        />
+        {!collapsed && (
+          <span className="flex-1 truncate leading-none">{label}</span>
+        )}
+        {!collapsed && badge && (
+          <span className="flex-shrink-0 bg-[#FF5934] text-white text-[10px] font-bold rounded-full w-[18px] h-[18px] flex items-center justify-center">
+            {badge}
+          </span>
+        )}
+      </>
+    )}
+  </NavLink>
+);
+
+/* ─────────────────────────────────────────
+   Section label
+───────────────────────────────────────── */
+const SectionLabel = ({ children, collapsed }) => {
+  if (collapsed) {
+    return <div className="my-2 mx-3 border-t border-gray-100" />;
+  }
+  return (
+    <div className="flex items-center gap-2 px-5 pt-5 pb-[6px]">
+      <span className="text-[10px] font-bold tracking-[0.12em] text-[#B0B7C3] uppercase whitespace-nowrap">
+        {children}
+      </span>
+      <div className="flex-1 h-px bg-gray-100" />
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────
+   Main Sidebar
+───────────────────────────────────────── */
+const Sidebar = () => {
+  const user = useSelector(st => st.admin);
+  const [collapsed, setCollapsed] = useState(false);
+
+  const logoutHandler = () => {
+    if (window.confirm("Are you sure to logout?")) {
+      sessionStorage.removeItem("karyana-admin");
+      window.location.replace("/login");
+    }
+  };
+
+  const isWM = useMemo(() => user?.role?.includes(ROLES[2]), [user]);
+  const isCoordinator = useMemo(() => user?.role?.includes(ROLES[1]), [user]);
+
+  const initials = useMemo(() => {
+    const name = user?.name || "Admin";
+    return name
+      .split(" ")
+      .map(n => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  }, [user]);
+
+  const roleName = useMemo(() => {
+    if (isWM) return "Warehouse Manager";
+    if (isCoordinator) return "Coordinator";
+    return "Administrator";
+  }, [isWM, isCoordinator]);
+
+  return (
+    <>
+      {/* Google Font */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+        .karyana-sidebar { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
+        .karyana-sidebar .nav-scroll { scrollbar-width: none; }
+        .karyana-sidebar .nav-scroll::-webkit-scrollbar { display: none; }
+        .karyana-sidebar .sidebar-toggle {
+          position: absolute;
+          right: -12px;
+          top: 24px;
+          z-index: 10;
+          width: 24px;
+          height: 24px;
+          background: #ffffff;
+          border: 1.5px solid #E5E7EB;
+          border-radius: 9999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+          transition: box-shadow 0.2s, background 0.2s;
+        }
+        .karyana-sidebar .sidebar-toggle:hover {
+          background: #FFF5F2;
+          box-shadow: 0 2px 8px rgba(255,89,52,0.15);
+        }
+      `}</style>
+
+      <div
+        className={`karyana-sidebar relative flex flex-col h-screen bg-white border-r border-gray-100 transition-all duration-300 ease-in-out
+          ${collapsed ? 'w-[68px]' : 'w-[230px]'}`}
+      >
+        {/* ── Collapse Toggle ── */}
+        <button
+          onClick={() => setCollapsed(p => !p)}
+          className="sidebar-toggle"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <MdChevronLeft
+            size={14}
+            color="#9CA3AF"
+            style={{
+              transition: 'transform 0.3s',
+              transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+            }}
+          />
+        </button>
+
+        {/* ── Brand Header ── */}
+        <div
+          className={`flex items-center gap-3 border-b border-gray-50 transition-all duration-300
+            ${collapsed ? 'px-3 py-4 justify-center' : 'px-4 py-4'}`}
+        >
+          <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#FF5934] flex items-center justify-center shadow-md shadow-orange-100">
+            <span className="text-white font-bold text-base select-none">K</span>
+          </div>
+          {!collapsed && (
+            <div className="overflow-hidden">
+              <p className="text-[#111827] font-bold text-[15px] leading-tight tracking-tight">Karyana</p>
+              <p className="text-[10px] font-semibold text-[#B0B7C3] tracking-[0.12em] uppercase">Dashboard</p>
+            </div>
+          )}
+        </div>
+
+        {/* ── Navigation ── */}
+        <nav className="flex-1 nav-scroll overflow-y-auto py-2">
+
+          {/* ════ WAREHOUSE MANAGER ════ */}
+          {isWM && (
+            <>
+              <SectionLabel collapsed={collapsed}>Warehouse</SectionLabel>
+              <NavItem to="/Product" icon={MdInventory2}   label="Product" collapsed={collapsed} />
+              <NavItem to="/Order"   icon={MdShoppingCart} label="Orders"  collapsed={collapsed} />
+            </>
+          )}
+
+          {/* ════ COORDINATOR ════ */}
+          {!isWM && isCoordinator && (
+            <>
+              <SectionLabel collapsed={collapsed}>People</SectionLabel>
+              <NavItem to="/Users/Sales"         icon={FaRegUser}       label="Users"                 collapsed={collapsed} />
+              <NavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Attendance & Tracking" collapsed={collapsed} />
+
+              <SectionLabel collapsed={collapsed}>Catalog</SectionLabel>
+              <NavItem to="/Product"    icon={MdInventory2}  label="Product"    collapsed={collapsed} />
+              <NavItem to="/Categories" icon={MdCategory}    label="Categories" collapsed={collapsed} />
+              <NavItem to="/Brands"     icon={SlDiamond}     label="Brands"     collapsed={collapsed} />
+
+              <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
+              <NavItem to="/Order"  icon={MdShoppingCart} label="Orders" collapsed={collapsed} />
+              <NavItem to="/Banner" icon={MdImage}         label="Banner" collapsed={collapsed} />
+            </>
+          )}
+
+          {/* ════ SUPER ADMIN ════ */}
+          {!isWM && !isCoordinator && (
+            <>
+              <SectionLabel collapsed={collapsed}>Overview</SectionLabel>
+              <NavItem to="/Dashboard"          icon={MdDashboard}    label="Dashboard" collapsed={collapsed} />
+              <NavItem to="/Users/Coordinators" icon={FaRegUser}      label="Users"     collapsed={collapsed} />
+              <NavItem to="/Leders/LedgerSales" icon={FaBook}         label="Accounts"  collapsed={collapsed} />
+
+              <SectionLabel collapsed={collapsed}>People</SectionLabel>
+              <NavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Attendance & Tracking" collapsed={collapsed} />
+              <NavItem to="/target"              icon={FaBullseye}      label="Target"                 collapsed={collapsed} />
+
+              <SectionLabel collapsed={collapsed}>Catalog</SectionLabel>
+              <NavItem to="/Product"    icon={MdInventory2}  label="Inventory"   collapsed={collapsed} />
+              <NavItem to="/Brands"     icon={MdCategory}    label="Categories"  collapsed={collapsed} />
+              <NavItem to="/Categories" icon={SlDiamond}     label="Brands"      collapsed={collapsed} />
+              <NavItem to="/coupon"     icon={RiCoupon3Line} label="Coupon"      collapsed={collapsed} />
+
+              <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
+              <NavItem to="/Cities" icon={MdLocationOn}   label="Locations" collapsed={collapsed} />
+              <NavItem to="/Order"  icon={MdShoppingCart} label="Orders"    collapsed={collapsed} />
+
+              <SectionLabel collapsed={collapsed}>Legal</SectionLabel>
+              <NavItem to="/PrivacyPolicy" icon={MdPrivacyTip} label="Privacy Policy"     collapsed={collapsed} />
+              <NavItem to="/Terms"         icon={MdArticle}    label="Terms & Conditions" collapsed={collapsed} />
+            </>
+          )}
+        </nav>
+
+        {/* ── User Footer ── */}
+        <div className="border-t border-gray-100 p-3">
+          <div className={`flex items-center gap-3 ${collapsed ? 'justify-center flex-col' : ''}`}>
+            {/* Avatar */}
+            <div
+              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
+              style={{ background: 'rgba(255,89,52,0.12)', border: '1px solid rgba(255,89,52,0.2)' }}
+            >
+              <span className="text-[#FF5934] font-bold text-xs select-none">{initials}</span>
+            </div>
+
+            {/* Name + role */}
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <p className="text-[#111827] text-[13px] font-semibold truncate leading-tight">
+                  {user?.name || "Admin"}
+                </p>
+                <p className="text-[#9CA3AF] text-[10px] truncate capitalize">{roleName}</p>
+              </div>
+            )}
+
+            {/* Logout */}
+            <button
+              onClick={logoutHandler}
+              title="Logout"
+              className={`flex-shrink-0 p-1.5 rounded-lg hover:bg-red-50 text-[#9CA3AF] hover:text-[#FF5934] transition-colors duration-200
+                ${collapsed ? 'mt-1' : ''}`}
+            >
+              <CiLogout size={18} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default Sidebar;
