@@ -16,6 +16,11 @@ import {
   MdCategory,
   MdChevronLeft,
   MdImage,
+  MdPeople,
+  MdReceipt,
+  MdPayment,
+  MdPointOfSale,
+  MdExpandMore,
 } from 'react-icons/md';
 import { useSelector } from 'react-redux';
 import { ROLES } from '../utils';
@@ -57,6 +62,94 @@ const NavItem = ({ to, icon: Icon, label, badge, collapsed }) => (
 );
 
 /* ─────────────────────────────────────────
+   Collapsible group nav item
+───────────────────────────────────────── */
+const NavGroup = ({ icon: Icon, label, children, collapsed, defaultOpen = false }) => {
+  const [open, setOpen] = useState(defaultOpen);
+
+  // When sidebar collapses, show a tooltip-style tooltip instead
+  if (collapsed) {
+    return (
+      <div className="relative group/grp mx-2 my-[2px]">
+        <button
+          className="w-full flex items-center justify-center px-3 py-[9px] rounded-xl text-[#9CA3AF] hover:bg-gray-100 hover:text-[#111827] transition-all duration-200"
+          title={label}
+        >
+          <Icon size={18} className="flex-shrink-0" />
+        </button>
+        {/* Flyout on hover when collapsed */}
+        <div className="absolute left-full top-0 ml-2 hidden group-hover/grp:flex flex-col bg-white border border-gray-100 rounded-2xl shadow-xl z-50 min-w-[170px] py-2 overflow-hidden">
+          <div className="px-3 pb-2 pt-1 border-b border-gray-100 mb-1">
+            <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">{label}</p>
+          </div>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-2 my-[2px]">
+      {/* Group header button */}
+      <button
+        onClick={() => setOpen(p => !p)}
+        className={`group w-full flex items-center gap-3 px-3 py-[9px] rounded-xl transition-all duration-200 text-sm font-medium
+          ${open ? 'text-[#FF5934] bg-[#FF5934]/5' : 'text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]'}`}
+      >
+        <Icon
+          size={18}
+          className={`flex-shrink-0 transition-colors duration-200 ${open ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`}
+        />
+        <span className="flex-1 truncate leading-none text-left">{label}</span>
+        <MdExpandMore
+          size={16}
+          className={`flex-shrink-0 transition-transform duration-300 ${open ? 'rotate-180 text-[#FF5934]' : 'text-[#9CA3AF]'}`}
+        />
+      </button>
+
+      {/* Animated children */}
+      <div
+        className="overflow-hidden transition-all duration-300 ease-in-out"
+        style={{ maxHeight: open ? '500px' : '0px', opacity: open ? 1 : 0 }}
+      >
+        {/* Indent line + children */}
+        <div className="relative ml-[22px] mt-1 mb-1">
+          {/* Vertical connector line */}
+          <div className="absolute left-[10px] top-0 bottom-0 w-px bg-gray-100" />
+          <div className="flex flex-col gap-[2px]">
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* Sub-item used inside NavGroup (slightly indented, smaller) */
+const SubNavItem = ({ to, icon: Icon, label }) => (
+  <NavLink
+    to={to}
+    className={({ isActive }) =>
+      `group flex items-center gap-2.5 pl-5 pr-3 py-[7px] rounded-xl transition-all duration-200 text-[13px] font-medium
+      ${isActive
+        ? 'bg-[#FF5934]/10 text-[#FF5934]'
+        : 'text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]'
+      }`
+    }
+  >
+    {({ isActive }) => (
+      <>
+        <Icon
+          size={14}
+          className={`flex-shrink-0 ${isActive ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`}
+        />
+        <span className="truncate leading-none">{label}</span>
+      </>
+    )}
+  </NavLink>
+);
+
+/* ─────────────────────────────────────────
    Section label
 ───────────────────────────────────────── */
 const SectionLabel = ({ children, collapsed }) => {
@@ -92,12 +185,7 @@ const Sidebar = () => {
 
   const initials = useMemo(() => {
     const name = user?.name || "Admin";
-    return name
-      .split(" ")
-      .map(n => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
+    return name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
   }, [user]);
 
   const roleName = useMemo(() => {
@@ -108,7 +196,6 @@ const Sidebar = () => {
 
   return (
     <>
-      {/* Google Font */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
         .karyana-sidebar { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
@@ -207,9 +294,16 @@ const Sidebar = () => {
           {!isWM && !isCoordinator && (
             <>
               <SectionLabel collapsed={collapsed}>Overview</SectionLabel>
-              <NavItem to="/Dashboard"          icon={MdDashboard}    label="Dashboard" collapsed={collapsed} />
-              <NavItem to="/Users/Coordinators" icon={FaRegUser}      label="Users"     collapsed={collapsed} />
-              <NavItem to="/Leders/LedgerSales" icon={FaBook}         label="Accounts"  collapsed={collapsed} />
+              <NavItem to="/Dashboard"          icon={MdDashboard} label="Dashboard" collapsed={collapsed} />
+              <NavItem to="/Leders/LedgerSales" icon={FaBook}      label="Accounts"  collapsed={collapsed} />
+
+              {/* ── Sales (collapsible) ── */}
+              <NavGroup icon={MdPointOfSale} label="Sales" collapsed={collapsed}>
+                <SubNavItem to="/Users/Coordinators" icon={MdPeople}       label="Customers" />
+                <SubNavItem to="/Order"              icon={MdShoppingCart} label="Orders"    />
+                <SubNavItem to="/Sales/Invoices"     icon={MdReceipt}      label="Invoices"  />
+                <SubNavItem to="/Sales/Payments"     icon={MdPayment}      label="Payments"  />
+              </NavGroup>
 
               <SectionLabel collapsed={collapsed}>People</SectionLabel>
               <NavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Attendance & Tracking" collapsed={collapsed} />
@@ -235,7 +329,6 @@ const Sidebar = () => {
         {/* ── User Footer ── */}
         <div className="border-t border-gray-100 p-3">
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center flex-col' : ''}`}>
-            {/* Avatar */}
             <div
               className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
               style={{ background: 'rgba(255,89,52,0.12)', border: '1px solid rgba(255,89,52,0.2)' }}
@@ -243,7 +336,6 @@ const Sidebar = () => {
               <span className="text-[#FF5934] font-bold text-xs select-none">{initials}</span>
             </div>
 
-            {/* Name + role */}
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <p className="text-[#111827] text-[13px] font-semibold truncate leading-tight">
@@ -253,7 +345,6 @@ const Sidebar = () => {
               </div>
             )}
 
-            {/* Logout */}
             <button
               onClick={logoutHandler}
               title="Logout"
