@@ -23,6 +23,13 @@ import {
   MdOutlineInventory2, MdFilterList,
 } from "react-icons/md";
 
+/* ── Only show orders with these statuses ── */
+const ALLOWED_STATUSES = ['Delivered', 'Satelment'];
+
+function filterAllowed(orders = []) {
+  return orders.filter(o => ALLOWED_STATUSES.includes(o.status));
+}
+
 function toMMDDYYYY(dateStr) {
   if (!dateStr) return '';
   if (dateStr.includes('-')) {
@@ -172,7 +179,7 @@ const generateOrderPDF = (item, formatDate) => {
   else toast.error('Please allow pop-ups to download PDF');
 };
 
-const Order = () => {
+const InvoicePage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [show, setShow] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -189,7 +196,7 @@ const Order = () => {
   const [loadFormData, setLoadFormData] = useState({ salePerson: "", date: "" });
   const [salesPersons, setSalesPersons] = useState([]);
 
-  /* ── NEW filter state ── */
+  /* ── Filter state ── */
   const [selectedSalesPerson, setSelectedSalesPerson] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
 
@@ -229,6 +236,7 @@ const Order = () => {
       .catch(() => {});
   }, []);
 
+  /* ── Initial data fetch — only Delivered & Satelment ── */
   useEffect(() => {
     setLoading(true);
     const fetch = role.includes(ROLES[2])
@@ -238,7 +246,11 @@ const Order = () => {
         : getOrders(currentPage, LIMIT);
 
     fetch
-      .then((res) => { setData(res.data.data); setTotalPages(res.data.totalPages); setLoading(false); })
+      .then((res) => {
+        setData(filterAllowed(res.data.data));
+        setTotalPages(res.data.totalPages);
+        setLoading(false);
+      })
       .catch((err) => { setLoading(false); toast.error(err.message); });
   }, [currentPage, role, user]);
 
@@ -250,7 +262,7 @@ const Order = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [show]);
 
-  /* ── Unified search/filter fetch ── */
+  /* ── Unified search/filter fetch — only Delivered & Satelment ── */
   const fetchFiltered = useCallback(async ({
     page = currentPage,
     term = searchTerm,
@@ -268,7 +280,7 @@ const Order = () => {
         salesPersonId: salesperson || undefined,
         status: status || undefined,
       });
-      setData(res.data.data);
+      setData(filterAllowed(res.data.data));
       setTotalPages(res.data.totalPages);
     } catch (error) {
       toast.error(error?.response?.data?.errors?.[0]?.msg || error.message);
@@ -295,7 +307,7 @@ const Order = () => {
     await fetchFiltered({ page: 1, salesperson: value });
   };
 
-  /* ── Status filter handler ── */
+  /* ── Status filter handler — restrict choices to allowed statuses ── */
   const handleStatusFilter = async (value) => {
     setSelectedStatus(value);
     setCurrentPage(1);
@@ -317,7 +329,8 @@ const Order = () => {
         statuses: [...prev.statuses, { status: newStatus, date: new Date() }]
       }));
       const res = await getOrders(1, LIMIT);
-      setData(res.data.data); setTotalPages(res.data.totalPages);
+      setData(filterAllowed(res.data.data));
+      setTotalPages(res.data.totalPages);
       setLoading(false); setShow(false);
       toast.success("Status Updated");
     } catch (error) { setLoading(false); toast.error(error.response?.data?.message || error.message); }
@@ -348,7 +361,8 @@ const Order = () => {
       const total = updatedItems.reduce((sum, item) => sum + (item.quantity * item.price), 0);
       await updateOrderStatus({ status: "Satelment", items: updatedItems, total, id: selectedItem._id });
       const res = await getOrders(1, LIMIT);
-      setData(res.data.data); setTotalPages(res.data.totalPages);
+      setData(filterAllowed(res.data.data));
+      setTotalPages(res.data.totalPages);
       setSelectedItem(prev => ({
         ...prev, status: "Satelment", total,
         statuses: [...prev.statuses, { status: "Satelment", date: new Date() }],
@@ -412,7 +426,7 @@ const Order = () => {
     } finally { setLoading(false); }
   };
 
-  /* ── Clear ALL filters ── */
+  /* ── Clear ALL filters — restore Delivered/Satelment only ── */
   const refreshData = async () => {
     setCurrentPage(1);
     setSearchTerm("");
@@ -422,7 +436,11 @@ const Order = () => {
     setSelectedStatus('');
     setLoading(true);
     getOrders(1, LIMIT)
-      .then((res) => { setData(res.data.data); setTotalPages(res.data.totalPages); setLoading(false); })
+      .then((res) => {
+        setData(filterAllowed(res.data.data));
+        setTotalPages(res.data.totalPages);
+        setLoading(false);
+      })
       .catch((err) => { setLoading(false); toast.error(err.message); });
   };
 
@@ -488,8 +506,10 @@ const Order = () => {
         {/* ── Page Header ── */}
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
           <div>
-            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Orders</h1>
-            <p className="text-sm text-[#9CA3AF] mt-0.5">{data.length} orders on this page</p>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Completed Orders</h1>
+            <p className="text-sm text-[#9CA3AF] mt-0.5">
+              Showing Delivered &amp; Settlement orders · {data.length} on this page
+            </p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
             {!role.includes(ROLES[2]) && (
@@ -550,7 +570,7 @@ const Order = () => {
             </select>
           </div>
 
-          {/* Status filter */}
+          {/* Status filter — only Delivered & Satelment ── */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
             <select
@@ -559,7 +579,7 @@ const Order = () => {
               className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[120px]"
             >
               <option value="">All Statuses</option>
-              {ORDER_STATUSES.map(s => (
+              {ALLOWED_STATUSES.map(s => (
                 <option value={s} key={s}>{s}</option>
               ))}
             </select>
@@ -661,7 +681,7 @@ const Order = () => {
                     <div className="flex items-center gap-1.5">
 
                       {/* Excel download */}
-                      {/* <button
+                      <button
                         onClick={async (e) => {
                           e.stopPropagation();
                           try {
@@ -699,10 +719,10 @@ const Order = () => {
                         {downloadingInvoice === item._id + '_excel'
                           ? <div className="w-3.5 h-3.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
                           : <FaFileExcel size={13} />}
-                      </button> */}
+                      </button>
 
                       {/* PDF download */}
-                      {/* <button
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           generateOrderPDF(item, formatDate);
@@ -711,7 +731,7 @@ const Order = () => {
                         title="Download PDF Receipt"
                       >
                         <FaFilePdf size={13} />
-                      </button> */}
+                      </button>
 
                       {/* View */}
                       <button
@@ -731,7 +751,7 @@ const Order = () => {
                       <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
                         <MdShoppingBag size={24} className="text-gray-300" />
                       </div>
-                      <p className="text-[#9CA3AF] text-sm font-medium">No orders found</p>
+                      <p className="text-[#9CA3AF] text-sm font-medium">No completed orders found</p>
                       {filterCount > 0 ? (
                         <button onClick={refreshData} className="text-[#FF5934] text-xs hover:underline font-medium">
                           Clear {filterCount} active filter{filterCount > 1 ? 's' : ''}
@@ -947,7 +967,7 @@ const Order = () => {
                     <div className="flex gap-2 mt-2">
                       <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold
                         ${selectedItem.status === 'Delivered' ? 'bg-emerald-500/20 text-emerald-300'
-                          : selectedItem.status === 'Cancelled' ? 'bg-red-500/20 text-red-300'
+                          : selectedItem.status === 'Satelment' ? 'bg-orange-500/20 text-orange-300'
                           : 'bg-amber-500/20 text-amber-300'}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${statusDot(selectedItem.status)}`} />
                         {selectedItem.status}
@@ -1100,4 +1120,4 @@ const Order = () => {
   );
 };
 
-export default Order;
+export default InvoicePage;

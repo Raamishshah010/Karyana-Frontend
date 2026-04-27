@@ -23,6 +23,10 @@ import {
   MdDownload, MdUpload, MdPerson, MdCategory, MdMyLocation
 } from "react-icons/md";
 import EscapeClose from '../EscapeClose';
+import { useFilters } from '../../context/FilterContext'; // ← ADD THIS IMPORT
+
+/* ── Module key — must be unique per page ── */
+const MODULE = 'retailers'; // ← ADD THIS
 
 /* ── Status badges ── */
 const StatusBadge = ({ active }) => (
@@ -62,15 +66,21 @@ const EMPTY_FORM = {
 };
 
 const Retailers = () => {
-  const [limit, setLimit] = useState(10);
-  const [currentPage, setCurrentPage] = useState(1);
+  /* ── Persistent filter state ── */
+  const { getFilters, setFilters, clearFilters, getFilterCount } = useFilters(); // ← ADD
+  const savedFilters = getFilters(MODULE); // ← ADD
+
+  /* ── Derive local state from saved filters ── */
+  const [limit, setLimit] = useState(savedFilters.limit ?? 10); // ← CHANGED
+  const [currentPage, setCurrentPage] = useState(savedFilters.currentPage ?? 1); // ← CHANGED
+  const [searchTerm, setSearchTerm] = useState(savedFilters.searchTerm ?? ''); // ← CHANGED
+  const [selectedCityId, setSelectedCityId] = useState(savedFilters.selectedCityId ?? ''); // ← CHANGED
+  const [selectedMaritalStatus, setSelectedMaritalStatus] = useState(savedFilters.selectedStatus ?? ''); // ← CHANGED
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
   const [totalPages, setTotalPages] = useState(0);
   const [importing, setImporting] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCityId, setSelectedCityId] = useState('');
-  const [selectedMaritalStatus, setSelectedMaritalStatus] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [cities, setCities] = useState({ isLoaded: false, data: [] });
   const [isFormVisible, setIsFormVisible] = useState(false);
@@ -78,6 +88,18 @@ const Retailers = () => {
   const [editInitialValues, setEditInitialValues] = useState(EMPTY_FORM);
 
   const token = useSelector((state) => state.admin.token);
+  const filterCount = getFilterCount(MODULE); // ← ADD
+
+  /* ── Persist filter changes to context whenever they change ── */
+  useEffect(() => { // ← ADD THIS ENTIRE EFFECT
+    setFilters(MODULE, {
+      searchTerm,
+      selectedCityId,
+      selectedStatus: selectedMaritalStatus,
+      limit,
+      currentPage,
+    });
+  }, [searchTerm, selectedCityId, selectedMaritalStatus, limit, currentPage]);
 
   const normalizeRetailersList = (list = []) => {
     try {
@@ -270,31 +292,61 @@ const Retailers = () => {
     }
   };
 
-  const citySelectHandler = (e) => {
-    setSelectedCityId(e.target.value?.length ? e.target.value : "");
-    if (!e.target.value?.length) setCurrentPage(1);
+  /* ── Filter handlers — update local state AND context ── */
+  const handleCityChange = (value) => { // ← CHANGED from citySelectHandler
+    setSelectedCityId(value);
+    setCurrentPage(1);
+    setFilters(MODULE, { selectedCityId: value, currentPage: 1 });
   };
 
-  const statusSelectHandler = (e) => {
-    setSelectedMaritalStatus(e.target.value?.length ? e.target.value === USER_STATUSES[0] : "");
-    if (!e.target.value?.length) setCurrentPage(1);
+  const handleStatusChange = (value) => { // ← CHANGED from statusSelectHandler
+    const mapped = value ? (value === USER_STATUSES[0] ? true : false) : '';
+    setSelectedMaritalStatus(mapped);
+    setCurrentPage(1);
+    setFilters(MODULE, { selectedStatus: mapped, currentPage: 1 });
   };
 
-  const refreshData = () => {
-    setSearchTerm("");
+  const handleSearchChange = (value) => { // ← ADD
+    setSearchTerm(value);
+    setFilters(MODULE, { searchTerm: value });
+    if (!value) triggerSearch(value);
+  };
+
+  const triggerSearch = (term = searchTerm) => { // ← ADD (replaces inline search logic)
     setLoading(true);
-    getDatas(`/retailer/search?page=1&limit=${limit}&searchTerm=&city=${selectedCityId}&status=${selectedMaritalStatus}`)
+    getDatas(`/retailer/search?page=${currentPage}&limit=${limit}&searchTerm=${term}&city=${selectedCityId}&status=${selectedMaritalStatus}`)
       .then((res) => { setData(normalizeRetailersList(res.data.data)); setTotalPages(res.data.totalPages); setLoading(false); })
       .catch((err) => { setLoading(false); toast.error(err.message); });
   };
 
-  const searchHandler = (e) => {
-    if (e.key === 'Enter') {
-      setLoading(true);
-      getDatas(`/retailer/search?page=${currentPage}&limit=${limit}&searchTerm=${searchTerm}&city=${selectedCityId}&status=${selectedMaritalStatus}`)
-        .then((res) => { setData(normalizeRetailersList(res.data.data)); setTotalPages(res.data.totalPages); setLoading(false); })
-        .catch((err) => { setLoading(false); toast.error(err.message); });
-    }
+  /* ── Clear all filters ── */
+  const handleClearAllFilters = () => { // ← ADD
+    setSearchTerm('');
+    setSelectedCityId('');
+    setSelectedMaritalStatus('');
+    setCurrentPage(1);
+    clearFilters(MODULE);
+    setLoading(true);
+    getDatas(`/retailer/search?page=1&limit=${limit}&searchTerm=&city=&status=`)
+      .then((res) => { setData(normalizeRetailersList(res.data.data)); setTotalPages(res.data.totalPages); setLoading(false); })
+      .catch((err) => { setLoading(false); toast.error(err.message); });
+  };
+
+  const refreshData = () => { // ← CHANGED (now resets limit too and delegates to clearAll)
+    handleClearAllFilters();
+    setLimit(10);
+    setFilters(MODULE, { limit: 10 });
+  };
+
+  const handlePageChange = (next) => { // ← ADD
+    setCurrentPage(next);
+    setFilters(MODULE, { currentPage: next });
+  };
+
+  const handleLimitChange = (val) => { // ← ADD
+    setLimit(val);
+    setCurrentPage(1);
+    setFilters(MODULE, { limit: val, currentPage: 1 });
   };
 
   const editHandler = async (e, item) => {
@@ -398,6 +450,14 @@ const Retailers = () => {
     document.body.removeChild(link);
   };
 
+  /* ── Status select display value ── */
+  const statusDisplayValue = // ← ADD
+    selectedMaritalStatus === ''
+      ? ''
+      : selectedMaritalStatus === true || selectedMaritalStatus === 'true'
+        ? USER_STATUSES[0]
+        : USER_STATUSES[1];
+
   if (loading) return <Loader />;
 
   return (
@@ -468,43 +528,69 @@ const Retailers = () => {
 
         {/* ── Filter Bar ── */}
         <div className="flex flex-wrap items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm mb-5">
+          {/* Search */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2 flex-1 min-w-[200px]">
             <MdSearch size={18} className="text-[#9CA3AF] flex-shrink-0" />
             <input
               value={searchTerm}
-              onChange={e => { if (e.target.value.length) { setSearchTerm(e.target.value); } else { refreshData(); } }}
-              onKeyPress={searchHandler}
+              onChange={e => handleSearchChange(e.target.value)} // ← CHANGED
+              onKeyDown={e => e.key === 'Enter' && triggerSearch()} // ← CHANGED
               className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
               type="search"
               placeholder="Search by name…"
             />
             {searchTerm && (
-              <button onClick={refreshData} className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
+              <button onClick={() => handleSearchChange('')} className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors"> {/* ← CHANGED */}
                 <MdClose size={14} />
               </button>
             )}
           </div>
+
+          {/* City filter */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <MdFilterList size={16} className="text-[#9CA3AF]" />
-            <select value={selectedCityId} onChange={citySelectHandler}
-              className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[130px]">
+            <select
+              value={selectedCityId}
+              onChange={e => handleCityChange(e.target.value)} // ← CHANGED
+              className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[130px]"
+            >
               <option value="">All Locations</option>
               {cities.data.map(city => (
                 <option value={city._id} key={city._id}>{city.name}</option>
               ))}
             </select>
           </div>
+
+          {/* Status filter */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <select
-              value={selectedMaritalStatus === '' ? '' : selectedMaritalStatus ? USER_STATUSES[0] : USER_STATUSES[1]}
-              onChange={statusSelectHandler}
-              className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[110px]">
+              value={statusDisplayValue} // ← CHANGED
+              onChange={e => handleStatusChange(e.target.value)} // ← CHANGED
+              className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[110px]"
+            >
               <option value="">All Status</option>
               {USER_STATUSES.map(status => (
                 <option value={status} key={status}>{status}</option>
               ))}
             </select>
           </div>
+
+          {/* ← ADD: Active filter count badge + Clear Filters button */}
+          {filterCount > 0 && (
+            <button
+              onClick={handleClearAllFilters}
+              className="flex items-center gap-1.5 text-sm font-semibold text-[#FF5934] bg-[#FF5934]/10 hover:bg-[#FF5934]/20 px-3 py-2 rounded-xl transition-all duration-200"
+              title="Clear all active filters"
+            >
+              <MdClose size={14} />
+              Clear Filters
+              <span className="w-5 h-5 rounded-full bg-[#FF5934] text-white text-[10px] font-bold flex items-center justify-center leading-none ml-0.5">
+                {filterCount}
+              </span>
+            </button>
+          )}
+
+          {/* Reset */}
           <button onClick={refreshData}
             className="flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#FF5934] px-3 py-2 rounded-xl hover:bg-orange-50 transition-all duration-200">
             <MdRefresh size={16} /> Reset
@@ -590,7 +676,14 @@ const Retailers = () => {
                         <MdFilterList size={24} className="text-gray-300" />
                       </div>
                       <p className="text-[#9CA3AF] text-sm font-medium">No customers found</p>
-                      <button onClick={refreshData} className="text-[#FF5934] text-xs hover:underline">Clear filters</button>
+                      {/* ← CHANGED: show filter count in empty state */}
+                      {filterCount > 0 ? (
+                        <button onClick={handleClearAllFilters} className="text-[#FF5934] text-xs hover:underline font-medium">
+                          Clear {filterCount} active filter{filterCount > 1 ? 's' : ''}
+                        </button>
+                      ) : (
+                        <button onClick={refreshData} className="text-[#FF5934] text-xs hover:underline">Clear filters</button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -604,7 +697,9 @@ const Retailers = () => {
           <div className="flex items-center gap-1.5">
             <button
               className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
-              disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>
+              disabled={currentPage === 1}
+              onClick={() => handlePageChange(currentPage - 1)} // ← CHANGED
+            >
               <GrFormPrevious size={16} />
             </button>
             <div className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-[#374151]">
@@ -614,14 +709,19 @@ const Retailers = () => {
             </div>
             <button
               className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
-              disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>
+              disabled={currentPage === totalPages}
+              onClick={() => handlePageChange(currentPage + 1)} // ← CHANGED
+            >
               <GrFormNext size={16} />
             </button>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-[#9CA3AF]">Rows per page</span>
-            <select value={limit} onChange={(e) => { setLimit(Number(e.target.value)); setCurrentPage(1); }}
-              className="filter-select bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-[#374151] outline-none">
+            <select
+              value={limit}
+              onChange={(e) => handleLimitChange(Number(e.target.value))} // ← CHANGED
+              className="filter-select bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-[#374151] outline-none"
+            >
               <option value={10}>10</option>
               <option value={15}>15</option>
               <option value={30}>30</option>

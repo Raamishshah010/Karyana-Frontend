@@ -24,6 +24,10 @@ import DragNdrop from '../DragDrop';
 import EscapeClose from '../EscapeClose';
 import placeholder from '../../assets/placehold.jpg';
 import AreaSelector from '../common/AreaSelector';
+import { useFilters } from '../../context/FilterContext';
+
+/* ── Module key ── */
+const MODULE = 'sales';
 
 /* ── Status badges ── */
 const StatusBadge = ({ active }) => (
@@ -64,15 +68,20 @@ const TABS = [
 ];
 
 const Sales = () => {
-  const [limit, setLimit] = useState(10);
-  const [currentPage, setCurrentPage] = useState(1);
+  /* ── Persistent filter state ── */
+  const { getFilters, setFilters, clearFilters, getFilterCount } = useFilters();
+  const savedFilters = getFilters(MODULE);
+
+  const [limit, setLimit] = useState(savedFilters.limit ?? 10);
+  const [currentPage, setCurrentPage] = useState(savedFilters.currentPage ?? 1);
+  const [searchTerm, setSearchTerm] = useState(savedFilters.searchTerm ?? '');
+  const [selectedCityId, setSelectedCityId] = useState(savedFilters.selectedCityId ?? '');
+  const [selectedMaritalStatus, setSelectedMaritalStatus] = useState(savedFilters.selectedStatus ?? '');
+
+  /* ── Other local state ── */
   const [loading, setLoading] = useState(true);
   const [imageLoading, setImageLoading] = useState(false);
-  const [showDropdown, setShowDropdown] = useState('');
   const [totalPages, setTotalPages] = useState(0);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCityId, setSelectedCityId] = useState('');
-  const [selectedMaritalStatus, setSelectedMaritalStatus] = useState('');
   const [sales, setSales] = useState([]);
   const token = useSelector((state) => state.admin.token);
   const [cities, setCities] = useState({ isLoaded: false, data: [] });
@@ -90,6 +99,20 @@ const Sales = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [lastPasswords, setLastPasswords] = useState({});
 
+  const filterCount = getFilterCount(MODULE);
+
+  /* ── Persist filters to context ── */
+  useEffect(() => {
+    setFilters(MODULE, {
+      searchTerm,
+      selectedCityId,
+      selectedStatus: selectedMaritalStatus,
+      limit,
+      currentPage,
+    });
+  }, [searchTerm, selectedCityId, selectedMaritalStatus, limit, currentPage]);
+
+  /* ── Validation schema ── */
   const validations = yup.object().shape({
     salesId: yup.string()
       .required("Sales ID is required")
@@ -120,6 +143,7 @@ const Sales = () => {
     checkOutTime: yup.string().test('time-format', 'Invalid time format (HH:MM)', (v) => !v || /^([01]\d|2[0-3]):([0-5]\d)$/.test(v)),
   });
 
+  /* ── Fetch data ── */
   useEffect(() => {
     setLoading(true);
     const link = `/sale-user/search?page=${currentPage}&limit=${limit}&searchTerm=${searchTerm}&city=${selectedCityId}&status=${selectedMaritalStatus}`;
@@ -129,6 +153,15 @@ const Sales = () => {
       setTotalPages(res.data.totalPages);
     }).catch((err) => { setLoading(false); toast.error(err.message); });
   }, [currentPage, limit, selectedMaritalStatus, selectedCityId]);
+
+  /* ── Load cities ── */
+  useEffect(() => {
+    if (!cities.isLoaded) {
+      getAllCities().then(res => {
+        setCities({ isLoaded: true, data: res.data.data });
+      }).catch(err => console.log("Loading cities: ", err.message));
+    }
+  }, [cities.isLoaded]);
 
   const refreshWithFilters = async (page = currentPage) => {
     try {
@@ -272,46 +305,70 @@ const Sales = () => {
     setFormVisible(true);
   };
 
-  const citySelectHandler = (e) => {
-    setSelectedCityId(e.target.value?.length ? e.target.value : "");
-    if (!e.target.value?.length) setCurrentPage(1);
+  /* ── Filter handlers ── */
+  const handleCityChange = (value) => {
+    setSelectedCityId(value);
+    setCurrentPage(1);
+    setFilters(MODULE, { selectedCityId: value, currentPage: 1 });
   };
 
-  const statusSelectHandler = (e) => {
-    setSelectedMaritalStatus(e.target.value?.length ? e.target.value === USER_STATUSES[0] : "");
-    if (!e.target.value?.length) setCurrentPage(1);
+  const handleStatusChange = (value) => {
+    const mapped = value ? (value === USER_STATUSES[0] ? 'true' : 'false') : '';
+    setSelectedMaritalStatus(mapped);
+    setCurrentPage(1);
+    setFilters(MODULE, { selectedStatus: mapped, currentPage: 1 });
+  };
+
+  const handleSearchChange = (value) => {
+    setSearchTerm(value);
+    setFilters(MODULE, { searchTerm: value });
+    if (!value) triggerSearch(value);
+  };
+
+  const triggerSearch = (term = searchTerm) => {
+    setLoading(true);
+    const link = `/sale-user/search?page=${currentPage}&limit=${limit}&searchTerm=${term}&city=${selectedCityId}&status=${selectedMaritalStatus}`;
+    getDatas(link)
+      .then((res) => { setSales(res.data.data); setTotalPages(res.data.totalPages); setLoading(false); })
+      .catch((err) => { setLoading(false); toast.error(err.message); });
+  };
+
+  const handleClearAllFilters = () => {
+    setSearchTerm('');
+    setSelectedCityId('');
+    setSelectedMaritalStatus('');
+    setCurrentPage(1);
+    clearFilters(MODULE);
+    setLoading(true);
+    getDatas(`/sale-user/search?page=1&limit=${limit}&searchTerm=&city=&status=`)
+      .then((res) => { setSales(res.data.data); setTotalPages(res.data.totalPages); setLoading(false); })
+      .catch((err) => { setLoading(false); toast.error(err.message); });
   };
 
   const refreshData = () => {
-    setSearchTerm("");
-    setLoading(true);
-    const link = `/sale-user/search?page=1&limit=${limit}&searchTerm=&city=${selectedCityId}&status=${selectedMaritalStatus}`;
-    getDatas(link).then((res) => {
-      setSales(res.data.data);
-      setTotalPages(res.data.totalPages);
-      setLoading(false);
-    }).catch((err) => { setLoading(false); toast.error(err.message); });
+    handleClearAllFilters();
+    setLimit(10);
+    setFilters(MODULE, { limit: 10 });
   };
 
-  const searchHandler = (e) => {
-    if (e.key === 'Enter') {
-      setLoading(true);
-      const link = `/sale-user/search?page=${currentPage}&limit=${limit}&searchTerm=${searchTerm}&city=${selectedCityId}&status=${selectedMaritalStatus}`;
-      getDatas(link).then((res) => {
-        setSales(res.data.data);
-        setTotalPages(res.data.totalPages);
-        setLoading(false);
-      }).catch((err) => { setLoading(false); toast.error(err.message); });
-    }
+  const handlePageChange = (next) => {
+    setCurrentPage(next);
+    setFilters(MODULE, { currentPage: next });
   };
 
-  useEffect(() => {
-    if (!cities.isLoaded) {
-      getAllCities().then(res => {
-        setCities({ isLoaded: true, data: res.data.data });
-      }).catch(err => console.log("Loading cities: ", err.message));
-    }
-  }, [cities.isLoaded]);
+  const handleLimitChange = (val) => {
+    setLimit(val);
+    setCurrentPage(1);
+    setFilters(MODULE, { limit: val, currentPage: 1 });
+  };
+
+  /* ── Status display value for controlled <select> ── */
+  const statusDisplayValue =
+    selectedMaritalStatus === ''
+      ? ''
+      : selectedMaritalStatus === 'true'
+        ? USER_STATUSES[0]
+        : USER_STATUSES[1];
 
   if (loading) return <Loader />;
 
@@ -375,45 +432,77 @@ const Sales = () => {
 
         {/* ── Filter Bar ── */}
         <div className="flex flex-wrap items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm mb-5">
+
+          {/* Search */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2 flex-1 min-w-[200px]">
             <MdSearch size={18} className="text-[#9CA3AF] flex-shrink-0" />
             <input
               value={searchTerm}
-              onChange={e => { if (e.target.value.length) { setSearchTerm(e.target.value); } else { refreshData(); } }}
-              onKeyPress={searchHandler}
+              onChange={e => handleSearchChange(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && triggerSearch()}
               className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
               type="search"
               placeholder="Search by name…"
             />
             {searchTerm && (
-              <button onClick={refreshData} className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
+              <button
+                onClick={() => handleSearchChange('')}
+                className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors flex-shrink-0"
+              >
                 <MdClose size={14} />
               </button>
             )}
           </div>
+
+          {/* City filter */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <MdFilterList size={16} className="text-[#9CA3AF]" />
-            <select value={selectedCityId} onChange={citySelectHandler}
-              className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[130px]">
+            <select
+              value={selectedCityId}
+              onChange={e => handleCityChange(e.target.value)}
+              className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[130px]"
+            >
               <option value="">All Locations</option>
               {cities.data.map(city => (
                 <option value={city._id} key={city._id}>{city.name}</option>
               ))}
             </select>
           </div>
+
+          {/* Status filter */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <select
-              value={selectedMaritalStatus === '' ? '' : selectedMaritalStatus ? USER_STATUSES[0] : USER_STATUSES[1]}
-              onChange={statusSelectHandler}
-              className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[110px]">
+              value={statusDisplayValue}
+              onChange={e => handleStatusChange(e.target.value)}
+              className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[110px]"
+            >
               <option value="">All Status</option>
               {USER_STATUSES.map(status => (
                 <option value={status} key={status}>{status}</option>
               ))}
             </select>
           </div>
-          <button onClick={refreshData}
-            className="flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#FF5934] px-3 py-2 rounded-xl hover:bg-orange-50 transition-all duration-200">
+
+          {/* Clear Filters badge — only shown when filters are active */}
+          {filterCount > 0 && (
+            <button
+              onClick={handleClearAllFilters}
+              className="flex items-center gap-1.5 text-sm font-semibold text-[#FF5934] bg-[#FF5934]/10 hover:bg-[#FF5934]/20 px-3 py-2 rounded-xl transition-all duration-200"
+              title="Clear all active filters"
+            >
+              <MdClose size={14} />
+              Clear Filters
+              <span className="w-5 h-5 rounded-full bg-[#FF5934] text-white text-[10px] font-bold flex items-center justify-center leading-none ml-0.5">
+                {filterCount}
+              </span>
+            </button>
+          )}
+
+          {/* Reset */}
+          <button
+            onClick={refreshData}
+            className="flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#FF5934] px-3 py-2 rounded-xl hover:bg-orange-50 transition-all duration-200"
+          >
             <MdRefresh size={16} /> Reset
           </button>
         </div>
@@ -529,7 +618,14 @@ const Sales = () => {
                         <MdFilterList size={24} className="text-gray-300" />
                       </div>
                       <p className="text-[#9CA3AF] text-sm font-medium">No sales persons found</p>
-                      <button onClick={refreshData} className="text-[#FF5934] text-xs hover:underline">Clear filters</button>
+                      {filterCount > 0 && (
+                        <button
+                          onClick={handleClearAllFilters}
+                          className="text-[#FF5934] text-xs hover:underline font-medium"
+                        >
+                          Clear {filterCount} active filter{filterCount > 1 ? 's' : ''}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -544,7 +640,7 @@ const Sales = () => {
             <button
               className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
               disabled={currentPage === 1}
-              onClick={() => setCurrentPage(p => p - 1)}
+              onClick={() => handlePageChange(currentPage - 1)}
             >
               <GrFormPrevious size={16} />
             </button>
@@ -556,7 +652,7 @@ const Sales = () => {
             <button
               className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
               disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage(p => p + 1)}
+              onClick={() => handlePageChange(currentPage + 1)}
             >
               <GrFormNext size={16} />
             </button>
@@ -565,7 +661,7 @@ const Sales = () => {
             <span className="text-xs text-[#9CA3AF]">Rows per page</span>
             <select
               value={limit}
-              onChange={(e) => { setLimit(Number(e.target.value)); setCurrentPage(1); }}
+              onChange={(e) => handleLimitChange(Number(e.target.value))}
               className="filter-select bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-[#374151] outline-none"
             >
               <option value={10}>10</option>
