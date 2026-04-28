@@ -1,9 +1,17 @@
 /* eslint-disable react/prop-types */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const DateRangePicker = ({ submitHandler, sd, ed }) => {
   const [startDate, setStartDate] = useState(sd ?? '');
   const [endDate, setEndDate] = useState(ed ?? '');
+
+  useEffect(() => {
+    setStartDate(sd ?? '');
+  }, [sd]);
+
+  useEffect(() => {
+    setEndDate(ed ?? '');
+  }, [ed]);
 
   const handleSubmit = () => {
     if (startDate && endDate) {

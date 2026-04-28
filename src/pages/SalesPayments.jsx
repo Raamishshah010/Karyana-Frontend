@@ -4,19 +4,17 @@ import {
   getRetailerLedgerById,
   approveLedger,
   rejectLedger,
-  searchRetailerUsers,
 } from '../APIS';
 import { toast } from 'react-toastify';
-import { Loader } from '../components/common/loader';
 import { GrFormNext, GrFormPrevious } from 'react-icons/gr';
 import { FaRegEye } from 'react-icons/fa6';
 import { AiOutlineCheck, AiOutlineClose } from 'react-icons/ai';
 import {
-  MdSearch, MdClose, MdArrowBack, MdPerson,
-  MdFilterList, MdOutlineReceipt, MdRefresh,
+  MdClose, MdArrowBack, MdPerson,
+  MdOutlineReceipt, MdRefresh, MdKeyboardArrowDown,
+  MdFilterList,
 } from 'react-icons/md';
-import { HiDotsVertical } from 'react-icons/hi';
-import ClickOutside from '../Hooks/ClickOutside';
+import { MdSearch } from 'react-icons/md';
 
 const TRANSACTIONS_PER_PAGE = 11;
 
@@ -61,39 +59,66 @@ const mapLedger = (ledger) => ({
 const SalesPayments = () => {
   /* list state */
   const [allRetailers, setAllRetailers] = useState([]);
-  const [filteredRetailers, setFilteredRetailers] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
   const [listLoading, setListLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
+
+  /* dropdown state */
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [dropdownSearch, setDropdownSearch] = useState('');
+  const dropdownRef = useRef(null);
 
   /* selected user + ledger state */
   const [selectedUser, setSelectedUser] = useState(null);
   const [transactionData, setTransactionData] = useState([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [actionStatuses, setActionStatuses] = useState({});
-  const [showDropdown, setShowDropdown] = useState(null);
 
   /* image drawer */
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerImageSrc, setDrawerImageSrc] = useState(null);
 
-  /* date filter */
+  /* filters */
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'inactive'
+  const [typeFilter, setTypeFilter] = useState('all');     // 'all' | 'ORDER' | 'PAYMENT' | ...
 
   /* pagination */
   const [recoveryPage, setRecoveryPage] = useState(1);
 
-  /* ── recovery rows derived ── */
+  /* ── dropdown filtered list ── */
+  const dropdownList = allRetailers.filter((r) => {
+    const q = dropdownSearch.toLowerCase();
+    return (
+      r.name.toLowerCase().includes(q) ||
+      r.shopName.toLowerCase().includes(q) ||
+      r.phone.toLowerCase().includes(q)
+    );
+  });
+
+  /* ── recovery rows derived (with type filter) ── */
   const recoveryRows = transactionData.filter((t) => {
     const drNum = parseFloat(String(t.dr || '0').replace(/[^0-9.-]/g, ''));
     const crNum = parseFloat(String(t.cr || '0').replace(/[^0-9.-]/g, ''));
-    return !t.isImported && t.isApproved === false && drNum > 0 && (isNaN(crNum) || crNum === 0);
+    const isRecovery = !t.isImported && t.isApproved === false && drNum > 0 && (isNaN(crNum) || crNum === 0);
+    const matchesType = typeFilter === 'all' || String(t.type || '').toUpperCase() === typeFilter.toUpperCase();
+    return isRecovery && matchesType;
   });
 
   const recoveryTotalPages = Math.ceil(recoveryRows.length / TRANSACTIONS_PER_PAGE) || 1;
   const recoveryStart = (recoveryPage - 1) * TRANSACTIONS_PER_PAGE;
   const recoveryVisible = recoveryRows.slice(recoveryStart, recoveryStart + TRANSACTIONS_PER_PAGE);
+
+  /* ── close dropdown on outside click ── */
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+        setDropdownSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   /* ── fetch all retailers on mount ── */
   useEffect(() => {
@@ -101,8 +126,7 @@ const SalesPayments = () => {
       try {
         setListLoading(true);
         const res = await getAllRetailers();
-        const formatted = formatRetailerData(res?.data?.data || []);
-        setAllRetailers(formatted);
+        setAllRetailers(formatRetailerData(res?.data?.data || []));
       } catch {
         toast.error('Failed to load retailers');
       } finally {
@@ -115,6 +139,7 @@ const SalesPayments = () => {
   useEffect(() => {
     if (!selectedUser?._id) return;
     setRecoveryPage(1);
+    setTypeFilter('all');
     (async () => {
       try {
         setLedgerLoading(true);
@@ -134,32 +159,6 @@ const SalesPayments = () => {
       }
     })();
   }, [selectedUser?._id]);
-
-  /* ── search handler ── */
-  const handleSearch = async () => {
-    setSearched(true);
-    if (!searchTerm.trim()) {
-      setFilteredRetailers(allRetailers);
-      return;
-    }
-    try {
-      setListLoading(true);
-      const res = await searchRetailerUsers({ searchTerm: searchTerm.trim(), page: 1, limit: 50 });
-      setFilteredRetailers(formatRetailerData(res?.data?.data || []));
-    } catch {
-      /* fallback to client-side filter */
-      setFilteredRetailers(
-        allRetailers.filter((r) =>
-          r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          r.shopName.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-      );
-    } finally {
-      setListLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e) => { if (e.key === 'Enter') handleSearch(); };
 
   /* ── date filter ── */
   const handleDateFilter = async () => {
@@ -183,6 +182,12 @@ const SalesPayments = () => {
     } finally {
       setLedgerLoading(false);
     }
+  };
+
+  const clearDateFilter = () => {
+    setStartDate('');
+    setEndDate('');
+    refreshLedger();
   };
 
   /* ── approve ── */
@@ -231,17 +236,18 @@ const SalesPayments = () => {
     setIsDrawerOpen(true);
   };
 
-  /* ── reset search ── */
-  const resetSearch = () => {
-    setSearchTerm('');
-    setFilteredRetailers([]);
-    setSearched(false);
+  /* ── select user from dropdown ── */
+  const handleSelectUser = (retailer) => {
+    setSelectedUser(retailer);
+    setDropdownOpen(false);
+    setDropdownSearch('');
+    setStartDate('');
+    setEndDate('');
+    setActionStatuses({});
   };
 
-  const displayList = searched ? filteredRetailers : [];
-
-  /* ── shared classes ── */
-  const inputCls = 'bg-[#F9FAFB] border border-gray-200 focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-3 py-2.5 rounded-xl w-full outline-none text-sm text-[#111827] transition-all placeholder:text-gray-300';
+  /* ── unique transaction types for type filter ── */
+  const transactionTypes = [...new Set(transactionData.map((t) => t.type).filter(Boolean))];
 
   return (
     <>
@@ -256,6 +262,8 @@ const SalesPayments = () => {
         .sp-drawer { animation: drawerIn 0.25s cubic-bezier(0.4,0,0.2,1); }
         .sp-no-scroll::-webkit-scrollbar { display:none; }
         .sp-no-scroll { scrollbar-width:none; }
+        @keyframes ddIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+        .sp-dropdown { animation: ddIn 0.15s ease both; }
       `}</style>
 
       <div className="sp-page">
@@ -266,10 +274,10 @@ const SalesPayments = () => {
         {selectedUser ? (
           <div className="sp-animate">
             {/* Header */}
-            <div className="flex items-center justify-between mt-6 mb-5">
+            <div className="flex items-center justify-between mt-6 mb-5 flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => { setSelectedUser(null); setTransactionData([]); setStartDate(''); setEndDate(''); setActionStatuses({}); }}
+                  onClick={() => { setSelectedUser(null); setTransactionData([]); setStartDate(''); setEndDate(''); setActionStatuses({}); setTypeFilter('all'); }}
                   className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] transition-all shadow-sm"
                 >
                   <MdArrowBack size={18} />
@@ -287,25 +295,45 @@ const SalesPayments = () => {
                 </div>
               </div>
 
-              {/* Date filter */}
-              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
-                <input type="date" value={startDate} max={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="bg-transparent outline-none text-sm text-[#374151]" />
-                <span className="text-[#9CA3AF] text-xs">to</span>
-                <input type="date" value={endDate} min={startDate} max={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="bg-transparent outline-none text-sm text-[#374151]" />
-                <button onClick={handleDateFilter} disabled={!startDate || !endDate}
-                  className="ml-1 bg-[#FF5934] text-white text-[12px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-40 hover:bg-[#e84d2a] transition-colors">
-                  Filter
-                </button>
-                {(startDate || endDate) && (
-                  <button onClick={() => { setStartDate(''); setEndDate(''); refreshLedger(); }}
-                    className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
-                    <MdClose size={15} />
-                  </button>
+              {/* Filters row */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Type filter */}
+                {transactionTypes.length > 0 && (
+                  <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
+                    <MdFilterList size={14} className="text-[#9CA3AF]" />
+                    <select
+                      value={typeFilter}
+                      onChange={(e) => { setTypeFilter(e.target.value); setRecoveryPage(1); }}
+                      className="bg-transparent outline-none text-sm text-[#374151] pr-1"
+                    >
+                      <option value="all">All Types</option>
+                      {transactionTypes.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
+
+                {/* Date filter */}
+                <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
+                  <input type="date" value={startDate} max={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="bg-transparent outline-none text-sm text-[#374151]" />
+                  <span className="text-[#9CA3AF] text-xs">to</span>
+                  <input type="date" value={endDate} min={startDate} max={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="bg-transparent outline-none text-sm text-[#374151]" />
+                  <button onClick={handleDateFilter} disabled={!startDate || !endDate}
+                    className="ml-1 bg-[#FF5934] text-white text-[12px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-40 hover:bg-[#e84d2a] transition-colors">
+                    Filter
+                  </button>
+                  {(startDate || endDate) && (
+                    <button onClick={clearDateFilter}
+                      className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
+                      <MdClose size={15} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -367,31 +395,22 @@ const SalesPayments = () => {
                         </tr>
                       ) : recoveryVisible.map((t, idx) => (
                         <tr key={t.id || idx} className="sp-row">
-                          {/* ID */}
                           <td className="px-4 py-3">
                             <span className="text-[11px] font-mono font-bold text-[#6B7280] bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg">
                               #{t.id ? String(t.id).slice(0, 6).toUpperCase() : 'N/A'}
                             </span>
                           </td>
-                          {/* Details */}
                           <td className="px-4 py-3 text-[13px] text-[#374151] max-w-[160px] truncate">{t.details}</td>
-                          {/* Ref No */}
                           <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">{t.refNo ?? '—'}</td>
-                          {/* V. No */}
                           <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">{t.voucherNo ?? '—'}</td>
-                          {/* Qty */}
                           <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">{t.quantity ?? '—'}</td>
-                          {/* Dr */}
                           <td className="px-4 py-3">
                             {t.dr !== '0'
                               ? <span className="text-[13px] font-semibold text-emerald-600">PKR {t.dr}</span>
                               : <span className="text-[#9CA3AF]">—</span>}
                           </td>
-                          {/* Date */}
                           <td className="px-4 py-3 text-[12px] text-[#6B7280]">{t.date}</td>
-                          {/* Balance */}
                           <td className="px-4 py-3 text-[13px] font-semibold text-[#111827]">PKR {t.balance}</td>
-                          {/* Action */}
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1.5">
                               {t.isRejected ? (
@@ -412,7 +431,6 @@ const SalesPayments = () => {
                                   </button>
                                 </>
                               )}
-                              {/* View image */}
                               <button onClick={() => handleViewImage(t)} title="View Image"
                                 className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-orange-50 text-[#9CA3AF] hover:text-[#FF5934] border border-gray-100 transition-all">
                                 <FaRegEye size={13} />
@@ -449,143 +467,132 @@ const SalesPayments = () => {
 
         ) : (
           /* ══════════════════════════════════════
-              SEARCH / LIST VIEW
+              DROPDOWN / LIST VIEW
           ══════════════════════════════════════ */
           <div className="sp-animate">
             {/* Page header */}
             <div className="flex items-center justify-between mt-6 mb-5">
               <div>
                 <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Sales Payments</h1>
-                <p className="text-sm text-[#9CA3AF] mt-0.5">Search a customer to view recovery entries</p>
+                <p className="text-sm text-[#9CA3AF] mt-0.5">Select a customer to view their recovery entries</p>
               </div>
             </div>
 
-            {/* Search bar */}
-            <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm mb-5">
-              <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2 flex-1">
-                <MdSearch size={18} className="text-[#9CA3AF] flex-shrink-0" />
-                <input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
-                  type="search"
-                  placeholder="Search by name or shop name…"
-                />
-                {searchTerm && (
-                  <button onClick={resetSearch} className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
-                    <MdClose size={14} />
-                  </button>
+            {/* Customer selector */}
+            <div className="bg-white border border-gray-100 rounded-2xl px-5 py-4 shadow-sm mb-5">
+              <label className="block text-[12px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-2">
+                Select Customer
+              </label>
+
+              <div className="relative" ref={dropdownRef}>
+                {/* Trigger button */}
+                <button
+                  onClick={() => setDropdownOpen((o) => !o)}
+                  disabled={listLoading}
+                  className="w-full flex items-center justify-between gap-3 bg-[#F9FAFB] border border-gray-200 hover:border-[#FF5934] focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-4 py-3 rounded-xl outline-none text-sm transition-all"
+                >
+                  {listLoading ? (
+                    <div className="flex items-center gap-2 text-[#9CA3AF]">
+                      <div className="w-4 h-4 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
+                      <span>Loading customers…</span>
+                    </div>
+                  ) : selectedUser ? (
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={selectedUser.image}
+                        alt={selectedUser.name}
+                        className="w-7 h-7 rounded-full object-cover ring-2 ring-white shadow-sm flex-shrink-0"
+                        onError={(e) => { e.target.src = 'https://developers.elementor.com/docs/assets/img/elementor-placeholder-image.png'; }}
+                      />
+                      <div className="text-left">
+                        <span className="font-semibold text-[#111827]">{selectedUser.name}</span>
+                        <span className="text-[#9CA3AF] ml-2 text-xs">{selectedUser.shopName}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-[#9CA3AF]">— Choose a customer —</span>
+                  )}
+                  <MdKeyboardArrowDown
+                    size={18}
+                    className={`text-[#9CA3AF] flex-shrink-0 transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                {/* Dropdown panel */}
+                {dropdownOpen && (
+                  <div className="sp-dropdown absolute top-full left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg z-30 overflow-hidden">
+                    {/* Search inside dropdown */}
+                    <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 bg-[#FAFAFA]">
+                      <MdSearch size={15} className="text-[#9CA3AF] flex-shrink-0" />
+                      <input
+                        autoFocus
+                        value={dropdownSearch}
+                        onChange={(e) => setDropdownSearch(e.target.value)}
+                        placeholder="Type to filter…"
+                        className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#C4C8D0] w-full"
+                      />
+                      {dropdownSearch && (
+                        <button onClick={() => setDropdownSearch('')} className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
+                          <MdClose size={13} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Options list */}
+                    <ul className="max-h-64 overflow-y-auto sp-no-scroll divide-y divide-gray-50">
+                      {dropdownList.length === 0 ? (
+                        <li className="px-4 py-6 text-center text-sm text-[#9CA3AF]">No customers match</li>
+                      ) : dropdownList.map((retailer) => (
+                        <li
+                          key={retailer._id}
+                          onClick={() => handleSelectUser(retailer)}
+                          className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-[#FFF4F2] transition-colors group"
+                        >
+                          <div className="relative flex-shrink-0">
+                            <img
+                              src={retailer.image}
+                              alt={retailer.name}
+                              className="w-8 h-8 rounded-full object-cover ring-2 ring-white shadow-sm"
+                              onError={(e) => { e.target.src = 'https://developers.elementor.com/docs/assets/img/elementor-placeholder-image.png'; }}
+                            />
+                            <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${retailer.isActive ? 'bg-emerald-400' : 'bg-gray-300'}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] font-semibold text-[#111827] truncate group-hover:text-[#FF5934] transition-colors">{retailer.name}</p>
+                            <p className="text-[11px] text-[#9CA3AF] truncate">{retailer.shopName} &nbsp;·&nbsp; {retailer.phone}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <span className="text-[12px] font-semibold text-[#111827]">PKR {retailer.balance}</span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                              ${retailer.isActive ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>
+                              {retailer.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {/* Footer count */}
+                    <div className="px-4 py-2 border-t border-gray-100 bg-[#FAFAFA]">
+                      <span className="text-[11px] text-[#9CA3AF]">
+                        {dropdownList.length} of {allRetailers.length} customers
+                      </span>
+                    </div>
+                  </div>
                 )}
               </div>
-              <button
-                onClick={handleSearch}
-                disabled={listLoading}
-                className="flex items-center gap-2 bg-[#FF5934] hover:bg-[#e84d2a] disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-md shadow-orange-100 transition-all"
-              >
-                {listLoading
-                  ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  : <MdSearch size={16} />}
-                Search
-              </button>
             </div>
 
-            {/* Results */}
-            {!searched ? (
-              /* Prompt state */
-              <div className="flex flex-col items-center justify-center py-24 text-center">
-                <div className="w-20 h-20 rounded-3xl bg-[#FFF4F2] border border-[#FFD7CE] flex items-center justify-center mb-4 shadow-sm">
-                  <MdSearch size={32} className="text-[#FF5934]" />
-                </div>
-                <h3 className="text-[16px] font-bold text-[#374151] mb-1">Search a Customer</h3>
-                <p className="text-sm text-[#9CA3AF] max-w-xs">
-                  Type a customer or shop name above and press Search or Enter to find their recovery records.
-                </p>
+            {/* Prompt state — no user selected */}
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="w-20 h-20 rounded-3xl bg-[#FFF4F2] border border-[#FFD7CE] flex items-center justify-center mb-4 shadow-sm">
+                <MdPerson size={32} className="text-[#FF5934]" />
               </div>
-            ) : displayList.length === 0 ? (
-              /* No results */
-              <div className="flex flex-col items-center justify-center py-24 text-center">
-                <div className="w-20 h-20 rounded-3xl bg-gray-50 flex items-center justify-center mb-4">
-                  <MdPerson size={32} className="text-gray-300" />
-                </div>
-                <h3 className="text-[16px] font-bold text-[#374151] mb-1">No customers found</h3>
-                <p className="text-sm text-[#9CA3AF]">Try a different name or clear the search.</p>
-                <button onClick={resetSearch}
-                  className="mt-4 text-[#FF5934] text-sm font-semibold hover:underline">
-                  Clear Search
-                </button>
-              </div>
-            ) : (
-              /* Results table */
-              <div className="sp-animate bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-[#FAFAFA]">
-                  <span className="text-[13px] font-bold text-[#374151]">
-                    {displayList.length} result{displayList.length !== 1 ? 's' : ''} found
-                  </span>
-                </div>
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-50">
-                      {['Customer', 'ID', 'Phone', 'Shop', 'Balance', 'Status', 'Action'].map((h) => (
-                        <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {displayList.map((retailer) => (
-                      <tr key={retailer._id} className="sp-row cursor-pointer" onClick={() => setSelectedUser(retailer)}>
-                        {/* Customer */}
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="relative flex-shrink-0">
-                              <img
-                                src={retailer.image}
-                                alt={retailer.name}
-                                className="w-9 h-9 rounded-full object-cover ring-2 ring-white shadow-sm"
-                                onError={(e) => { e.target.src = 'https://developers.elementor.com/docs/assets/img/elementor-placeholder-image.png'; }}
-                              />
-                              <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${retailer.isActive ? 'bg-emerald-400' : 'bg-gray-300'}`} />
-                            </div>
-                            <span className="text-[13px] font-semibold text-[#111827]">{retailer.name}</span>
-                          </div>
-                        </td>
-                        {/* ID */}
-                        <td className="px-4 py-3">
-                          <span className="text-[11px] font-mono font-bold text-[#6B7280] bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg uppercase">
-                            #{retailer._id.slice(0, 6)}
-                          </span>
-                        </td>
-                        {/* Phone */}
-                        <td className="px-4 py-3 text-[13px] text-[#374151]">{retailer.phone}</td>
-                        {/* Shop */}
-                        <td className="px-4 py-3 text-[13px] text-[#374151]">{retailer.shopName}</td>
-                        {/* Balance */}
-                        <td className="px-4 py-3 text-[13px] font-semibold text-[#111827]">PKR {retailer.balance}</td>
-                        {/* Status */}
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1
-                            ${retailer.isActive
-                              ? 'bg-emerald-50 text-emerald-600 ring-emerald-200'
-                              : 'bg-gray-100 text-gray-400 ring-gray-200'}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${retailer.isActive ? 'bg-emerald-400' : 'bg-gray-300'}`} />
-                            {retailer.isActive ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        {/* Action */}
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setSelectedUser(retailer); }}
-                            className="flex items-center gap-1.5 bg-[#FFF4F2] hover:bg-[#FFE8E2] border border-[#FFD7CE] text-[#FF5934] text-[12px] font-semibold px-3 py-1.5 rounded-xl transition-all"
-                          >
-                            <FaRegEye size={12} /> View
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+              <h3 className="text-[16px] font-bold text-[#374151] mb-1">No customer selected</h3>
+              <p className="text-sm text-[#9CA3AF] max-w-xs">
+                Use the dropdown above to pick a customer and view their recovery records.
+              </p>
+            </div>
           </div>
         )}
 

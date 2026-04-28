@@ -15,7 +15,7 @@ const User = () => {
 
   return (
     <>
-      <style>{`
+      {/* <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
 
         .user-nav-wrapper {
@@ -133,7 +133,7 @@ const User = () => {
             </NavLink>
           </div>
         ))}
-      </div>
+      </div> */}
     </>
   );
 };

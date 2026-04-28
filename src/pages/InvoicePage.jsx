@@ -506,7 +506,7 @@ const InvoicePage = () => {
         {/* ── Page Header ── */}
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
           <div>
-            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Completed Orders</h1>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Sales Invoices</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">
               Showing Delivered &amp; Settlement orders · {data.length} on this page
             </p>

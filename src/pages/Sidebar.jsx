@@ -31,10 +31,14 @@ import {
   MdPerson,
   MdListAlt,
   MdSettings,
+  MdSupervisorAccount,
+  MdWarehouse,
+  MdBadge,
 } from 'react-icons/md';
 import { useSelector } from 'react-redux';
 import { ROLES } from '../utils';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 /* ─────────────────────────────────────────
    Reusable nav item
@@ -53,18 +57,10 @@ const NavItem = ({ to, icon: Icon, label, badge, collapsed }) => (
   >
     {({ isActive }) => (
       <>
-        <Icon
-          size={18}
-          className={`flex-shrink-0 transition-colors duration-200
-            ${isActive ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`}
-        />
-        {!collapsed && (
-          <span className="flex-1 truncate leading-none">{label}</span>
-        )}
+        <Icon size={18} className={`flex-shrink-0 transition-colors duration-200 ${isActive ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`} />
+        {!collapsed && <span className="flex-1 truncate leading-none">{label}</span>}
         {!collapsed && badge && (
-          <span className="flex-shrink-0 bg-[#FF5934] text-white text-[10px] font-bold rounded-full w-[18px] h-[18px] flex items-center justify-center">
-            {badge}
-          </span>
+          <span className="flex-shrink-0 bg-[#FF5934] text-white text-[10px] font-bold rounded-full w-[18px] h-[18px] flex items-center justify-center">{badge}</span>
         )}
       </>
     )}
@@ -72,30 +68,85 @@ const NavItem = ({ to, icon: Icon, label, badge, collapsed }) => (
 );
 
 /* ─────────────────────────────────────────
+   Portal-based flyout for collapsed mode
+   Renders into document.body so it is NEVER
+   clipped by overflow:hidden / overflow:auto
+───────────────────────────────────────── */
+const FlyoutPortal = ({ anchorRef, children, label, onMouseEnter, onMouseLeave }) => {
+  const [style, setStyle] = useState({});
+
+  useEffect(() => {
+    if (!anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    setStyle({
+      position: 'fixed',
+      top: rect.top,
+      left: rect.right + 8,
+      zIndex: 9999,
+    });
+  }, [anchorRef]);
+
+  return createPortal(
+    <div
+      style={style}
+      className="flex flex-col bg-white border border-gray-100 rounded-2xl shadow-xl min-w-[210px] py-2 overflow-hidden"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      <div className="px-3 pb-2 pt-1 border-b border-gray-100 mb-1">
+        <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">{label}</p>
+      </div>
+      {children}
+    </div>,
+    document.body
+  );
+};
+
+/* ─────────────────────────────────────────
    Collapsible group nav item
 ───────────────────────────────────────── */
 const NavGroup = ({ icon: Icon, label, children, collapsed, defaultOpen = false }) => {
   const [open, setOpen] = useState(defaultOpen);
+  const [flyoutOpen, setFlyoutOpen] = useState(false);
+  const anchorRef = useRef(null);
+  const hideTimer = useRef(null);
+
+  const showFlyout = () => { clearTimeout(hideTimer.current); setFlyoutOpen(true); };
+  const hideFlyout = () => { hideTimer.current = setTimeout(() => setFlyoutOpen(false), 150); };
+
+  /* Close flyout if sidebar expands */
+  useEffect(() => { if (!collapsed) setFlyoutOpen(false); }, [collapsed]);
 
   if (collapsed) {
     return (
-      <div className="relative group/grp mx-2 my-[2px]">
+      <div
+        ref={anchorRef}
+        className="relative mx-2 my-[2px]"
+        onMouseEnter={showFlyout}
+        onMouseLeave={hideFlyout}
+      >
         <button
           className="w-full flex items-center justify-center px-3 py-[9px] rounded-xl text-[#9CA3AF] hover:bg-gray-100 hover:text-[#111827] transition-all duration-200"
           title={label}
         >
           <Icon size={18} className="flex-shrink-0" />
         </button>
-        <div className="absolute left-full top-0 ml-2 hidden group-hover/grp:flex flex-col bg-white border border-gray-100 rounded-2xl shadow-xl z-50 min-w-[190px] py-2 overflow-hidden">
-          <div className="px-3 pb-2 pt-1 border-b border-gray-100 mb-1">
-            <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">{label}</p>
-          </div>
-          {children}
-        </div>
+
+        {flyoutOpen && (
+          <FlyoutPortal
+            anchorRef={anchorRef}
+            label={label}
+            onMouseEnter={showFlyout}
+            onMouseLeave={hideFlyout}
+          >
+            {children}
+          </FlyoutPortal>
+        )}
       </div>
     );
   }
 
+  /* ── Expanded: accordion ── */
   return (
     <div className="mx-2 my-[2px]">
       <button
@@ -103,15 +154,9 @@ const NavGroup = ({ icon: Icon, label, children, collapsed, defaultOpen = false 
         className={`group w-full flex items-center gap-3 px-3 py-[9px] rounded-xl transition-all duration-200 text-sm font-medium
           ${open ? 'text-[#FF5934] bg-[#FF5934]/5' : 'text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]'}`}
       >
-        <Icon
-          size={18}
-          className={`flex-shrink-0 transition-colors duration-200 ${open ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`}
-        />
+        <Icon size={18} className={`flex-shrink-0 transition-colors duration-200 ${open ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`} />
         <span className="flex-1 truncate leading-none text-left">{label}</span>
-        <MdExpandMore
-          size={16}
-          className={`flex-shrink-0 transition-transform duration-300 ${open ? 'rotate-180 text-[#FF5934]' : 'text-[#9CA3AF]'}`}
-        />
+        <MdExpandMore size={16} className={`flex-shrink-0 transition-transform duration-300 ${open ? 'rotate-180 text-[#FF5934]' : 'text-[#9CA3AF]'}`} />
       </button>
 
       <div
@@ -120,33 +165,27 @@ const NavGroup = ({ icon: Icon, label, children, collapsed, defaultOpen = false 
       >
         <div className="relative ml-[22px] mt-1 mb-1">
           <div className="absolute left-[10px] top-0 bottom-0 w-px bg-gray-100" />
-          <div className="flex flex-col gap-[2px]">
-            {children}
-          </div>
+          <div className="flex flex-col gap-[2px]">{children}</div>
         </div>
       </div>
     </div>
   );
 };
 
-/* Sub-item used inside NavGroup */
+/* ─────────────────────────────────────────
+   Sub-item
+───────────────────────────────────────── */
 const SubNavItem = ({ to, icon: Icon, label }) => (
   <NavLink
     to={to}
     className={({ isActive }) =>
       `group flex items-center gap-2.5 pl-5 pr-3 py-[7px] rounded-xl transition-all duration-200 text-[13px] font-medium
-      ${isActive
-        ? 'bg-[#FF5934]/10 text-[#FF5934]'
-        : 'text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]'
-      }`
+      ${isActive ? 'bg-[#FF5934]/10 text-[#FF5934]' : 'text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]'}`
     }
   >
     {({ isActive }) => (
       <>
-        <Icon
-          size={14}
-          className={`flex-shrink-0 ${isActive ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`}
-        />
+        <Icon size={14} className={`flex-shrink-0 ${isActive ? 'text-[#FF5934]' : 'text-[#9CA3AF] group-hover:text-[#111827]'}`} />
         <span className="truncate leading-none">{label}</span>
       </>
     )}
@@ -157,14 +196,10 @@ const SubNavItem = ({ to, icon: Icon, label }) => (
    Section label
 ───────────────────────────────────────── */
 const SectionLabel = ({ children, collapsed }) => {
-  if (collapsed) {
-    return <div className="my-2 mx-3 border-t border-gray-100" />;
-  }
+  if (collapsed) return <div className="my-2 mx-3 border-t border-gray-100" />;
   return (
     <div className="flex items-center gap-2 px-5 pt-5 pb-[6px]">
-      <span className="text-[10px] font-bold tracking-[0.12em] text-[#B0B7C3] uppercase whitespace-nowrap">
-        {children}
-      </span>
+      <span className="text-[10px] font-bold tracking-[0.12em] text-[#B0B7C3] uppercase whitespace-nowrap">{children}</span>
       <div className="flex-1 h-px bg-gray-100" />
     </div>
   );
@@ -184,7 +219,7 @@ const Sidebar = () => {
     }
   };
 
-  const isWM = useMemo(() => user?.role?.includes(ROLES[2]), [user]);
+  const isWM          = useMemo(() => user?.role?.includes(ROLES[2]), [user]);
   const isCoordinator = useMemo(() => user?.role?.includes(ROLES[1]), [user]);
 
   const initials = useMemo(() => {
@@ -206,25 +241,15 @@ const Sidebar = () => {
         .karyana-sidebar .nav-scroll { scrollbar-width: none; }
         .karyana-sidebar .nav-scroll::-webkit-scrollbar { display: none; }
         .karyana-sidebar .sidebar-toggle {
-          position: absolute;
-          right: -12px;
-          top: 24px;
-          z-index: 10;
-          width: 24px;
-          height: 24px;
-          background: #ffffff;
-          border: 1.5px solid #E5E7EB;
-          border-radius: 9999px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+          position: absolute; right: -12px; top: 24px; z-index: 10;
+          width: 24px; height: 24px; background: #ffffff;
+          border: 1.5px solid #E5E7EB; border-radius: 9999px;
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
           transition: box-shadow 0.2s, background 0.2s;
         }
         .karyana-sidebar .sidebar-toggle:hover {
-          background: #FFF5F2;
-          box-shadow: 0 2px 8px rgba(255,89,52,0.15);
+          background: #FFF5F2; box-shadow: 0 2px 8px rgba(255,89,52,0.15);
         }
       `}</style>
 
@@ -239,20 +264,13 @@ const Sidebar = () => {
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           <MdChevronLeft
-            size={14}
-            color="#9CA3AF"
-            style={{
-              transition: 'transform 0.3s',
-              transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
-            }}
+            size={14} color="#9CA3AF"
+            style={{ transition: 'transform 0.3s', transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }}
           />
         </button>
 
         {/* ── Brand Header ── */}
-        <div
-          className={`flex items-center gap-3 border-b border-gray-50 transition-all duration-300
-            ${collapsed ? 'px-3 py-4 justify-center' : 'px-4 py-4'}`}
-        >
+        <div className={`flex items-center gap-3 border-b border-gray-50 transition-all duration-300 ${collapsed ? 'px-3 py-4 justify-center' : 'px-4 py-4'}`}>
           <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#FF5934] flex items-center justify-center shadow-md shadow-orange-100">
             <span className="text-white font-bold text-base select-none">K</span>
           </div>
@@ -264,8 +282,12 @@ const Sidebar = () => {
           )}
         </div>
 
-        {/* ── Navigation ── */}
-        <nav className="flex-1 nav-scroll overflow-y-auto py-2">
+        {/* ── Navigation ──
+            KEY FIX: when collapsed, use overflow-visible so portal flyouts
+            aren't visually clipped. Scrolling still works via the inner wrapper. ── */}
+        <nav
+          className={`flex-1 py-2 nav-scroll ${collapsed ? 'overflow-visible' : 'overflow-y-auto'}`}
+        >
 
           {/* ════ WAREHOUSE MANAGER ════ */}
           {isWM && (
@@ -300,63 +322,63 @@ const Sidebar = () => {
               <SectionLabel collapsed={collapsed}>Overview</SectionLabel>
               <NavItem to="/Dashboard" icon={MdDashboard} label="Dashboard" collapsed={collapsed} />
 
-              {/* ── Sales Module ── */}
-              <NavGroup icon={MdPointOfSale} label="Sales Module" collapsed={collapsed}>
-                <SubNavItem to="/Users/Coordinators" icon={MdPeople}       label="Customers" />
-                <SubNavItem to="/Order"              icon={MdShoppingCart} label="Orders"    />
-                <SubNavItem to="/Sales/Invoices"     icon={MdReceipt}      label="Invoices"  />
-                <SubNavItem to="/Sales/Payments"     icon={MdPayment}      label="Payments"  />
+              
+              <NavGroup icon={MdPointOfSale} label="Sales" collapsed={collapsed}>
+                <SubNavItem to="/Users/Retailers" icon={MdPeople}       label="Customers" />
+                <SubNavItem to="/Order"           icon={MdShoppingCart} label="Orders"    />
+                <SubNavItem to="/Sales/Invoices"  icon={MdReceipt}      label="Invoices"  />
+                <SubNavItem to="/Sales/Payments"  icon={MdPayment}      label="Payments"  />
               </NavGroup>
 
-              {/* ── Recovery ── */}
-              <NavGroup icon={MdAutorenew} label="Recovery" collapsed={collapsed}>
+              {/* <NavGroup icon={MdAutorenew} label="Recovery" collapsed={collapsed}>
                 <SubNavItem to="/Recovery"     icon={MdListAlt}          label="Recovery Listing" />
                 <SubNavItem to="/Recovery/Add" icon={MdAddCircleOutline} label="Add Recovery"     />
-              </NavGroup>
+              </NavGroup> */}
 
-              {/* ── Attendance ── */}
               <NavGroup icon={MdFingerprint} label="Attendance" collapsed={collapsed}>
                 <SubNavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Check-In/Out"       />
                 <SubNavItem to="/Attendance/History"  icon={MdHistory}       label="Attendance History" />
               </NavGroup>
 
-              {/* ── Tracking ── */}
               <NavGroup icon={MdMap} label="Tracking" collapsed={collapsed}>
                 <SubNavItem to="/Tracking/Location" icon={MdLocationOn} label="Location Tracking" />
                 <SubNavItem to="/Tracking/Reports"  icon={MdBarChart}   label="Tracking Reports"  />
               </NavGroup>
 
-              {/* ── Ledger ── */}
               <NavGroup icon={FaBook} label="Ledger" collapsed={collapsed}>
                 <SubNavItem to="/Leders/LedgerSales" icon={MdPeople}     label="Customer Ledger" />
                 <SubNavItem to="/Ledger/Reports"     icon={MdAssessment} label="Ledger Reports"  />
               </NavGroup>
 
-              {/* ── Reports ── */}
+              <NavGroup icon={MdPeople} label="Users" collapsed={collapsed}>
+                <SubNavItem to="/Users/Coordinators"      icon={MdSupervisorAccount} label="Coordinators"       />
+                <SubNavItem to="/Users/WarehouseManagers" icon={MdWarehouse}         label="Warehouse Managers" />
+                <SubNavItem to="/Users/Sales"             icon={MdBadge}             label="Sales Person"       />
+              </NavGroup>
+
+
               <NavGroup icon={MdAssessment} label="Reports" collapsed={collapsed}>
-                <SubNavItem to="/Reports/Sales"           icon={MdPointOfSale}  label="Sales"                 />
-                <SubNavItem to="/Product"       icon={MdInventory2}   label="Inventory"             />
-                <SubNavItem to="/Reports/Recovery"        icon={MdAutorenew}    label="Recovery"              />
-                <SubNavItem to="/Reports/Attendance"      icon={MdFingerprint}  label="Attendance"            />
-                <SubNavItem to="/Reports/CustomerLedger"  icon={MdReceipt}      label="Customer Ledger"       />
-                <SubNavItem to="/Reports/TargetVsAchieve" icon={FaBullseye}     label="Target vs Achievement" />
+                <SubNavItem to="/Reports/Sales"           icon={MdPointOfSale} label="Sales"                 />
+                <SubNavItem to="/Product"                 icon={MdInventory2}  label="Inventory"             />
+                <SubNavItem to="/Reports/Recovery"        icon={MdAutorenew}   label="Recovery"              />
+                <SubNavItem to="/Reports/Attendance"      icon={MdFingerprint} label="Attendance"            />
+                <SubNavItem to="/Reports/CustomerLedger"  icon={MdReceipt}     label="Customer Ledger"       />
+                <SubNavItem to="/Reports/TargetVsAchieve" icon={FaBullseye}    label="Target vs Achievement" />
               </NavGroup>
 
               <SectionLabel collapsed={collapsed}>Catalog</SectionLabel>
-              {/* <NavItem to="/Product"    icon={MdInventory2}  label="Inventory"   collapsed={collapsed} /> */}
-              <NavItem to="/Brands"     icon={MdCategory}    label="Categories"  collapsed={collapsed} />
-              <NavItem to="/Categories" icon={SlDiamond}     label="Brands"      collapsed={collapsed} />
-              <NavItem to="/coupon"     icon={RiCoupon3Line} label="Coupon"      collapsed={collapsed} />
+              <NavItem to="/Brands"     icon={MdCategory}    label="Categories" collapsed={collapsed} />
+              <NavItem to="/Categories" icon={SlDiamond}     label="Brands"     collapsed={collapsed} />
+              <NavItem to="/coupon"     icon={RiCoupon3Line} label="Coupon"     collapsed={collapsed} />
 
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
               <NavItem to="/Cities" icon={MdLocationOn} label="Locations" collapsed={collapsed} />
               <NavItem to="/target" icon={FaBullseye}   label="Target"    collapsed={collapsed} />
 
-              {/* ── Settings ── */}
               <SectionLabel collapsed={collapsed}>Settings</SectionLabel>
               <NavGroup icon={MdSettings} label="Settings" collapsed={collapsed}>
-                <SubNavItem to="/Settings/Profile" icon={MdPerson}  label="Profile" />
-                <SubNavItem to="/login"            icon={CiLogout}  label="Logout"  />
+                <SubNavItem to="/Settings/Profile" icon={MdPerson} label="Profile" />
+                <SubNavItem to="/login"            icon={CiLogout} label="Logout"  />
               </NavGroup>
 
               <SectionLabel collapsed={collapsed}>Legal</SectionLabel>
@@ -378,9 +400,7 @@ const Sidebar = () => {
 
             {!collapsed && (
               <div className="flex-1 min-w-0">
-                <p className="text-[#111827] text-[13px] font-semibold truncate leading-tight">
-                  {user?.name || "Admin"}
-                </p>
+                <p className="text-[#111827] text-[13px] font-semibold truncate leading-tight">{user?.name || "Admin"}</p>
                 <p className="text-[#9CA3AF] text-[10px] truncate capitalize">{roleName}</p>
               </div>
             )}
@@ -388,8 +408,7 @@ const Sidebar = () => {
             <button
               onClick={logoutHandler}
               title="Logout"
-              className={`flex-shrink-0 p-1.5 rounded-lg hover:bg-red-50 text-[#9CA3AF] hover:text-[#FF5934] transition-colors duration-200
-                ${collapsed ? 'mt-1' : ''}`}
+              className={`flex-shrink-0 p-1.5 rounded-lg hover:bg-red-50 text-[#9CA3AF] hover:text-[#FF5934] transition-colors duration-200 ${collapsed ? 'mt-1' : ''}`}
             >
               <CiLogout size={18} />
             </button>

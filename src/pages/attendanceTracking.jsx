@@ -1,650 +1,598 @@
-import { useEffect, useState } from 'react';
-import { useSelector } from 'react-redux';
-import { getAllCities, getDatas, getAttendanceBySalesId } from '../APIS';
-import { toast } from 'react-toastify';
-import { GrFormNext, GrFormPrevious } from "react-icons/gr";
-import placeholder from '../assets/placehold.jpg';
-import { MdCalendarMonth } from 'react-icons/md';
-import { FaRegClock } from 'react-icons/fa';
-import { Link, useSearchParams } from 'react-router-dom';
-import { ROLES } from '../utils';
+import React, { useState, useEffect } from "react";
+import { GrFormPrevious } from "react-icons/gr";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import { getAttendanceBySalesId, getAllSalesPersons } from "../APIS";
+import { Loader } from "../components/common/loader";
+import {
+  MdSearch, MdClose, MdRefresh, MdPerson, MdCalendarToday,
+  MdAccessTime, MdLocationOn, MdBarChart, MdCheckCircle,
+  MdLogout, MdLogin, MdTimer, MdFilterList,
+} from "react-icons/md";
 
+/* ─── helpers ─── */
+const formatTime = (time) => {
+  if (!time) return "—";
+  try {
+    const date = time.includes("T") ? new Date(time) : (() => {
+      const [h, m] = time.split(":");
+      const d = new Date(); d.setHours(+h, +m, 0, 0); return d;
+    })();
+    return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  } catch { return "—"; }
+};
+
+const formatDate = (dateString) => {
+  if (!dateString) return "—";
+  try { return new Date(dateString).toLocaleDateString("en-GB"); } catch { return "—"; }
+};
+
+const calcDiff = (checkIn, checkOut) => {
+  if (!checkIn || !checkOut) return { display: "—", seconds: 0 };
+  const ms = new Date(checkOut) - new Date(checkIn);
+  if (ms <= 0) return { display: "—", seconds: 0 };
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  let display = "";
+  if (h > 0) display += `${h}h `;
+  if (m > 0 || h > 0) display += `${m}m `;
+  display += `${sec}s`;
+  return { display: display.trim(), seconds: s };
+};
+
+const calcTotal = (data) => {
+  let total = 0;
+  data.forEach((r) => { const { seconds } = calcDiff(r.checkInTime, r.checkOutTime); total += seconds; });
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  let out = "";
+  if (h > 0) out += `${h}h `;
+  if (m > 0 || h > 0) out += `${m}m `;
+  out += `${s}s`;
+  return out.trim() || "0s";
+};
+
+const barWidth = (checkIn, checkOut) => {
+  const { seconds } = calcDiff(checkIn, checkOut);
+  return Math.min((seconds / 36000) * 100, 100);
+};
+
+const statusColor = (checkIn, checkOut) => {
+  const { seconds } = calcDiff(checkIn, checkOut);
+  if (!checkIn)         return { pill: "bg-gray-100 text-gray-400 ring-gray-200",           dot: "bg-gray-300",   label: "Absent"   };
+  if (!checkOut)        return { pill: "bg-amber-50 text-amber-600 ring-amber-200",         dot: "bg-amber-400",  label: "Active"   };
+  if (seconds >= 28800) return { pill: "bg-emerald-50 text-emerald-600 ring-emerald-200",   dot: "bg-emerald-400", label: "Full Day" };
+  if (seconds >= 14400) return { pill: "bg-blue-50 text-blue-600 ring-blue-200",            dot: "bg-blue-400",   label: "Half Day" };
+  return                       { pill: "bg-red-50 text-red-500 ring-red-200",               dot: "bg-red-400",    label: "Short"    };
+};
+
+const getVisitData = (data) => {
+  const byDate = {};
+  data.forEach((r) => {
+    const d = r.date || (r.checkInTime ? new Date(r.checkInTime).toISOString().slice(0, 10) : null);
+    if (!d) return;
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(r);
+  });
+  return Object.entries(byDate)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([date, records]) => ({ date, records }));
+};
+
+/* ════════════════════════════════════════
+   MAIN COMPONENT
+════════════════════════════════════════ */
 const AttandanceTracking = () => {
-    const [limit, setLimit] = useState(10);
-    const [searchParams, setSearchParams] = useSearchParams();
-    const admin = useSelector((state) => state.admin);
-    const isCoordinator = admin?.role?.includes(ROLES[1]);
-    const coordinatorCityId = isCoordinator
-        ? (admin?.user?.city && typeof admin.user.city === 'object'
-            ? admin.user.city._id
-            : admin?.user?.city || '')
-        : '';
+  const [activeTab, setActiveTab]                   = useState("checkin");
+  const [attendanceData, setAttendanceData]         = useState([]);
+  const [loading, setLoading]                       = useState(false);
+  const [salesPersons, setSalesPersons]             = useState([]);
+  const [selectedSalesPerson, setSelectedSalesPerson] = useState("");
+  const [startDate, setStartDate]                   = useState("");
+  const [endDate, setEndDate]                       = useState("");
+  const [spSearch, setSpSearch]                     = useState("");
+  const [spDropOpen, setSpDropOpen]                 = useState(false);
+  const [generated, setGenerated]                   = useState(false);
 
-    const [currentPage, setCurrentPage] = useState(() => {
-        try {
-            const fromUrl = parseInt(new URLSearchParams(window.location.search).get('page') || '', 10);
-            if (!Number.isNaN(fromUrl) && fromUrl > 0) return fromUrl;
-        } catch (e) {}
-        try {
-            const stored = localStorage.getItem('attendanceTrackingPage');
-            if (stored) { const p = parseInt(stored, 10); if (!Number.isNaN(p) && p > 0) return p; }
-        } catch (e) {}
-        return 1;
-    });
+  const [searchParams] = useSearchParams();
+  const navigate        = useNavigate();
+  const salesIdFromUrl  = searchParams.get("salesId");
 
-    const [loading, setLoading] = useState(false);
-    const [initialLoading, setInitialLoading] = useState(() => {
-        try { return !localStorage.getItem('attendanceTrackingData'); } catch (e) { return true; }
-    });
-    const [totalPages, setTotalPages] = useState(() => {
-        try { const s = localStorage.getItem('attendanceTrackingTotalPages'); return s ? parseInt(s, 10) : 0; } catch (e) { return 0; }
-    });
-    const [sales, setSales] = useState([]);
-    const [salesWithStatus, setSalesWithStatus] = useState(() => {
-        try { const s = localStorage.getItem('attendanceTrackingData'); return s ? JSON.parse(s) : []; } catch (e) { return []; }
-    });
-    const [cities, setCities] = useState({ isLoaded: false, data: [] });
-    const [searchTerm, setSearchTerm] = useState('');
-    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
-    const [selectedCityId, setSelectedCityId] = useState(coordinatorCityId);
+  /* load sales persons once */
+  useEffect(() => {
+    getAllSalesPersons()
+      .then((res) => setSalesPersons(res.data.data || []))
+      .catch(() => {});
+    if (salesIdFromUrl) setSelectedSalesPerson(salesIdFromUrl);
+  }, []);
 
-    useEffect(() => {
-        const handler = setTimeout(() => setDebouncedSearchTerm(searchTerm), 500);
-        return () => clearTimeout(handler);
-    }, [searchTerm]);
+  /* auto-fetch when coming from URL with salesId */
+  useEffect(() => {
+    if (salesIdFromUrl && salesPersons.length > 0) {
+      fetchData(salesIdFromUrl);
+    }
+  }, [salesIdFromUrl, salesPersons]);
 
-    const citySelectHandler = (e) => {
-        if (isCoordinator) { setSelectedCityId(coordinatorCityId || ''); setCurrentPage(1); return; }
-        setSelectedCityId(e.target.value || '');
-        setCurrentPage(1);
-    };
-
-    const checkOnlineStatus = async (salesId) => {
-        try {
-            const response = await getAttendanceBySalesId(salesId, 1);
-            if (response.data.msg !== "success" || !Array.isArray(response.data.data)) return false;
-            const records = response.data.data;
-            const todayStr = new Date().toLocaleDateString('en-CA');
-            const todays = records.filter(r => {
-                if (r.date) return r.date === todayStr;
-                if (r.checkInTime) return new Date(r.checkInTime).toISOString().slice(0, 10) === todayStr;
-                return false;
-            });
-            if (!todays.length) return false;
-            const normalizeTime = (r) => { const t = r.checkInTime ? new Date(r.checkInTime) : (r.createdAt ? new Date(r.createdAt) : null); return t && !isNaN(t.getTime()) ? t.getTime() : 0; };
-            const latest = todays.reduce((a, b) => (normalizeTime(a) >= normalizeTime(b) ? a : b));
-            return Boolean(latest?.checkInTime) && (!latest?.checkOutTime || latest.checkOutTime === "");
-        } catch (error) { return false; }
-    };
-
-    const fetchSalesWithStatus = async () => {
-        setLoading(true);
-        try {
-            const link = `/sale-user/search?page=${currentPage}&limit=${limit}&searchTerm=${encodeURIComponent(debouncedSearchTerm)}&city=${encodeURIComponent(selectedCityId)}`;
-            const res = await getDatas(link);
-            const salesData = res.data.data;
-            setTotalPages(res.data.totalPages);
-            const salesWithStatusData = await Promise.all(
-                salesData.map(async (s) => ({ ...s, isOnline: await checkOnlineStatus(s._id) }))
-            );
-            setSalesWithStatus(salesWithStatusData);
-            setSales(salesData);
-            try {
-                localStorage.setItem('attendanceTrackingData', JSON.stringify(salesWithStatusData));
-                localStorage.setItem('attendanceTrackingTotalPages', String(res.data.totalPages));
-            } catch (e) {}
-            setLoading(false);
-        } catch (err) { setLoading(false); toast.error(err.message); }
-    };
-
-    useEffect(() => {
-        const load = async () => { await fetchSalesWithStatus(); setInitialLoading(false); };
-        load();
-    }, [currentPage, selectedCityId, debouncedSearchTerm, limit]);
-
-    useEffect(() => {
-        try { localStorage.setItem('attendanceTrackingPage', String(currentPage)); } catch (e) {}
-        setSearchParams(prev => {
-            const params = new URLSearchParams(prev);
-            params.set('page', String(currentPage));
-            return params;
-        }, { replace: true });
-    }, [currentPage, setSearchParams]);
-
-    useEffect(() => {
-        if (!cities.isLoaded) {
-            getAllCities().then(res => {
-                let all = Array.isArray(res?.data?.data) ? res.data.data : [];
-                if (isCoordinator) all = all.filter((c) => c._id === coordinatorCityId);
-                setCities({ isLoaded: true, data: all });
-                if (isCoordinator && coordinatorCityId && selectedCityId !== coordinatorCityId) setSelectedCityId(coordinatorCityId);
-            }).catch(err => console.log("Loading cities: ", err.message));
+  const fetchData = async (overrideSid) => {
+    const sid = overrideSid || selectedSalesPerson || salesIdFromUrl;
+    if (!sid) { alert("Please select a sales person first."); return; }
+    try {
+      setLoading(true);
+      setGenerated(false);
+      const daysToFetch = startDate && endDate ? 365 : 30;
+      const response = await getAttendanceBySalesId(sid, daysToFetch);
+      if (response.data.msg === "success") {
+        let data = Array.isArray(response.data.data) ? response.data.data : [];
+        if (startDate && endDate) {
+          data = data.filter((r) => {
+            const dStr = r.date || (r.checkInTime ? new Date(r.checkInTime).toISOString().slice(0, 10) : null);
+            return dStr && dStr >= startDate && dStr <= endDate;
+          });
         }
-    }, [cities.isLoaded, isCoordinator, coordinatorCityId]);
+        setAttendanceData(data);
+        setGenerated(true);
+      }
+    } catch (e) {
+      console.error("Attendance fetch error:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return (
-        <>
-            <style>{`
-                @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
+  const handleReset = () => {
+    setStartDate("");
+    setEndDate("");
+    setSelectedSalesPerson("");
+    setAttendanceData([]);
+    setGenerated(false);
+    setSpSearch("");
+  };
 
-                .at-wrapper {
-                    font-family: 'DM Sans', sans-serif;
-                    position: relative;
-                }
+  const sortedData = [...attendanceData].sort((a, b) => {
+    const diff = new Date(b.date || 0) - new Date(a.date || 0);
+    if (diff !== 0) return diff;
+    return (b.checkInTime ? new Date(b.checkInTime).getTime() : 0)
+         - (a.checkInTime ? new Date(a.checkInTime).getTime() : 0);
+  });
 
-                /* ── Top bar ── */
-                .at-topbar {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-top: 12px;
-                    margin-bottom: 16px;
-                }
+  const selectedPersonObj = salesPersons.find((sp) => sp._id === selectedSalesPerson);
+  const filteredSP        = salesPersons.filter((sp) =>
+    (sp.name || "").toLowerCase().includes(spSearch.toLowerCase())
+  );
+  const visitGroups = getVisitData(sortedData);
 
-                .at-title {
-                    font-size: 20px;
-                    font-weight: 600;
-                    color: #1a1a1a;
-                    margin: 0;
-                }
+  const canGenerate = !!(selectedSalesPerson || salesIdFromUrl);
 
-                /* ── Filter pill container (mirrors User.jsx) ── */
-                .at-filters {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 4px;
-                    padding: 6px;
-                    background: #ffffff;
-                    border-radius: 16px;
-                    box-shadow:
-                        0 1px 2px rgba(0,0,0,0.04),
-                        0 4px 16px rgba(0,0,0,0.06),
-                        inset 0 1px 0 rgba(255,255,255,0.9);
-                    border: 1px solid rgba(0,0,0,0.07);
-                    position: relative;
-                }
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+        .att-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
+        .att-page .table-row { transition: background 0.15s, box-shadow 0.15s; }
+        .att-page .table-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
+        .att-tab { transition: all 0.2s; border-bottom: 2.5px solid transparent; padding: 10px 16px; cursor: pointer; }
+        .att-tab.active { border-bottom-color: #FF5934; color: #FF5934; background: #fff8f6; border-radius: 8px 8px 0 0; }
+        .att-tab:not(.active) { color: #6B7280; }
+        .att-tab:not(.active):hover { color: #111827; background: #F9FAFB; border-radius: 8px 8px 0 0; }
+        @keyframes attModalIn   { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:none; } }
+        @keyframes attOverlayIn { from { opacity:0; } to { opacity:1; } }
+        .att-modal-overlay { animation: attOverlayIn 0.2s ease; }
+        .att-modal-card    { animation: attModalIn 0.25s cubic-bezier(0.34,1.2,0.64,1); }
+        .att-dur-track { height:4px; border-radius:9999px; background:#F3F4F6; overflow:hidden; }
+        .att-dur-bar   { height:4px; border-radius:9999px; background:#FF5934; transition: width 0.6s ease; }
+        .att-no-scroll::-webkit-scrollbar { display:none; }
+        .att-no-scroll { scrollbar-width: none; }
+        .att-select {
+          appearance: none; -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+          background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px;
+        }
+        .att-input {
+          background: #F9FAFB; border: 1px solid #E5E7EB;
+          border-radius: 12px; padding: 10px 14px;
+          font-size: 13px; color: #111827; outline: none;
+          font-family: 'DM Sans', sans-serif; width: 100%;
+          transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .att-input:focus { border-color: #FF5934; box-shadow: 0 0 0 3px rgba(255,89,52,0.1); }
+        .att-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+      `}</style>
 
-                .at-filters::before {
-                    content: '';
-                    position: absolute;
-                    inset: 0;
-                    border-radius: 16px;
-                    background: linear-gradient(135deg, rgba(255,89,52,0.03) 0%, transparent 60%);
-                    pointer-events: none;
-                }
+      <div className="att-page">
 
-                .at-divider {
-                    width: 1px;
-                    background: rgba(0,0,0,0.07);
-                    margin: 6px 2px;
-                    align-self: stretch;
-                    border-radius: 1px;
-                }
+        {/* ── Page Header ── */}
+        <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
+          <div className="flex items-center gap-3">
+            <Link
+              to="/attendance-tracking"
+              className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-orange-50 hover:border-[#FF5934] text-[#374151] hover:text-[#FF5934] transition-all shadow-sm"
+            >
+              <GrFormPrevious size={18} />
+            </Link>
+            <div>
+              <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Attendance</h1>
+              {generated && attendanceData.length > 0 && (
+                <p className="text-sm text-[#9CA3AF] mt-0.5">
+                  Total: <span className="text-[#FF5934] font-semibold">{calcTotal(attendanceData)}</span>
+                  &nbsp;·&nbsp;{attendanceData.length} record{attendanceData.length !== 1 ? "s" : ""}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
 
-                /* ── Search input pill ── */
-                .at-search-pill {
-                    display: flex;
-                    align-items: center;
-                    gap: 7px;
-                    padding: 9px 14px;
-                    border-radius: 11px;
-                    background: transparent;
-                    transition: background 0.18s ease;
-                }
+        {/* ── Tabs ── */}
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-visible mb-0">
 
-                .at-search-pill:focus-within {
-                    background: rgba(255, 89, 52, 0.07);
-                }
+          {/* Tab bar */}
+          <div className="flex border-b border-gray-100 px-3 pt-2 gap-1">
+            {[
+              { key: "checkin", icon: MdLogin,  label: "Check-In / Out"  },
+              { key: "visit",   icon: MdTimer,  label: "Visit Duration"  },
+            ].map(({ key, icon: Icon, label }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`att-tab flex items-center gap-2 text-[13px] font-semibold ${activeTab === key ? "active" : ""}`}
+              >
+                <Icon size={15} /> {label}
+              </button>
+            ))}
+          </div>
 
-                .at-search-pill input {
-                    border: none;
-                    outline: none;
-                    background: transparent;
-                    font-family: 'DM Sans', sans-serif;
-                    font-size: 13.5px;
-                    font-weight: 500;
-                    color: #1a1a1a;
-                    letter-spacing: -0.01em;
-                    width: 160px;
-                }
+          {/* ── Shared Filter Card ── */}
+          <div className="px-5 py-5 border-b border-gray-100 bg-[#FAFAFA]">
+            <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-4 flex items-center gap-2">
+              <MdFilterList size={13} className="text-[#FF5934]" /> Filters
+            </p>
 
-                .at-search-pill input::placeholder {
-                    color: #9ca3af;
-                    font-weight: 400;
-                }
+            <div className="flex flex-wrap gap-4 items-end">
 
-                /* ── City select pill ── */
-                .at-city-select {
-                    appearance: none;
-                    -webkit-appearance: none;
-                    border: none;
-                    outline: none;
-                    background: transparent;
-                    padding: 9px 28px 9px 14px;
-                    border-radius: 11px;
-                    font-family: 'DM Sans', sans-serif;
-                    font-size: 13.5px;
-                    font-weight: 500;
-                    color: #5a5f6e;
-                    letter-spacing: -0.01em;
-                    cursor: pointer;
-                    transition: background 0.18s ease, color 0.18s ease;
-                    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-                    background-repeat: no-repeat;
-                    background-position: right 10px center;
-                }
+              {/* ── Sales Person Picker ── */}
+              <div className="flex-1 min-w-[220px]">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                  <MdPerson size={12} className="text-[#FF5934]" /> Sales Person
+                </label>
+                <div className="relative">
+                  <div
+                    className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                    onClick={() => setSpDropOpen(p => !p)}
+                  >
+                    {selectedPersonObj ? (
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                          <span className="text-[#FF5934] text-[10px] font-bold">
+                            {(selectedPersonObj.name || "?")[0].toUpperCase()}
+                          </span>
+                        </div>
+                        <span className="text-[13px] text-[#111827] font-medium truncate">{selectedPersonObj.name}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[13px] text-gray-300 flex-1">Select sales person…</span>
+                    )}
+                    <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
+                  </div>
 
-                .at-city-select:hover, .at-city-select:focus {
-                    background-color: rgba(255, 89, 52, 0.07);
-                    color: #FF5934;
-                    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23FF5934' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-                }
+                  {/* Dropdown */}
+                  {spDropOpen && (
+                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
+                      <div className="p-2 border-b border-gray-100">
+                        <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
+                          <MdSearch size={14} className="text-[#9CA3AF]" />
+                          <input
+                            autoFocus
+                            value={spSearch}
+                            onChange={e => setSpSearch(e.target.value)}
+                            placeholder="Search…"
+                            className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
+                          />
+                          {spSearch && (
+                            <button onClick={() => setSpSearch("")} className="text-[#9CA3AF] hover:text-[#FF5934]">
+                              <MdClose size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="max-h-52 overflow-y-auto att-no-scroll">
+                        {filteredSP.length ? filteredSP.map(sp => (
+                          <div
+                            key={sp._id}
+                            onClick={() => { setSelectedSalesPerson(sp._id); setSpDropOpen(false); setSpSearch(""); }}
+                            className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSalesPerson === sp._id ? "bg-orange-50" : ""}`}
+                          >
+                            <div className="w-7 h-7 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                              <span className="text-[#FF5934] text-[11px] font-bold">{(sp.name || "?")[0].toUpperCase()}</span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[13px] font-medium text-[#111827] truncate">{sp.name}</p>
+                              <p className="text-[11px] text-[#9CA3AF] truncate">{sp.email}</p>
+                            </div>
+                            {selectedSalesPerson === sp._id && (
+                              <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0" />
+                            )}
+                          </div>
+                        )) : (
+                          <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No results found</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-                /* ── Table ── */
-                .at-table {
-                    width: 100%;
-                    border-collapse: separate;
-                    border-spacing: 0 8px;
-                }
+              {/* ── Date From ── */}
+              <div className="flex-1 min-w-[160px]">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                  <MdCalendarToday size={12} className="text-[#FF5934]" /> From
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="att-input"
+                />
+              </div>
 
-                .at-table thead td {
-                    font-size: 13px;
-                    font-weight: 500;
-                    color: #9ca3af;
-                    padding: 4px 10px;
-                    letter-spacing: 0.02em;
-                    text-transform: uppercase;
-                    font-size: 11px;
-                }
+              {/* ── Date To ── */}
+              <div className="flex-1 min-w-[160px]">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                  <MdCalendarToday size={12} className="text-[#FF5934]" /> To
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  min={startDate || undefined}
+                  className="att-input"
+                />
+              </div>
 
-                .at-table tbody tr {
-                    cursor: pointer;
-                    transition: transform 0.15s ease, box-shadow 0.15s ease;
-                }
+              {/* ── Buttons ── */}
+              <div className="flex gap-2 flex-shrink-0">
+                <button
+                  onClick={handleReset}
+                  className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
+                >
+                  <MdRefresh size={15} /> Reset
+                </button>
+                <button
+                  onClick={() => fetchData()}
+                  disabled={!canGenerate}
+                  className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2"
+                >
+                  <MdBarChart size={16} /> Generate Report
+                </button>
+              </div>
+            </div>
 
-                .at-table tbody tr:hover {
-                    transform: translateY(-1px);
-                    box-shadow: 0 4px 16px rgba(0,0,0,0.06);
-                }
+            {/* Active filter chips */}
+            {(selectedPersonObj || (startDate && endDate)) && (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {selectedPersonObj && (
+                  <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-3 py-1.5">
+                    <div className="w-5 h-5 rounded-full bg-[#FF5934]/20 flex items-center justify-center flex-shrink-0">
+                      <span className="text-[#FF5934] text-[9px] font-bold">{(selectedPersonObj.name || "?")[0].toUpperCase()}</span>
+                    </div>
+                    <span className="text-[12px] font-semibold text-[#FF5934]">{selectedPersonObj.name}</span>
+                    <button onClick={() => { setSelectedSalesPerson(""); setAttendanceData([]); setGenerated(false); }} className="text-[#FF5934]/50 hover:text-[#FF5934] ml-1">
+                      <MdClose size={13} />
+                    </button>
+                  </div>
+                )}
+                {startDate && endDate && (
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
+                    <MdCalendarToday size={12} className="text-blue-500" />
+                    <span className="text-[12px] font-semibold text-blue-600">{startDate} → {endDate}</span>
+                    <button onClick={() => { setStartDate(""); setEndDate(""); }} className="text-blue-400 hover:text-blue-600 ml-1">
+                      <MdClose size={13} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
-                .at-table tbody tr td {
-                    background: #ffffff;
-                    padding: 10px 14px;
-                }
+          {/* ═══ TAB CONTENT ═══ */}
 
-                .at-table tbody tr td:first-child {
-                    border-radius: 12px 0 0 12px;
-                }
+          {/* ── Check-In / Out ── */}
+          {activeTab === "checkin" && (
+            <>
+              {loading ? (
+                <div className="py-20 flex justify-center"><Loader /></div>
+              ) : !generated ? (
+                <div className="py-20 text-center flex flex-col items-center gap-3">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+                    <MdBarChart size={24} className="text-gray-300" />
+                  </div>
+                  <p className="text-[#9CA3AF] text-sm font-medium">Select a sales person and click Generate Report</p>
+                </div>
+              ) : attendanceData.length === 0 ? (
+                <div className="py-20 text-center flex flex-col items-center gap-3">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+                    <MdAccessTime size={24} className="text-gray-300" />
+                  </div>
+                  <p className="text-[#9CA3AF] text-sm font-medium">No attendance records found for this period</p>
+                  <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline font-medium">Clear filters</button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-[#FAFAFA] border-b border-gray-100">
+                        {["Date", "Check In", "Check Out", "Duration", "Status"].map(h => (
+                          <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {sortedData.map((record, i) => {
+                        const { display } = calcDiff(record.checkInTime, record.checkOutTime);
+                        const sc = statusColor(record.checkInTime, record.checkOutTime);
+                        return (
+                          <tr key={record._id || i} className="table-row">
 
-                .at-table tbody tr td:last-child {
-                    border-radius: 0 12px 12px 0;
-                }
+                            {/* Date */}
+                            <td className="px-4 py-3">
+                              <p className="text-[13px] font-semibold text-[#111827]">{formatDate(record.date)}</p>
+                            </td>
 
-                /* ── Status badges ── */
-                .badge-online {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 5px;
-                    padding: 4px 10px;
-                    border-radius: 20px;
-                    font-size: 12px;
-                    font-weight: 500;
-                    background: #f0fdf4;
-                    color: #16a34a;
-                    border: 1px solid rgba(22, 163, 74, 0.2);
-                }
+                            {/* Check In */}
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                                  <MdLogin size={12} className="text-emerald-500" />
+                                </div>
+                                <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkInTime)}</span>
+                              </div>
+                            </td>
 
-                .badge-online::before {
-                    content: '';
-                    width: 6px;
-                    height: 6px;
-                    border-radius: 50%;
-                    background: #16a34a;
-                    flex-shrink: 0;
-                    animation: pulse-green 2s infinite;
-                }
+                            {/* Check Out */}
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                                  <MdLogout size={12} className="text-red-400" />
+                                </div>
+                                <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkOutTime)}</span>
+                              </div>
+                            </td>
 
-                .badge-offline {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 5px;
-                    padding: 4px 10px;
-                    border-radius: 20px;
-                    font-size: 12px;
-                    font-weight: 500;
-                    background: #fef2f2;
-                    color: #dc2626;
-                    border: 1px solid rgba(220, 38, 38, 0.15);
-                }
+                            {/* Duration */}
+                            <td className="px-4 py-3">
+                              <span className="text-[13px] font-semibold text-[#111827]">{display}</span>
+                            </td>
 
-                .badge-offline::before {
-                    content: '';
-                    width: 6px;
-                    height: 6px;
-                    border-radius: 50%;
-                    background: #dc2626;
-                    flex-shrink: 0;
-                }
+                            {/* Status */}
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${sc.pill}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
+                                {sc.label}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
 
-                @keyframes pulse-green {
-                    0%, 100% { opacity: 1; }
-                    50% { opacity: 0.4; }
-                }
+                  {/* Summary footer */}
+                  <div className="px-5 py-4 bg-[#FAFAFA] border-t border-gray-100 flex items-center justify-between">
+                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
+                      {sortedData.length} record{sortedData.length !== 1 ? "s" : ""}
+                    </p>
+                    <span className="inline-flex items-center gap-2 text-[14px] font-bold text-[#111827]">
+                      <MdTimer size={16} className="text-[#FF5934]" />
+                      Total: {calcTotal(attendanceData)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
-                /* ── Action buttons ── */
-                .at-actions {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 4px;
-                    padding: 5px;
-                    border-radius: 10px;
-                    background: #f9fafb;
-                    border: 1px solid rgba(0,0,0,0.07);
-                }
+          {/* ── Visit Duration ── */}
+          {activeTab === "visit" && (
+            <>
+              {loading ? (
+                <div className="py-20 flex justify-center"><Loader /></div>
+              ) : !generated ? (
+                <div className="py-20 text-center flex flex-col items-center gap-3">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+                    <MdBarChart size={24} className="text-gray-300" />
+                  </div>
+                  <p className="text-[#9CA3AF] text-sm font-medium">Select a sales person and click Generate Report</p>
+                </div>
+              ) : attendanceData.length === 0 ? (
+                <div className="py-20 text-center flex flex-col items-center gap-3">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+                    <MdTimer size={24} className="text-gray-300" />
+                  </div>
+                  <p className="text-[#9CA3AF] text-sm font-medium">No visit data found for this period</p>
+                  <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline font-medium">Clear filters</button>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {visitGroups.map(({ date, records }) => {
+                    const dayTotal = calcTotal(records);
+                    return (
+                      <div key={date} className="px-5 py-4">
 
-                .at-action-btn {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 30px;
-                    height: 30px;
-                    border-radius: 7px;
-                    color: #6b7280;
-                    text-decoration: none;
-                    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
-                }
-
-                .at-action-btn:hover {
-                    background: #FF5934;
-                    color: #ffffff;
-                    transform: scale(1.08);
-                }
-
-                .at-action-divider {
-                    width: 1px;
-                    height: 16px;
-                    background: rgba(0,0,0,0.08);
-                    flex-shrink: 0;
-                }
-
-                /* ── Pagination ── */
-                .at-pagination {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-top: 16px;
-                }
-
-                .at-page-controls {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 4px;
-                    padding: 6px;
-                    background: #ffffff;
-                    border-radius: 14px;
-                    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06);
-                    border: 1px solid rgba(0,0,0,0.07);
-                }
-
-                .at-page-btn {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 32px;
-                    height: 32px;
-                    border-radius: 9px;
-                    background: transparent;
-                    border: none;
-                    cursor: pointer;
-                    color: #5a5f6e;
-                    transition: background 0.15s ease, color 0.15s ease;
-                }
-
-                .at-page-btn:hover:not(:disabled) {
-                    background: rgba(255, 89, 52, 0.07);
-                    color: #FF5934;
-                }
-
-                .at-page-btn:disabled {
-                    opacity: 0.35;
-                    cursor: not-allowed;
-                }
-
-                .at-page-info {
-                    padding: 0 10px;
-                    font-size: 13.5px;
-                    font-weight: 500;
-                    color: #5a5f6e;
-                    letter-spacing: -0.01em;
-                }
-
-                .at-show-control {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 8px;
-                    padding: 6px 10px;
-                    background: #ffffff;
-                    border-radius: 14px;
-                    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06);
-                    border: 1px solid rgba(0,0,0,0.07);
-                }
-
-                .at-show-label {
-                    font-size: 13px;
-                    font-weight: 500;
-                    color: #9ca3af;
-                }
-
-                .at-show-select {
-                    appearance: none;
-                    -webkit-appearance: none;
-                    border: none;
-                    outline: none;
-                    background: transparent;
-                    font-family: 'DM Sans', sans-serif;
-                    font-size: 13.5px;
-                    font-weight: 500;
-                    color: #5a5f6e;
-                    cursor: pointer;
-                    padding-right: 16px;
-                    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-                    background-repeat: no-repeat;
-                    background-position: right 0px center;
-                }
-
-                /* ── Loading skeleton ── */
-                .at-skeleton-row td {
-                    background: #f3f4f6;
-                    animation: shimmer 1.4s infinite linear;
-                }
-
-                @keyframes shimmer {
-                    0% { opacity: 1; }
-                    50% { opacity: 0.5; }
-                    100% { opacity: 1; }
-                }
-
-                @media (max-width: 640px) {
-                    .at-filters { flex-wrap: wrap; border-radius: 14px; }
-                    .at-search-pill input { width: 120px; }
-                }
-            `}</style>
-
-            <div className="at-wrapper">
-                {/* Top bar */}
-                <div className="at-topbar">
-                    <h1 className="at-title">Attendance & Tracking</h1>
-
-                    <div className="at-filters">
-                        {/* Search */}
-                        <div className="at-search-pill">
-                            <img src="/Search.svg" alt="search" style={{ width: 15, height: 15, opacity: 0.5 }} />
-                            <input
-                                type="search"
-                                name="search"
-                                placeholder="Search by name"
-                                value={searchTerm}
-                                onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                                onKeyPress={async (e) => { if (e.key === 'Enter') await fetchSalesWithStatus(); }}
-                            />
+                        {/* Day header */}
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-xl bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                              <MdCalendarToday size={14} className="text-[#FF5934]" />
+                            </div>
+                            <p className="text-[13px] font-bold text-[#111827]">{formatDate(date)}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-[#9CA3AF]">{records.length} session{records.length !== 1 ? "s" : ""}</span>
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-orange-50 text-[#FF5934] ring-1 ring-orange-200">
+                              <MdTimer size={11} /> {dayTotal}
+                            </span>
+                          </div>
                         </div>
 
-                        <div className="at-divider" />
+                        {/* Sessions */}
+                        <div className="flex flex-col gap-2 pl-10">
+                          {records.map((r, i) => {
+                            const { display } = calcDiff(r.checkInTime, r.checkOutTime);
+                            const pct = barWidth(r.checkInTime, r.checkOutTime);
+                            const sc  = statusColor(r.checkInTime, r.checkOutTime);
+                            return (
+                              <div key={r._id || i} className="bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-sm">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-4 flex-wrap">
+                                    <div className="flex items-center gap-1.5 text-[12px] text-[#374151]">
+                                      <div className="w-5 h-5 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                                        <MdLogin size={11} className="text-emerald-500" />
+                                      </div>
+                                      <span className="font-medium">{formatTime(r.checkInTime)}</span>
+                                    </div>
+                                    <span className="text-gray-300 text-[10px]">→</span>
+                                    <div className="flex items-center gap-1.5 text-[12px] text-[#374151]">
+                                      <div className="w-5 h-5 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                                        <MdLogout size={11} className="text-red-400" />
+                                      </div>
+                                      <span className="font-medium">{formatTime(r.checkOutTime)}</span>
+                                    </div>
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ${sc.pill}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
+                                      {sc.label}
+                                    </span>
+                                  </div>
+                                  <span className="text-[13px] font-bold text-[#111827] flex-shrink-0">{display}</span>
+                                </div>
+                                {/* Duration bar */}
+                                <div className="att-dur-track mt-1">
+                                  <div className="att-dur-bar" style={{ width: `${pct}%` }} />
+                                </div>
+                                <p className="text-[10px] text-[#9CA3AF] mt-1">{Math.round(pct)}% of 10h target</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
 
-                        {/* City select */}
-                        <select
-                            value={selectedCityId}
-                            onChange={citySelectHandler}
-                            className="at-city-select"
-                        >
-                            {isCoordinator ? (
-                                cities.data.map((city) => (
-                                    <option value={city._id} key={city._id}>{city.name}</option>
-                                ))
-                            ) : (
-                                <>
-                                    <option value=''>All locations</option>
-                                    {cities.data.map((city) => (
-                                        <option value={city._id} key={city._id}>{city.name}</option>
-                                    ))}
-                                </>
-                            )}
-                        </select>
-                    </div>
+                  {/* Overall summary footer */}
+                  <div className="px-5 py-4 bg-[#FAFAFA] border-t border-gray-100 flex items-center justify-between">
+                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Overall Total</p>
+                    <span className="inline-flex items-center gap-2 text-[14px] font-bold text-[#111827]">
+                      <MdTimer size={16} className="text-[#FF5934]" />
+                      {calcTotal(attendanceData)}
+                    </span>
+                  </div>
                 </div>
-
-                {/* Table */}
-                <table className="at-table">
-                    <thead>
-                        <tr>
-                            <td>Name</td>
-                            <td>Sales ID</td>
-                            <td>Status</td>
-                            <td>Actions</td>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading && salesWithStatus.length === 0 ? (
-                            [1, 2, 3, 4, 5].map(i => (
-                                <tr key={i} className="at-skeleton-row">
-                                    <td style={{ borderRadius: '12px 0 0 12px', height: 56 }}>&nbsp;</td>
-                                    <td>&nbsp;</td>
-                                    <td>&nbsp;</td>
-                                    <td style={{ borderRadius: '0 12px 12px 0' }}>&nbsp;</td>
-                                </tr>
-                            ))
-                        ) : salesWithStatus.length ? (
-                            salesWithStatus.map((data, index) => (
-                                <tr key={index}>
-                                    {/* Name */}
-                                    <td>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                            <img
-                                                src={data.image || placeholder}
-                                                alt=""
-                                                style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1.5px solid rgba(0,0,0,0.08)' }}
-                                            />
-                                            <div>
-                                                <div style={{ fontWeight: 600, fontSize: 14, color: '#1a1a1a' }}>{data.name}</div>
-                                                <div style={{ fontSize: 12, color: '#9ca3af' }}>{data.email}</div>
-                                            </div>
-                                        </div>
-                                    </td>
-
-                                    {/* ID */}
-                                    <td>
-                                        <span style={{ fontFamily: 'monospace', fontSize: 13, color: '#6b7280', background: '#f3f4f6', padding: '3px 8px', borderRadius: 6 }}>
-                                            #{data._id ? data._id.slice(-6) : '000000'}
-                                        </span>
-                                    </td>
-
-                                    {/* Status */}
-                                    <td>
-                                        {data.isOnline
-                                            ? <span className="badge-online">Online</span>
-                                            : <span className="badge-offline">Offline</span>
-                                        }
-                                    </td>
-
-                                    {/* Actions */}
-                                    <td>
-                                        <div className="at-actions">
-                                            <Link
-                                                to={`/attendance-tracking/attendance?salesId=${data._id}&page=${currentPage}`}
-                                                className="at-action-btn"
-                                                title="Attendance"
-                                            >
-                                                <MdCalendarMonth size={15} />
-                                            </Link>
-                                            <div className="at-action-divider" />
-                                            <Link
-                                                to={`/attendance-tracking/tracking?salesId=${data._id}&page=${currentPage}`}
-                                                className="at-action-btn"
-                                                title="Tracking"
-                                            >
-                                                <img src='/locations.png' alt='Locations' style={{ width: 14, height: 14 }} />
-                                            </Link>
-                                            <div className="at-action-divider" />
-                                            <Link
-                                                to={`/attendance-tracking/visits?salesId=${data._id}&page=${currentPage}`}
-                                                className="at-action-btn"
-                                                title="Visits"
-                                            >
-                                                <FaRegClock size={13} />
-                                            </Link>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))
-                        ) : (
-                            !initialLoading && (
-                                <tr>
-                                    <td colSpan="4" style={{ textAlign: 'center', padding: '32px 0', color: '#9ca3af', fontSize: 14 }}>
-                                        No data found
-                                    </td>
-                                </tr>
-                            )
-                        )}
-                    </tbody>
-                </table>
-
-                {/* Pagination */}
-                <div className="at-pagination">
-                    <div className="at-page-controls">
-                        <button
-                            className="at-page-btn"
-                            disabled={currentPage === 1}
-                            onClick={() => setCurrentPage(p => p - 1)}
-                        >
-                            <GrFormPrevious size={16} />
-                        </button>
-                        <span className="at-page-info">{currentPage} / {totalPages}</span>
-                        <button
-                            className="at-page-btn"
-                            disabled={totalPages <= currentPage}
-                            onClick={() => setCurrentPage(p => p + 1)}
-                        >
-                            <GrFormNext size={16} />
-                        </button>
-                    </div>
-
-                    <div className="at-show-control">
-                        <span className="at-show-label">Show</span>
-                        <select
-                            value={limit}
-                            onChange={e => { setLimit(Number(e.target.value)); setCurrentPage(1); }}
-                            className="at-show-select"
-                        >
-                            <option value={10}>10</option>
-                            <option value={15}>15</option>
-                            <option value={30}>30</option>
-                            <option value={50}>50</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-        </>
-    );
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
 };
 
 export default AttandanceTracking;
