@@ -337,7 +337,7 @@ const Sidebar = () => {
 
               <NavGroup icon={MdFingerprint} label="Attendance" collapsed={collapsed}>
                 <SubNavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Check-In/Out"       />
-                <SubNavItem to="/Attendance/History"  icon={MdHistory}       label="Attendance History" />
+                <SubNavItem to="/visit-duration"  icon={MdHistory}       label="Visit Duration" />
               </NavGroup>
 
               <NavGroup icon={MdMap} label="Tracking" collapsed={collapsed}>

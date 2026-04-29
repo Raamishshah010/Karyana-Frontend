@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   generateLoadForm, getAllSalesPersons,
-  getCoordinatorOrders, getOrders, getSearchOrders,
+  getCoordinatorOrders, getOrders,
   getWarhouseManagerOrders, updateOrderStatus, getOrdersBySalesPersonAndDate
 } from "../APIS";
 import { Loader } from '../components/common/loader';
@@ -22,6 +22,7 @@ import {
 
 const ORDER_STATUSES = ['Placed', 'Processed', 'Cancelled', 'Satelment'];
 const LIMIT = 10;
+const FILTER_FETCH_LIMIT = 1000;
 
 function toMMDDYYYY(dateStr) {
   if (!dateStr) return '';
@@ -55,6 +56,46 @@ const statusDot = (status) => {
     'Satelment': 'bg-orange-400',
   };
   return map[status] || 'bg-gray-400';
+};
+
+const getOrderDateKey = (order) => {
+  const source = order?.createdAt || order?.date || order?.expectedDelivery;
+  if (!source) return '';
+  const parsed = new Date(source);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().split('T')[0];
+};
+
+const orderMatchesFilters = (order, { term = '', sd = '', ed = '', salesperson = '', status = '' }) => {
+  const q = String(term || '').trim().toLowerCase();
+  if (q) {
+    const searchable = [
+      order?._id,
+      order?.orderId,
+      order?.RetailerUser?.name,
+      order?.SaleUser?.name,
+      order?.phoneNumber,
+      order?.shippingAddress,
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (!searchable.includes(q)) return false;
+  }
+
+  const dateKey = getOrderDateKey(order);
+  if (sd && (!dateKey || dateKey < sd)) return false;
+  if (ed && (!dateKey || dateKey > ed)) return false;
+
+  if (salesperson) {
+    const saleUserId = order?.SaleUser?._id || order?.SaleUser || order?.salesPersonId || order?.salePerson;
+    if (String(saleUserId || '') !== String(salesperson)) return false;
+  }
+
+  if (status && String(order?.status || '').toLowerCase() !== String(status).toLowerCase()) return false;
+
+  return true;
+};
+
+const paginate = (rows, page, limit) => {
+  const start = (page - 1) * limit;
+  return rows.slice(start, start + limit);
 };
 
 const generateOrderPDF = (item) => {
@@ -140,7 +181,7 @@ const generateOrderPDF = (item) => {
       </div>
       <div style="text-align:center;margin-top:24px;font-size:11px;color:#9ca3af">Generated on ${new Date().toLocaleString()}</div>
     </div>
-    <script>window.onload = () => { window.print(); }<\/script>
+    <script>window.onload = () => { window.print(); }</script>
     </body></html>`;
 
   const win = window.open('', '_blank');
@@ -174,10 +215,13 @@ const Order = () => {
   const [invoiceData, setInvoiceData]                 = useState({ salePerson: '', date: '' });
 
   const { role, user, token } = useSelector((state) => state.admin);
+  const roleValue = Array.isArray(role) ? role.join(',') : String(role || '');
+  const isCoordinator = roleValue.includes(ROLES[1]);
+  const isWarehouseManager = roleValue.includes(ROLES[2]);
 
   const filterCount = useMemo(() =>
-    [selectedSalesPerson, selectedStatus, startDate, searchTerm].filter(Boolean).length,
-    [selectedSalesPerson, selectedStatus, startDate, searchTerm]
+    [selectedSalesPerson, selectedStatus, startDate || endDate, searchTerm].filter(Boolean).length,
+    [selectedSalesPerson, selectedStatus, startDate, endDate, searchTerm]
   );
 
   const handleEscape = useCallback(() => setShow(false), []);
@@ -211,18 +255,29 @@ const Order = () => {
     try {
       setLoading(true);
       if (hasAnyFilter) {
-        const params = {
-          ...(sd          && { startDate: sd }),
-          ...(ed          && { endDate: ed }),
-          ...(term        && { id: term }),
-          ...(salesperson && { salesPersonId: salesperson }),
-          ...(status      && { status }),
-        };
-        const res = await getSearchOrders(page, LIMIT, params);
-        setData(res.data.data ?? []);
-        setTotalPages(res.data.totalPages ?? 0);
+        const filterState = { term, sd, ed, salesperson, status };
+        let rows = [];
+
+        if (isWarehouseManager) {
+          const res = await getWarhouseManagerOrders(1, FILTER_FETCH_LIMIT);
+          rows = res.data.data ?? [];
+        } else if (isCoordinator) {
+          const res = await getCoordinatorOrders(1, FILTER_FETCH_LIMIT, user.city);
+          rows = res.data.data ?? [];
+        } else {
+          const res = await getOrders(1, FILTER_FETCH_LIMIT);
+          rows = res.data.data ?? [];
+        }
+
+        const filteredRows = rows.filter((order) => orderMatchesFilters(order, filterState));
+        setData(paginate(filteredRows, page, LIMIT));
+        setTotalPages(Math.ceil(filteredRows.length / LIMIT) || 0);
       } else {
-        const res = await getOrders(page, LIMIT);
+        const res = isWarehouseManager
+          ? await getWarhouseManagerOrders(page, LIMIT)
+          : isCoordinator
+            ? await getCoordinatorOrders(page, LIMIT, user.city)
+            : await getOrders(page, LIMIT);
         setData(res.data.data ?? []);
         setTotalPages(res.data.totalPages ?? 0);
       }
@@ -231,33 +286,15 @@ const Order = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isCoordinator, isWarehouseManager, user?.city]);
 
   /* ─── INITIAL LOAD for warehouse / coordinator roles ── */
-  useEffect(() => {
-    if (role.includes(ROLES[2])) {
-      setLoading(true);
-      getWarhouseManagerOrders(1, LIMIT)
-        .then(res => { setData(res.data.data ?? []); setTotalPages(res.data.totalPages ?? 0); })
-        .catch(err => toast.error(err.message))
-        .finally(() => setLoading(false));
-      return;
-    }
-    if (role.includes(ROLES[1])) {
-      setLoading(true);
-      getCoordinatorOrders(1, LIMIT, user.city)
-        .then(res => { setData(res.data.data ?? []); setTotalPages(res.data.totalPages ?? 0); })
-        .catch(err => toast.error(err.message))
-        .finally(() => setLoading(false));
-    }
-  }, [role, user]);
-
   /* ─── RE-FETCH whenever any filter / page changes ─────────────────
      Skipped for warehouse / coordinator roles (they have their own
      fetch above and don't use the search endpoint).
   ─────────────────────────────────────────────────────────────────── */
   useEffect(() => {
-    if (role.includes(ROLES[2]) || role.includes(ROLES[1])) return;
+    if (isCoordinator && !user?.city) return;
     doFetch({
       page:        currentPage,
       term:        searchTerm,
@@ -266,8 +303,7 @@ const Order = () => {
       salesperson: selectedSalesPerson,
       status:      selectedStatus,
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, searchTerm, startDate, endDate, selectedSalesPerson, selectedStatus]);
+  }, [currentPage, searchTerm, startDate, endDate, selectedSalesPerson, selectedStatus, doFetch, isCoordinator, user?.city]);
 
   /* ─── close sidebar on outside click ── */
   useEffect(() => {
@@ -479,7 +515,7 @@ const Order = () => {
             <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Orders</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">{data.length} orders on this page</p>
           </div>
-          {!role.includes(ROLES[2]) && (
+          {!isWarehouseManager && (
             <div className="flex flex-wrap gap-2 items-center">
               <button onClick={invoiceHandler} className="flex items-center gap-2 bg-white border border-gray-200 hover:bg-orange-50 hover:border-[#FF5934] text-[#374151] hover:text-[#FF5934] text-sm font-semibold px-4 py-2.5 rounded-xl transition-all">
                 <MdReceipt size={16} /> Generate Invoice

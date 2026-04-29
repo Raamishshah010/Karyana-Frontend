@@ -620,7 +620,10 @@ const InvoicePage = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {data.length ? data.map((item) => (
+              {data.filter(item => ALLOWED_STATUSES.includes(item.status)).length
+  ? data
+      .filter(item => ALLOWED_STATUSES.includes(item.status))
+      .map((item) => (
                 <tr
                   key={item._id}
                   className="table-row cursor-pointer"

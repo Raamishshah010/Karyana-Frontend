@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   getAllRetailers,
   getRetailerLedgerById,
@@ -79,7 +79,6 @@ const SalesPayments = () => {
   /* filters */
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'inactive'
   const [typeFilter, setTypeFilter] = useState('all');     // 'all' | 'ORDER' | 'PAYMENT' | ...
 
   /* pagination */
@@ -104,9 +103,12 @@ const SalesPayments = () => {
     return isRecovery && matchesType;
   });
 
-  const recoveryTotalPages = Math.ceil(recoveryRows.length / TRANSACTIONS_PER_PAGE) || 1;
+  const ledgerRows = transactionData.filter((t) =>
+    typeFilter === 'all' || String(t.type || '').toUpperCase() === typeFilter.toUpperCase()
+  );
+  const recoveryTotalPages = Math.ceil(ledgerRows.length / TRANSACTIONS_PER_PAGE) || 1;
   const recoveryStart = (recoveryPage - 1) * TRANSACTIONS_PER_PAGE;
-  const recoveryVisible = recoveryRows.slice(recoveryStart, recoveryStart + TRANSACTIONS_PER_PAGE);
+  const recoveryVisible = ledgerRows.slice(recoveryStart, recoveryStart + TRANSACTIONS_PER_PAGE);
 
   /* ── close dropdown on outside click ── */
   useEffect(() => {
@@ -356,9 +358,9 @@ const SalesPayments = () => {
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-[#FAFAFA]">
                 <div className="flex items-center gap-2">
                   <MdOutlineReceipt size={16} className="text-[#FF5934]" />
-                  <span className="text-[13px] font-bold text-[#374151]">Recovery Entries</span>
+                  <span className="text-[13px] font-bold text-[#374151]">Ledger Entries</span>
                   <span className="bg-[#FF5934]/10 text-[#FF5934] text-[11px] font-bold px-2 py-0.5 rounded-full">
-                    {recoveryRows.length}
+                    {ledgerRows.length}
                   </span>
                 </div>
                 <button onClick={refreshLedger}
@@ -376,7 +378,7 @@ const SalesPayments = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-50">
-                        {['ID', 'Details', 'Ref No.', 'V. No.', 'Qty', 'Dr.', 'Date', 'Balance', 'Action'].map((h) => (
+                        {['ID', 'Details', 'Ref No.', 'V. No.', 'Qty', 'Dr.', 'Cr.', 'Date', 'Balance', 'Action'].map((h) => (
                           <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
                         ))}
                       </tr>
@@ -384,12 +386,12 @@ const SalesPayments = () => {
                     <tbody className="divide-y divide-gray-50">
                       {recoveryVisible.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="py-16 text-center">
+                          <td colSpan={10} className="py-16 text-center">
                             <div className="flex flex-col items-center gap-3">
                               <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
                                 <MdOutlineReceipt size={24} className="text-gray-300" />
                               </div>
-                              <p className="text-[#9CA3AF] text-sm font-medium">No recovery entries found</p>
+                              <p className="text-[#9CA3AF] text-sm font-medium">No ledger entries found</p>
                             </div>
                           </td>
                         </tr>
@@ -409,6 +411,11 @@ const SalesPayments = () => {
                               ? <span className="text-[13px] font-semibold text-emerald-600">PKR {t.dr}</span>
                               : <span className="text-[#9CA3AF]">—</span>}
                           </td>
+                          <td className="px-4 py-3">
+                            {t.cr !== '0'
+                              ? <span className="text-[13px] font-semibold text-blue-600">PKR {t.cr}</span>
+                              : <span className="text-[#9CA3AF]">—</span>}
+                          </td>
                           <td className="px-4 py-3 text-[12px] text-[#6B7280]">{t.date}</td>
                           <td className="px-4 py-3 text-[13px] font-semibold text-[#111827]">PKR {t.balance}</td>
                           <td className="px-4 py-3">
@@ -419,6 +426,10 @@ const SalesPayments = () => {
                                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-600 ring-1 ring-emerald-200">Approved</span>
                               ) : actionStatuses[t.id] === 'rejected' ? (
                                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-100 text-red-600 ring-1 ring-red-200">Rejected</span>
+                              ) : t.isApproved ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-600 ring-1 ring-emerald-200">Approved</span>
+                              ) : t.isImported ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-gray-100 text-gray-500 ring-1 ring-gray-200">Imported</span>
                               ) : (
                                 <>
                                   <button onClick={() => handleApprove(t)} title="Approve"
@@ -445,7 +456,7 @@ const SalesPayments = () => {
               )}
 
               {/* Pagination */}
-              {recoveryRows.length > TRANSACTIONS_PER_PAGE && (
+              {ledgerRows.length > TRANSACTIONS_PER_PAGE && (
                 <div className="flex items-center gap-1.5 px-4 py-3 border-t border-gray-100">
                   <button disabled={recoveryPage === 1} onClick={() => setRecoveryPage((p) => p - 1)}
                     className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all">

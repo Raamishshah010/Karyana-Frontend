@@ -55,6 +55,7 @@ import TargetHistoryReport from './pages/TargetHistoryReport.jsx';
 import { FilterProvider } from './context/FilterContext';
 import InvoicePage from './pages/InvoicePage.jsx';
 import SalesPayments from './pages/SalesPayments.jsx';
+import VisitDuration from './pages/VisitDuration.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -131,6 +132,7 @@ const App = () => {
               <Route path="/Sales/Invoices" element={<InvoicePage />} />
               <Route path="/Sales/Payments" element={<SalesPayments />} />
               <Route path="/attendance-tracking" element={<AttandanceTracking />} />
+              <Route path="/visit-duration" element={<VisitDuration />} />
               <Route path="/attendance-tracking/attendance" element={<Attandance />} />
               <Route path="/attendance-tracking/tracking" element={<Tracking />} />
               <Route path="/attendance-tracking/tracking-report" element={<TrackingReport />} />

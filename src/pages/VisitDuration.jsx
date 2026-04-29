@@ -1,3 +1,6 @@
+
+
+
 import { useState, useEffect } from "react";
 import { GrFormPrevious } from "react-icons/gr";
 import { Link, useSearchParams } from "react-router-dom";
@@ -7,8 +10,8 @@ import { getAttendanceBySalesId, getAllSalesPersons } from "../APIS";
 import { Loader } from "../components/common/loader";
 import {
   MdSearch, MdClose, MdRefresh, MdPerson, MdCalendarToday,
-  MdAccessTime, MdBarChart, MdCheckCircle, MdLogout, MdLogin,
-  MdTimer, MdFilterList, MdPictureAsPdf, MdGridOn,
+  MdBarChart, MdCheckCircle, MdLogout, MdLogin, MdTimer,
+  MdFilterList, MdPictureAsPdf, MdGridOn,
 } from "react-icons/md";
 
 /* ─── helpers ─── */
@@ -56,6 +59,11 @@ const calcTotal = (data) => {
   return out.trim() || "0s";
 };
 
+const barWidth = (checkIn, checkOut) => {
+  const { seconds } = calcDiff(checkIn, checkOut);
+  return Math.min((seconds / 36000) * 100, 100);
+};
+
 const statusColor = (checkIn, checkOut) => {
   const { seconds } = calcDiff(checkIn, checkOut);
   if (!checkIn)         return { pill: "bg-gray-100 text-gray-400 ring-gray-200",           dot: "bg-gray-300",   label: "Absent"   };
@@ -63,6 +71,19 @@ const statusColor = (checkIn, checkOut) => {
   if (seconds >= 28800) return { pill: "bg-emerald-50 text-emerald-600 ring-emerald-200",   dot: "bg-emerald-400", label: "Full Day" };
   if (seconds >= 14400) return { pill: "bg-blue-50 text-blue-600 ring-blue-200",            dot: "bg-blue-400",   label: "Half Day" };
   return                       { pill: "bg-red-50 text-red-500 ring-red-200",               dot: "bg-red-400",    label: "Short"    };
+};
+
+const getVisitData = (data) => {
+  const byDate = {};
+  data.forEach((r) => {
+    const d = r.date || (r.checkInTime ? new Date(r.checkInTime).toISOString().slice(0, 10) : null);
+    if (!d) return;
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(r);
+  });
+  return Object.entries(byDate)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([date, records]) => ({ date, records }));
 };
 
 const reportHeaders = [
@@ -139,8 +160,8 @@ const getDateRangeLabel = (rows, startDate, endDate) => {
 /* ════════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════════ */
-const AttandanceTracking = () => {
-  
+const VisitDuration = () => {
+//   const [activeTab, setActiveTab]                   = useState("visit");
   const [attendanceData, setAttendanceData]         = useState([]);
   const [loading, setLoading]                       = useState(false);
   const [salesPersons, setSalesPersons]             = useState([]);
@@ -221,6 +242,7 @@ const AttandanceTracking = () => {
     (sp.name || "").toLowerCase().includes(spSearch.toLowerCase())
   );
   const reportRows = buildReportRows(sortedData, selectedPersonObj);
+  const visitGroups = getVisitData(sortedData);
 
   const canGenerate = !!(selectedSalesPerson || salesIdFromUrl);
   const canExport = generated && reportRows.length > 0 && !loading;
@@ -407,7 +429,7 @@ const AttandanceTracking = () => {
               <GrFormPrevious size={18} />
             </Link>
             <div>
-              <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">CheckIn/Out</h1>
+              <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Visit Duration</h1>
               {generated && attendanceData.length > 0 && (
                 <p className="text-sm text-[#9CA3AF] mt-0.5">
                   Total: <span className="text-[#FF5934] font-semibold">{calcTotal(attendanceData)}</span>
@@ -440,7 +462,20 @@ const AttandanceTracking = () => {
         <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-visible mb-0">
 
           {/* Tab bar */}
-          
+          {/* <div className="flex border-b border-gray-100 px-3 pt-2 gap-1">
+            {[
+              { key: "checkin", icon: MdLogin,  label: "Check-In / Out"  },
+              { key: "visit",   icon: MdTimer,  label: "Visit Duration"  },
+            ].map(({ key, icon: Icon, label }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`att-tab flex items-center gap-2 text-[13px] font-semibold ${activeTab === key ? "active" : ""}`}
+              >
+                <Icon size={15} /> {label}
+              </button>
+            ))}
+          </div> */}
 
           {/* ── Shared Filter Card ── */}
           <div className="px-5 py-5 border-b border-gray-100 bg-[#FAFAFA]">
@@ -596,8 +631,7 @@ const AttandanceTracking = () => {
 
           {/* ═══ TAB CONTENT ═══ */}
 
-          {/* ── Check-In / Out ── */}
-          
+        
             <>
               {loading ? (
                 <div className="py-20 flex justify-center"><Loader /></div>
@@ -611,91 +645,93 @@ const AttandanceTracking = () => {
               ) : attendanceData.length === 0 ? (
                 <div className="py-20 text-center flex flex-col items-center gap-3">
                   <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                    <MdAccessTime size={24} className="text-gray-300" />
+                    <MdTimer size={24} className="text-gray-300" />
                   </div>
-                  <p className="text-[#9CA3AF] text-sm font-medium">No attendance records found for this period</p>
+                  <p className="text-[#9CA3AF] text-sm font-medium">No visit data found for this period</p>
                   <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline font-medium">Clear filters</button>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-[#FAFAFA] border-b border-gray-100">
-                        {["Date", "Check In", "Check Out", "Duration", "Status"].map(h => (
-                          <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {sortedData.map((record, i) => {
-                        const { display } = calcDiff(record.checkInTime, record.checkOutTime);
-                        const sc = statusColor(record.checkInTime, record.checkOutTime);
-                        return (
-                          <tr key={record._id || i} className="table-row">
+                <div className="divide-y divide-gray-50">
+                  {visitGroups.map(({ date, records }) => {
+                    const dayTotal = calcTotal(records);
+                    return (
+                      <div key={date} className="px-5 py-4">
 
-                            {/* Date */}
-                            <td className="px-4 py-3">
-                              <p className="text-[13px] font-semibold text-[#111827]">{formatDate(record.date)}</p>
-                            </td>
+                        {/* Day header */}
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-xl bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                              <MdCalendarToday size={14} className="text-[#FF5934]" />
+                            </div>
+                            <p className="text-[13px] font-bold text-[#111827]">{formatDate(date)}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-[#9CA3AF]">{records.length} session{records.length !== 1 ? "s" : ""}</span>
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-orange-50 text-[#FF5934] ring-1 ring-orange-200">
+                              <MdTimer size={11} /> {dayTotal}
+                            </span>
+                          </div>
+                        </div>
 
-                            {/* Check In */}
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
-                                  <MdLogin size={12} className="text-emerald-500" />
+                        {/* Sessions */}
+                        <div className="flex flex-col gap-2 pl-10">
+                          {records.map((r, i) => {
+                            const { display } = calcDiff(r.checkInTime, r.checkOutTime);
+                            const pct = barWidth(r.checkInTime, r.checkOutTime);
+                            const sc  = statusColor(r.checkInTime, r.checkOutTime);
+                            return (
+                              <div key={r._id || i} className="bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-sm">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-4 flex-wrap">
+                                    <div className="flex items-center gap-1.5 text-[12px] text-[#374151]">
+                                      <div className="w-5 h-5 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                                        <MdLogin size={11} className="text-emerald-500" />
+                                      </div>
+                                      <span className="font-medium">{formatTime(r.checkInTime)}</span>
+                                    </div>
+                                    <span className="text-gray-300 text-[10px]">→</span>
+                                    <div className="flex items-center gap-1.5 text-[12px] text-[#374151]">
+                                      <div className="w-5 h-5 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                                        <MdLogout size={11} className="text-red-400" />
+                                      </div>
+                                      <span className="font-medium">{formatTime(r.checkOutTime)}</span>
+                                    </div>
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ${sc.pill}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
+                                      {sc.label}
+                                    </span>
+                                  </div>
+                                  <span className="text-[13px] font-bold text-[#111827] flex-shrink-0">{display}</span>
                                 </div>
-                                <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkInTime)}</span>
-                              </div>
-                            </td>
-
-                            {/* Check Out */}
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                                  <MdLogout size={12} className="text-red-400" />
+                                {/* Duration bar */}
+                                <div className="att-dur-track mt-1">
+                                  <div className="att-dur-bar" style={{ width: `${pct}%` }} />
                                 </div>
-                                <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkOutTime)}</span>
+                                <p className="text-[10px] text-[#9CA3AF] mt-1">{Math.round(pct)}% of 10h target</p>
                               </div>
-                            </td>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
 
-                            {/* Duration */}
-                            <td className="px-4 py-3">
-                              <span className="text-[13px] font-semibold text-[#111827]">{display}</span>
-                            </td>
-
-                            {/* Status */}
-                            <td className="px-4 py-3">
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${sc.pill}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-                                {sc.label}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-
-                  {/* Summary footer */}
+                  {/* Overall summary footer */}
                   <div className="px-5 py-4 bg-[#FAFAFA] border-t border-gray-100 flex items-center justify-between">
-                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
-                      {sortedData.length} record{sortedData.length !== 1 ? "s" : ""}
-                    </p>
+                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Overall Total</p>
                     <span className="inline-flex items-center gap-2 text-[14px] font-bold text-[#111827]">
                       <MdTimer size={16} className="text-[#FF5934]" />
-                      Total: {calcTotal(attendanceData)}
+                      {calcTotal(attendanceData)}
                     </span>
                   </div>
                 </div>
               )}
             </>
-          
-
-          
+         
         </div>
       </div>
     </>
   );
 };
 
-export default AttandanceTracking;
+export default VisitDuration;
