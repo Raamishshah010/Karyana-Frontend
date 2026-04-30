@@ -515,7 +515,7 @@ const Order = () => {
             <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Orders</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">{data.length} orders on this page</p>
           </div>
-          {!isWarehouseManager && (
+          {/* {!isWarehouseManager && (
             <div className="flex flex-wrap gap-2 items-center">
               <button onClick={invoiceHandler} className="flex items-center gap-2 bg-white border border-gray-200 hover:bg-orange-50 hover:border-[#FF5934] text-[#374151] hover:text-[#FF5934] text-sm font-semibold px-4 py-2.5 rounded-xl transition-all">
                 <MdReceipt size={16} /> Generate Invoice
@@ -524,7 +524,7 @@ const Order = () => {
                 <MdLocalShipping size={16} /> Generate Load Form
               </button>
             </div>
-          )}
+          )} */}
         </div>
 
         {/* ── Filter Bar ── */}

@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { GrFormPrevious } from "react-icons/gr";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import jsPDF from "jspdf";
 import * as XLSX from "xlsx";
 import { getAttendanceBySalesId, getAllSalesPersons, getAllRetailers } from "../APIS";
@@ -61,11 +60,11 @@ const calcTotal = (data) => {
 
 const statusColor = (checkIn, checkOut) => {
   const { seconds } = calcDiff(checkIn, checkOut);
-  if (!checkIn)         return { pill: "bg-gray-100 text-gray-400 ring-gray-200",           dot: "bg-gray-300",   label: "Absent"   };
-  if (!checkOut)        return { pill: "bg-amber-50 text-amber-600 ring-amber-200",         dot: "bg-amber-400",  label: "Active"   };
-  if (seconds >= 28800) return { pill: "bg-emerald-50 text-emerald-600 ring-emerald-200",   dot: "bg-emerald-400", label: "Full Day" };
-  if (seconds >= 14400) return { pill: "bg-blue-50 text-blue-600 ring-blue-200",            dot: "bg-blue-400",   label: "Half Day" };
-  return                       { pill: "bg-red-50 text-red-500 ring-red-200",               dot: "bg-red-400",    label: "Short"    };
+  if (!checkIn)         return { pill: "bg-gray-100 text-gray-400 ring-gray-200",          dot: "bg-gray-300",    label: "Absent"   };
+  if (!checkOut)        return { pill: "bg-amber-50 text-amber-600 ring-amber-200",        dot: "bg-amber-400",   label: "Active"   };
+  if (seconds >= 28800) return { pill: "bg-emerald-50 text-emerald-600 ring-emerald-200",  dot: "bg-emerald-400", label: "Full Day" };
+  if (seconds >= 14400) return { pill: "bg-blue-50 text-blue-600 ring-blue-200",           dot: "bg-blue-400",    label: "Half Day" };
+  return                       { pill: "bg-red-50 text-red-500 ring-red-200",              dot: "bg-red-400",     label: "Short"    };
 };
 
 const reportHeaders = ["Employee Name","Date","Check-In Time","Check-Out Time","Total Hours Worked","Status","Remarks"];
@@ -110,158 +109,203 @@ const getDateRangeLabel = (rows, startDate, endDate) => {
   if (startDate && endDate) return `${formatDate(startDate)} - ${formatDate(endDate)}`;
   if (startDate) return `${formatDate(startDate)} - Latest`;
   if (endDate) return `Up to ${formatDate(endDate)}`;
-  const validDates = rows.map((row) => row.Date).filter((date) => date && date.includes("/")).sort((a, b) => {
-    const [ad, am, ay] = a.split("/"); const [bd, bm, by] = b.split("/");
-    return new Date(`${ay}-${am}-${ad}`) - new Date(`${by}-${bm}-${bd}`);
-  });
+  const validDates = rows
+    .map((row) => row.Date)
+    .filter((date) => date && date.includes("/"))
+    .sort((a, b) => {
+      const [ad, am, ay] = a.split("/"); const [bd, bm, by] = b.split("/");
+      return new Date(`${ay}-${am}-${ad}`) - new Date(`${by}-${bm}-${bd}`);
+    });
   if (!validDates.length) return "Generated records";
   return `${validDates[0]} - ${validDates[validDates.length - 1]}`;
 };
 
-/* ─── Embedded Map Component ─── */
-const EmbeddedMap = ({ salesId }) => {
-  const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const markerRef = useRef(null);
-  const animationRef = useRef(null);
-  const shopMarkersRef = useRef([]);
-
-  const [currentLocation, setCurrentLocation] = useState(null);
-  const [locationData, setLocationData] = useState([]);
-  const [isTracking, setIsTracking] = useState(false);
-  const [previousMarkerPosition, setPreviousMarkerPosition] = useState(null);
-  const [shops, setShops] = useState([]);
-  const [mapError, setMapError] = useState(null);
-
-  const fetchShops = async () => {
-    try {
-      const response = await getAllRetailers();
-      if (response.data && response.data.msg === "success") {
-        const allShops = response.data.data || [];
-        const filteredShops = salesId
-          ? allShops.filter(shop => shop.salesPersonID && (shop.salesPersonID._id === salesId || shop.salesPersonID === salesId))
-          : allShops;
-        setShops(filteredShops);
-      }
-    } catch (err) { console.error("Error fetching shops:", err); }
-  };
-
-  const addShopMarkers = (map, shopsList) => {
-    shopMarkersRef.current.forEach(m => m.setMap(null));
-    shopMarkersRef.current = [];
-    if (!window.google || !window.google.maps) return;
-    shopsList.forEach(shop => {
-      if (shop.lat && shop.lng) {
-        const marker = new window.google.maps.Marker({
-          position: { lat: parseFloat(shop.lat), lng: parseFloat(shop.lng) },
-          map,
-          title: shop.shopName || shop.name,
-          icon: { url: shopIcon, scaledSize: new window.google.maps.Size(30, 30), anchor: new window.google.maps.Point(15, 15) }
-        });
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `<div style="padding:8px;font-family:sans-serif;"><h4 style="margin:0 0 4px 0;font-weight:bold;color:#FF5934;">${shop.shopName || shop.name}</h4><p style="margin:0 0 2px 0;font-size:12px;"><b>Owner:</b> ${shop.name}</p><p style="margin:0 0 2px 0;font-size:12px;"><b>Phone:</b> ${shop.phoneNumber}</p><p style="margin:0;font-size:12px;"><b>Address:</b> ${shop.shopAddress1 || 'N/A'}</p></div>`
-        });
-        marker.addListener('click', () => infoWindow.open(map, marker));
-        shopMarkersRef.current.push(marker);
-      }
-    });
-  };
-
-  const animateMarker = (fromPosition, toPosition, duration = 2000) => {
-    if (!markerRef.current) return;
-    if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    const startTime = Date.now();
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const ease = 1 - Math.pow(1 - progress, 3);
-      markerRef.current.setPosition({
-        lat: fromPosition.lat + (toPosition.lat - fromPosition.lat) * ease,
-        lng: fromPosition.lng + (toPosition.lng - fromPosition.lng) * ease,
-      });
-      if (progress < 1) animationRef.current = requestAnimationFrame(animate);
-    };
-    animate();
-  };
-
-  const initializeMap = () => {
-    if (!mapRef.current || !window.google) return;
-    const map = new window.google.maps.Map(mapRef.current, {
-      center: { lat: 33.6844, lng: 73.0479 },
-      zoom: 16,
-      mapTypeControl: true,
-      fullscreenControl: true,
-      streetViewControl: true,
-      zoomControl: true,
-    });
-    mapInstanceRef.current = map;
-    markerRef.current = new window.google.maps.Marker({
-      position: { lat: 33.6844, lng: 73.0479 },
-      map,
-      title: 'Current Location',
-      icon: {
-        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`<svg width="32" height="48" viewBox="0 0 32 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 0C7.163 0 0 7.163 0 16C0 24.837 16 48 16 48S32 24.837 32 16C32 7.163 24.837 0 16 0Z" fill="#FF5934"/><circle cx="16" cy="16" r="8" fill="white"/></svg>`),
-        scaledSize: new window.google.maps.Size(32, 48),
-        anchor: new window.google.maps.Point(16, 48)
-      }
-    });
-    if (shops.length > 0) addShopMarkers(map, shops);
-  };
-
-  useEffect(() => { fetchShops(); }, [salesId]);
-
-  useEffect(() => {
-    if (mapInstanceRef.current && shops.length > 0) addShopMarkers(mapInstanceRef.current, shops);
-  }, [shops]);
-
-  useEffect(() => {
-    if (window.google && window.google.maps) { initializeMap(); return; }
-    if (document.querySelector('script[src*="maps.googleapis.com"]')) {
-      const interval = setInterval(() => {
-        if (window.google && window.google.maps) { clearInterval(interval); initializeMap(); }
-      }, 200);
-      return () => clearInterval(interval);
+/* ─── load Google Maps script once globally ─── */
+let googleMapsPromise = null;
+const loadGoogleMaps = () => {
+  if (googleMapsPromise) return googleMapsPromise;
+  if (window.google && window.google.maps) {
+    googleMapsPromise = Promise.resolve();
+    return googleMapsPromise;
+  }
+  googleMapsPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[src*="maps.googleapis.com"]');
+    if (existing) {
+      const poll = setInterval(() => {
+        if (window.google && window.google.maps) { clearInterval(poll); resolve(); }
+      }, 100);
+      return;
     }
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyAuJYLmzmglhCpBYTn0BjbJhjWYg0fPEEA`;
-    script.async = true; script.defer = true;
-    script.onload = initializeMap;
-    script.onerror = () => setMapError('Failed to load Google Maps.');
+    script.async = true;
+    script.defer = true;
+    script.onload = resolve;
+    script.onerror = reject;
     document.head.appendChild(script);
+  });
+  return googleMapsPromise;
+};
+
+/* ─── Embedded Map Component ─── */
+const EmbeddedMap = ({ salesId }) => {
+  // FIX: single consistent ref name used both in useRef and in JSX
+  const mapContainerRef = useRef(null);
+  const mapInstanceRef  = useRef(null);
+  const markerRef       = useRef(null);
+  const animationRef    = useRef(null);
+  const shopMarkersRef  = useRef([]);
+  const prevPosRef      = useRef(null); // FIX: only one ref, no duplicate state
+
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [locationData, setLocationData]       = useState([]);
+  const [isTracking, setIsTracking]           = useState(false);
+  const [shops, setShops]                     = useState([]);
+  const [mapError, setMapError]               = useState(null);
+  const [mapReady, setMapReady]               = useState(false);
+
+  /* shop fetching */
+  useEffect(() => {
+    getAllRetailers()
+      .then((res) => {
+        if (res.data?.msg === "success") {
+          const all = res.data.data || [];
+          setShops(salesId
+            ? all.filter(s => s.salesPersonID && (s.salesPersonID._id === salesId || s.salesPersonID === salesId))
+            : all);
+        }
+      })
+      .catch(() => {});
+  }, [salesId]);
+
+  /* init map once container is mounted */
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogleMaps()
+      .then(() => {
+        if (cancelled || !mapContainerRef.current) return;
+        const map = new window.google.maps.Map(mapContainerRef.current, {
+          center: { lat: 33.6844, lng: 73.0479 },
+          zoom: 14,
+          mapTypeControl: true,
+          fullscreenControl: true,
+          streetViewControl: true,
+          zoomControl: true,
+        });
+        mapInstanceRef.current = map;
+        markerRef.current = new window.google.maps.Marker({
+          position: { lat: 33.6844, lng: 73.0479 },
+          map,
+          title: 'Current Location',
+          icon: {
+            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+              `<svg width="32" height="48" viewBox="0 0 32 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16 0C7.163 0 0 7.163 0 16C0 24.837 16 48 16 48S32 24.837 32 16C32 7.163 24.837 0 16 0Z" fill="#FF5934"/>
+                <circle cx="16" cy="16" r="8" fill="white"/>
+              </svg>`
+            ),
+            scaledSize: new window.google.maps.Size(32, 48),
+            anchor: new window.google.maps.Point(16, 48),
+          },
+        });
+        setMapReady(true);
+      })
+      .catch(() => setMapError('Failed to load Google Maps.'));
+    return () => { cancelled = true; };
   }, []);
 
+  /* add shop markers after map + shops are ready */
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current) return;
+    shopMarkersRef.current.forEach(m => m.setMap(null));
+    shopMarkersRef.current = [];
+    shops.forEach(shop => {
+      if (!shop.lat || !shop.lng) return;
+      const marker = new window.google.maps.Marker({
+        position: { lat: parseFloat(shop.lat), lng: parseFloat(shop.lng) },
+        map: mapInstanceRef.current,
+        title: shop.shopName || shop.name,
+        icon: {
+          url: shopIcon,
+          scaledSize: new window.google.maps.Size(30, 30),
+          anchor: new window.google.maps.Point(15, 15),
+        },
+      });
+      const info = new window.google.maps.InfoWindow({
+        content: `<div style="padding:8px;font-family:sans-serif;">
+          <h4 style="margin:0 0 4px 0;font-weight:bold;color:#FF5934;">${shop.shopName || shop.name}</h4>
+          <p style="margin:0 0 2px 0;font-size:12px;"><b>Owner:</b> ${shop.name}</p>
+          <p style="margin:0 0 2px 0;font-size:12px;"><b>Phone:</b> ${shop.phoneNumber}</p>
+          <p style="margin:0;font-size:12px;"><b>Address:</b> ${shop.shopAddress1 || 'N/A'}</p>
+        </div>`,
+      });
+      marker.addListener('click', () => info.open(mapInstanceRef.current, marker));
+      shopMarkersRef.current.push(marker);
+    });
+  }, [mapReady, shops]);
+
+  /* FIX: single Firebase tracking effect — removed the duplicate */
   useEffect(() => {
     if (!salesId) return;
     setIsTracking(true);
     setLocationData([]);
     setCurrentLocation(null);
-    setPreviousMarkerPosition(null);
-    const locationRef = doc(db, 'LocationCollection', salesId);
-    const unsubscribe = onSnapshot(locationRef, (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        const data = docSnapshot.data();
-        const newLocation = { lat: data.latitude, lng: data.longitude, timestamp: data.updatedAt || data.createdAt, userId: data.userId };
-        setCurrentLocation(newLocation);
-        setLocationData(prev => [...prev, newLocation].slice(-100));
+    prevPosRef.current = null;
+
+    const unsubscribe = onSnapshot(
+      doc(db, 'LocationCollection', salesId),
+      (snap) => {
+        if (!snap.exists()) return;
+        const d = snap.data();
+        const loc = {
+          lat: d.latitude,
+          lng: d.longitude,
+          timestamp: d.updatedAt || d.createdAt,
+        };
+        setCurrentLocation(loc);
+        setLocationData(prev => [...prev, loc].slice(-100));
+      },
+      (err) => {
+        console.error(err);
+        setMapError("Failed to connect to live tracking.");
       }
-    }, (err) => {
-      console.error("Location tracking error:", err);
-      setMapError("Failed to connect to live tracking.");
-    });
-    return () => { unsubscribe(); setIsTracking(false); if (animationRef.current) cancelAnimationFrame(animationRef.current); };
+    );
+
+    return () => {
+      unsubscribe();
+      setIsTracking(false);
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
   }, [salesId]);
 
+  /* animate marker when location updates */
   useEffect(() => {
-    if (!mapInstanceRef.current || !markerRef.current || !currentLocation) return;
-    const newPosition = { lat: currentLocation.lat, lng: currentLocation.lng };
-    if (previousMarkerPosition) {
-      animateMarker(previousMarkerPosition, newPosition, 2000);
+    if (!mapReady || !markerRef.current || !currentLocation) return;
+
+    const to   = { lat: currentLocation.lat, lng: currentLocation.lng };
+    const from = prevPosRef.current;
+
+    if (from) {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      const startTime = Date.now();
+      const animate = () => {
+        const p    = Math.min((Date.now() - startTime) / 2000, 1);
+        const ease = 1 - Math.pow(1 - p, 3);
+        markerRef.current?.setPosition({
+          lat: from.lat + (to.lat - from.lat) * ease,
+          lng: from.lng + (to.lng - from.lng) * ease,
+        });
+        if (p < 1) animationRef.current = requestAnimationFrame(animate);
+      };
+      animate();
     } else {
-      markerRef.current.setPosition(newPosition);
-      mapInstanceRef.current.setCenter(newPosition);
+      markerRef.current.setPosition(to);
+      mapInstanceRef.current?.setCenter(to);
+      mapInstanceRef.current?.setZoom(16);
     }
-    setPreviousMarkerPosition(newPosition);
-  }, [currentLocation]);
+
+    prevPosRef.current = to;
+  }, [currentLocation, mapReady]);
 
   if (mapError) {
     return (
@@ -279,38 +323,44 @@ const EmbeddedMap = ({ salesId }) => {
       {/* Map status bar */}
       <div className="absolute top-3 left-3 z-10 flex items-center gap-2 bg-white/90 backdrop-blur-sm border border-gray-100 rounded-xl px-3 py-2 shadow-sm">
         <div className={`w-2 h-2 rounded-full ${isTracking ? 'bg-emerald-400 animate-pulse' : 'bg-gray-300'}`} />
-        <span className="text-xs font-semibold text-gray-600">{isTracking ? 'Live Tracking' : 'Connecting…'}</span>
+        <span className="text-xs font-semibold text-gray-600">
+          {isTracking ? 'Live Tracking' : 'Connecting…'}
+        </span>
         {currentLocation?.timestamp && (
           <span className="text-[10px] text-gray-400 border-l border-gray-200 pl-2 ml-1">
             {new Date(currentLocation.timestamp).toLocaleTimeString()}
           </span>
         )}
       </div>
+
       {locationData.length > 0 && (
         <div className="absolute top-3 right-3 z-10 bg-white/90 backdrop-blur-sm border border-gray-100 rounded-xl px-3 py-2 shadow-sm">
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{locationData.length} pts</span>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+            {locationData.length} pts
+          </span>
         </div>
       )}
-      <div ref={mapRef} className="w-full h-full" />
+
+      {/* FIX: ref name matches the declared useRef — was "mapRef", now "mapContainerRef" */}
+      <div ref={mapContainerRef} className="w-full h-full" />
     </div>
   );
 };
-
 
 /* ════════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════════ */
 const TrackingLocation = () => {
-  const [attendanceData, setAttendanceData] = useState([]);
-  const [loading, setLoading]               = useState(false);
-  const [salesPersons, setSalesPersons]     = useState([]);
+  const [attendanceData, setAttendanceData]           = useState([]);
+  const [loading, setLoading]                         = useState(false);
+  const [salesPersons, setSalesPersons]               = useState([]);
   const [selectedSalesPerson, setSelectedSalesPerson] = useState("");
-  const [startDate, setStartDate]           = useState("");
-  const [endDate, setEndDate]               = useState("");
-  const [spSearch, setSpSearch]             = useState("");
-  const [spDropOpen, setSpDropOpen]         = useState(false);
-  const [generated, setGenerated]           = useState(false);
-  const [activeTab, setActiveTab]           = useState("map"); // "map" | "report"
+  const [startDate, setStartDate]                     = useState("");
+  const [endDate, setEndDate]                         = useState("");
+  const [spSearch, setSpSearch]                       = useState("");
+  const [spDropOpen, setSpDropOpen]                   = useState(false);
+  const [generated, setGenerated]                     = useState(false);
+  const [activeTab, setActiveTab]                     = useState("map");
 
   const [searchParams] = useSearchParams();
   const salesIdFromUrl = searchParams.get("salesId");
@@ -344,10 +394,14 @@ const TrackingLocation = () => {
             return true;
           });
         }
-        setAttendanceData(data); setGenerated(true);
+        setAttendanceData(data);
+        setGenerated(true);
       }
-    } catch (e) { console.error("Attendance fetch error:", e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error("Attendance fetch error:", e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleReset = () => {
@@ -358,20 +412,23 @@ const TrackingLocation = () => {
   const sortedData = [...attendanceData].sort((a, b) => {
     const diff = new Date(b.date || 0) - new Date(a.date || 0);
     if (diff !== 0) return diff;
-    return (b.checkInTime ? new Date(b.checkInTime).getTime() : 0) - (a.checkInTime ? new Date(a.checkInTime).getTime() : 0);
+    return (b.checkInTime ? new Date(b.checkInTime).getTime() : 0)
+         - (a.checkInTime ? new Date(a.checkInTime).getTime() : 0);
   });
 
   const selectedPersonObj = salesPersons.find((sp) => sp._id === selectedSalesPerson);
-  const filteredSP = salesPersons.filter((sp) => (sp.name || "").toLowerCase().includes(spSearch.toLowerCase()));
-  const reportRows = buildReportRows(sortedData, selectedPersonObj);
-  const canGenerate = !!(selectedSalesPerson || salesIdFromUrl);
-  const canExport = generated && reportRows.length > 0 && !loading;
+  const filteredSP        = salesPersons.filter((sp) =>
+    (sp.name || "").toLowerCase().includes(spSearch.toLowerCase())
+  );
+  const reportRows    = buildReportRows(sortedData, selectedPersonObj);
+  const canGenerate   = !!(selectedSalesPerson || salesIdFromUrl);
+  const canExport     = generated && reportRows.length > 0 && !loading;
   const activeSalesId = selectedSalesPerson || salesIdFromUrl;
 
   const getReportFileName = (extension) => {
     const person = safeFilePart(selectedPersonObj?.name || selectedSalesPerson || salesIdFromUrl || "all");
     const from = startDate || "latest";
-    const to = endDate || new Date().toISOString().slice(0, 10);
+    const to   = endDate || new Date().toISOString().slice(0, 10);
     return `attendance-report-${person}-${from}-to-${to}.${extension}`;
   };
 
@@ -387,53 +444,71 @@ const TrackingLocation = () => {
 
   const handleExportPdf = () => {
     if (!canExport) { alert("Please generate a report with attendance records first."); return; }
-    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
+    const pdfDoc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageWidth  = pdfDoc.internal.pageSize.getWidth();
+    const pageHeight = pdfDoc.internal.pageSize.getHeight();
     const margin = 10; const footerHeight = 12; const rowMinHeight = 8;
-    const columns = [{ key: "Employee Name", width: 44 },{ key: "Date", width: 24 },{ key: "Check-In Time", width: 28 },{ key: "Check-Out Time", width: 28 },{ key: "Total Hours Worked", width: 34 },{ key: "Status", width: 24 },{ key: "Remarks", width: 95 }];
+    const columns = [
+      { key: "Employee Name", width: 44 },{ key: "Date", width: 24 },
+      { key: "Check-In Time", width: 28 },{ key: "Check-Out Time", width: 28 },
+      { key: "Total Hours Worked", width: 34 },{ key: "Status", width: 24 },
+      { key: "Remarks", width: 95 },
+    ];
     const dateRange = getDateRangeLabel(reportRows, startDate, endDate);
+
     const drawReportHeader = () => {
-      doc.setFillColor(255, 89, 52); doc.rect(0, 0, pageWidth, 17, "F");
-      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(14);
-      doc.text("Prime Link Distribution", margin, 10.5);
-      doc.setFontSize(9); doc.text("Attendance Report", pageWidth - margin, 10.5, { align: "right" });
-      doc.setTextColor(17, 24, 39); doc.setFontSize(10); doc.setFont("helvetica", "bold");
-      doc.text("Attendance Report", margin, 25);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(75, 85, 99);
-      doc.text(`Sales Person: ${selectedPersonObj?.name || "Selected salesperson"}`, margin, 31);
-      doc.text(`Date Range: ${dateRange}`, margin + 92, 31);
-      doc.text(`Records: ${reportRows.length}`, margin + 175, 31);
-      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, pageWidth - margin, 31, { align: "right" });
+      pdfDoc.setFillColor(255, 89, 52); pdfDoc.rect(0, 0, pageWidth, 17, "F");
+      pdfDoc.setTextColor(255, 255, 255); pdfDoc.setFont("helvetica", "bold"); pdfDoc.setFontSize(14);
+      pdfDoc.text("Prime Link Distribution", margin, 10.5);
+      pdfDoc.setFontSize(9); pdfDoc.text("Attendance Report", pageWidth - margin, 10.5, { align: "right" });
+      pdfDoc.setTextColor(17, 24, 39); pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "bold");
+      pdfDoc.text("Attendance Report", margin, 25);
+      pdfDoc.setFont("helvetica", "normal"); pdfDoc.setFontSize(8.5); pdfDoc.setTextColor(75, 85, 99);
+      pdfDoc.text(`Sales Person: ${selectedPersonObj?.name || "Selected salesperson"}`, margin, 31);
+      pdfDoc.text(`Date Range: ${dateRange}`, margin + 92, 31);
+      pdfDoc.text(`Records: ${reportRows.length}`, margin + 175, 31);
+      pdfDoc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, pageWidth - margin, 31, { align: "right" });
       let x = margin; const y = 38;
-      doc.setFont("helvetica", "bold"); doc.setFontSize(7);
+      pdfDoc.setFont("helvetica", "bold"); pdfDoc.setFontSize(7);
       columns.forEach((column) => {
-        doc.setFillColor(255, 239, 235); doc.rect(x, y, column.width, 8, "F");
-        doc.setDrawColor(255, 183, 167); doc.rect(x, y, column.width, 8, "S");
-        doc.setTextColor(17, 24, 39);
-        doc.text(doc.splitTextToSize(column.key, column.width - 4), x + 2, y + 5);
+        pdfDoc.setFillColor(255, 239, 235); pdfDoc.rect(x, y, column.width, 8, "F");
+        pdfDoc.setDrawColor(255, 183, 167); pdfDoc.rect(x, y, column.width, 8, "S");
+        pdfDoc.setTextColor(17, 24, 39);
+        pdfDoc.text(pdfDoc.splitTextToSize(column.key, column.width - 4), x + 2, y + 5);
         x += column.width;
       });
       return y + 8;
     };
+
     let y = drawReportHeader();
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
+    pdfDoc.setFont("helvetica", "normal"); pdfDoc.setFontSize(7.5);
     reportRows.forEach((row) => {
-      const cellLines = columns.map((column) => doc.splitTextToSize(String(row[column.key] || "-"), column.width - 4));
+      const cellLines = columns.map((column) =>
+        pdfDoc.splitTextToSize(String(row[column.key] || "-"), column.width - 4)
+      );
       const rowHeight = Math.max(rowMinHeight, ...cellLines.map((lines) => lines.length * 4 + 4));
-      if (y + rowHeight > pageHeight - footerHeight) { doc.addPage(); y = drawReportHeader(); doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); }
-      let x = margin; doc.setDrawColor(229, 231, 235); doc.setTextColor(31, 41, 55);
+      if (y + rowHeight > pageHeight - footerHeight) {
+        pdfDoc.addPage(); y = drawReportHeader();
+        pdfDoc.setFont("helvetica", "normal"); pdfDoc.setFontSize(7.5);
+      }
+      let x = margin;
+      pdfDoc.setDrawColor(229, 231, 235); pdfDoc.setTextColor(31, 41, 55);
       cellLines.forEach((lines, index) => {
-        const column = columns[index]; doc.rect(x, y, column.width, rowHeight); doc.text(lines, x + 2, y + 5); x += column.width;
+        const column = columns[index];
+        pdfDoc.rect(x, y, column.width, rowHeight);
+        pdfDoc.text(lines, x + 2, y + 5);
+        x += column.width;
       });
       y += rowHeight;
     });
-    const pageCount = doc.getNumberOfPages();
-    for (let page = 1; page <= pageCount; page += 1) {
-      doc.setPage(page); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(107, 114, 128);
-      doc.text(`Page ${page} of ${pageCount}`, pageWidth - margin, pageHeight - 6, { align: "right" });
+
+    const pageCount = pdfDoc.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page++) {
+      pdfDoc.setPage(page);
+      pdfDoc.setFont("helvetica", "normal"); pdfDoc.setFontSize(8); pdfDoc.setTextColor(107, 114, 128);
+      pdfDoc.text(`Page ${page} of ${pageCount}`, pageWidth - margin, pageHeight - 6, { align: "right" });
     }
-    doc.save(getReportFileName("pdf"));
+    pdfDoc.save(getReportFileName("pdf"));
   };
 
   return (
@@ -447,12 +522,11 @@ const TrackingLocation = () => {
         .att-tab.active { border-bottom-color: #FF5934; color: #FF5934; background: #fff8f6; border-radius: 8px 8px 0 0; }
         .att-tab:not(.active) { color: #6B7280; }
         .att-tab:not(.active):hover { color: #111827; background: #F9FAFB; border-radius: 8px 8px 0 0; }
-        .att-no-scroll::-webkit-scrollbar { display:none; }
+        .att-no-scroll::-webkit-scrollbar { display: none; }
         .att-no-scroll { scrollbar-width: none; }
         .att-input {
-          background: #F9FAFB; border: 1px solid #E5E7EB;
-          border-radius: 12px; padding: 10px 14px;
-          font-size: 13px; color: #111827; outline: none;
+          background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 12px;
+          padding: 10px 14px; font-size: 13px; color: #111827; outline: none;
           font-family: 'DM Sans', sans-serif; width: 100%;
           transition: border-color 0.15s, box-shadow 0.15s;
         }
@@ -462,18 +536,16 @@ const TrackingLocation = () => {
 
       <div className="att-page">
 
-        {/* ── Page Header ── */}
+        {/* Header */}
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
-          <div className="flex items-center gap-3">
-            <div>
-              <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Tracking Location</h1>
-              {generated && attendanceData.length > 0 && (
-                <p className="text-sm text-[#9CA3AF] mt-0.5">
-                  Total: <span className="text-[#FF5934] font-semibold">{calcTotal(attendanceData)}</span>
-                  &nbsp;·&nbsp;{attendanceData.length} record{attendanceData.length !== 1 ? "s" : ""}
-                </p>
-              )}
-            </div>
+          <div>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Tracking Location</h1>
+            {generated && attendanceData.length > 0 && (
+              <p className="text-sm text-[#9CA3AF] mt-0.5">
+                Total: <span className="text-[#FF5934] font-semibold">{calcTotal(attendanceData)}</span>
+                &nbsp;·&nbsp;{attendanceData.length} record{attendanceData.length !== 1 ? "s" : ""}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={handleExportPdf} disabled={!canExport}
@@ -487,10 +559,10 @@ const TrackingLocation = () => {
           </div>
         </div>
 
-        {/* ── Main Card ── */}
-        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-visible mb-0">
+        {/* Main Card */}
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-visible">
 
-          {/* ── Filter Card ── */}
+          {/* Filter Card */}
           <div className="px-5 py-5 border-b border-gray-100 bg-[#FAFAFA]">
             <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-4 flex items-center gap-2">
               <MdFilterList size={13} className="text-[#FF5934]" /> Filters
@@ -503,8 +575,10 @@ const TrackingLocation = () => {
                   <MdPerson size={12} className="text-[#FF5934]" /> Sales Person
                 </label>
                 <div className="relative">
-                  <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                    onClick={() => setSpDropOpen(p => !p)}>
+                  <div
+                    className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                    onClick={() => setSpDropOpen(p => !p)}
+                  >
                     {selectedPersonObj ? (
                       <div className="flex items-center gap-2 flex-1 min-w-0">
                         <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
@@ -523,8 +597,8 @@ const TrackingLocation = () => {
                       <div className="p-2 border-b border-gray-100">
                         <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
                           <MdSearch size={14} className="text-[#9CA3AF]" />
-                          <input autoFocus value={spSearch} onChange={e => setSpSearch(e.target.value)} placeholder="Search…"
-                            className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
+                          <input autoFocus value={spSearch} onChange={e => setSpSearch(e.target.value)}
+                            placeholder="Search…" className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
                           {spSearch && (
                             <button onClick={() => setSpSearch("")} className="text-[#9CA3AF] hover:text-[#FF5934]">
                               <MdClose size={13} />
@@ -536,7 +610,8 @@ const TrackingLocation = () => {
                         {filteredSP.length ? filteredSP.map(sp => (
                           <div key={sp._id}
                             onClick={() => { setSelectedSalesPerson(sp._id); setSpDropOpen(false); setSpSearch(""); }}
-                            className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSalesPerson === sp._id ? "bg-orange-50" : ""}`}>
+                            className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSalesPerson === sp._id ? "bg-orange-50" : ""}`}
+                          >
                             <div className="w-7 h-7 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
                               <span className="text-[#FF5934] text-[11px] font-bold">{(sp.name || "?")[0].toUpperCase()}</span>
                             </div>
@@ -611,17 +686,15 @@ const TrackingLocation = () => {
             )}
           </div>
 
-          {/* ── Tab Bar ── */}
+          {/* Tab Bar */}
           <div className="flex border-b border-gray-100 px-2 pt-1">
             <button className={`att-tab ${activeTab === "map" ? "active" : ""}`} onClick={() => setActiveTab("map")}>
               <MdMap size={15} /> Live Map
             </button>
-            <button className={`att-tab ${activeTab === "report" ? "active" : ""}`} onClick={() => setActiveTab("report")}>
+            {/* <button className={`att-tab ${activeTab === "report" ? "active" : ""}`} onClick={() => setActiveTab("report")}>
               <MdTableRows size={15} /> Attendance Report
-            </button>
+            </button> */}
           </div>
-
-          {/* ── Tab Content ── */}
 
           {/* MAP TAB */}
           {activeTab === "map" && (

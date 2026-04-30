@@ -56,6 +56,8 @@ import { FilterProvider } from './context/FilterContext';
 import InvoicePage from './pages/InvoicePage.jsx';
 import SalesPayments from './pages/SalesPayments.jsx';
 import VisitDuration from './pages/VisitDuration.jsx';
+import TrackingLoaction from './pages/TrackingLoaction.jsx';
+import TrackingReports from './pages/TrackingReports.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -135,6 +137,8 @@ const App = () => {
               <Route path="/visit-duration" element={<VisitDuration />} />
               <Route path="/attendance-tracking/attendance" element={<Attandance />} />
               <Route path="/attendance-tracking/tracking" element={<Tracking />} />
+              <Route path="/Tracking/Location" element={<TrackingLoaction />} />
+              <Route path="/Tracking/Reports" element={<TrackingReports />} />
               <Route path="/attendance-tracking/tracking-report" element={<TrackingReport />} />
               <Route path="/attendance-tracking/reports" element={<Reports />} />
               <Route path="/attendance-tracking/visits" element={<Visits />} />

@@ -400,12 +400,7 @@ const AttandanceTracking = () => {
         {/* ── Page Header ── */}
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
           <div className="flex items-center gap-3">
-            <Link
-              to="/attendance-tracking"
-              className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-orange-50 hover:border-[#FF5934] text-[#374151] hover:text-[#FF5934] transition-all shadow-sm"
-            >
-              <GrFormPrevious size={18} />
-            </Link>
+            
             <div>
               <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">CheckIn/Out</h1>
               {generated && attendanceData.length > 0 && (
