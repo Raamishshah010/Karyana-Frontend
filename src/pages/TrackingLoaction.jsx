@@ -432,84 +432,7 @@ const TrackingLocation = () => {
     return `attendance-report-${person}-${from}-to-${to}.${extension}`;
   };
 
-  const handleExportExcel = () => {
-    if (!canExport) { alert("Please generate a report with attendance records first."); return; }
-    const worksheet = XLSX.utils.json_to_sheet(reportRows, { header: reportHeaders });
-    worksheet["!cols"] = [{ wch: 24 },{ wch: 14 },{ wch: 16 },{ wch: 16 },{ wch: 20 },{ wch: 14 },{ wch: 32 }];
-    if (worksheet["!ref"]) worksheet["!autofilter"] = { ref: worksheet["!ref"] };
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance Report");
-    XLSX.writeFile(workbook, getReportFileName("xlsx"));
-  };
 
-  const handleExportPdf = () => {
-    if (!canExport) { alert("Please generate a report with attendance records first."); return; }
-    const pdfDoc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const pageWidth  = pdfDoc.internal.pageSize.getWidth();
-    const pageHeight = pdfDoc.internal.pageSize.getHeight();
-    const margin = 10; const footerHeight = 12; const rowMinHeight = 8;
-    const columns = [
-      { key: "Employee Name", width: 44 },{ key: "Date", width: 24 },
-      { key: "Check-In Time", width: 28 },{ key: "Check-Out Time", width: 28 },
-      { key: "Total Hours Worked", width: 34 },{ key: "Status", width: 24 },
-      { key: "Remarks", width: 95 },
-    ];
-    const dateRange = getDateRangeLabel(reportRows, startDate, endDate);
-
-    const drawReportHeader = () => {
-      pdfDoc.setFillColor(255, 89, 52); pdfDoc.rect(0, 0, pageWidth, 17, "F");
-      pdfDoc.setTextColor(255, 255, 255); pdfDoc.setFont("helvetica", "bold"); pdfDoc.setFontSize(14);
-      pdfDoc.text("Prime Link Distribution", margin, 10.5);
-      pdfDoc.setFontSize(9); pdfDoc.text("Attendance Report", pageWidth - margin, 10.5, { align: "right" });
-      pdfDoc.setTextColor(17, 24, 39); pdfDoc.setFontSize(10); pdfDoc.setFont("helvetica", "bold");
-      pdfDoc.text("Attendance Report", margin, 25);
-      pdfDoc.setFont("helvetica", "normal"); pdfDoc.setFontSize(8.5); pdfDoc.setTextColor(75, 85, 99);
-      pdfDoc.text(`Sales Person: ${selectedPersonObj?.name || "Selected salesperson"}`, margin, 31);
-      pdfDoc.text(`Date Range: ${dateRange}`, margin + 92, 31);
-      pdfDoc.text(`Records: ${reportRows.length}`, margin + 175, 31);
-      pdfDoc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, pageWidth - margin, 31, { align: "right" });
-      let x = margin; const y = 38;
-      pdfDoc.setFont("helvetica", "bold"); pdfDoc.setFontSize(7);
-      columns.forEach((column) => {
-        pdfDoc.setFillColor(255, 239, 235); pdfDoc.rect(x, y, column.width, 8, "F");
-        pdfDoc.setDrawColor(255, 183, 167); pdfDoc.rect(x, y, column.width, 8, "S");
-        pdfDoc.setTextColor(17, 24, 39);
-        pdfDoc.text(pdfDoc.splitTextToSize(column.key, column.width - 4), x + 2, y + 5);
-        x += column.width;
-      });
-      return y + 8;
-    };
-
-    let y = drawReportHeader();
-    pdfDoc.setFont("helvetica", "normal"); pdfDoc.setFontSize(7.5);
-    reportRows.forEach((row) => {
-      const cellLines = columns.map((column) =>
-        pdfDoc.splitTextToSize(String(row[column.key] || "-"), column.width - 4)
-      );
-      const rowHeight = Math.max(rowMinHeight, ...cellLines.map((lines) => lines.length * 4 + 4));
-      if (y + rowHeight > pageHeight - footerHeight) {
-        pdfDoc.addPage(); y = drawReportHeader();
-        pdfDoc.setFont("helvetica", "normal"); pdfDoc.setFontSize(7.5);
-      }
-      let x = margin;
-      pdfDoc.setDrawColor(229, 231, 235); pdfDoc.setTextColor(31, 41, 55);
-      cellLines.forEach((lines, index) => {
-        const column = columns[index];
-        pdfDoc.rect(x, y, column.width, rowHeight);
-        pdfDoc.text(lines, x + 2, y + 5);
-        x += column.width;
-      });
-      y += rowHeight;
-    });
-
-    const pageCount = pdfDoc.getNumberOfPages();
-    for (let page = 1; page <= pageCount; page++) {
-      pdfDoc.setPage(page);
-      pdfDoc.setFont("helvetica", "normal"); pdfDoc.setFontSize(8); pdfDoc.setTextColor(107, 114, 128);
-      pdfDoc.text(`Page ${page} of ${pageCount}`, pageWidth - margin, pageHeight - 6, { align: "right" });
-    }
-    pdfDoc.save(getReportFileName("pdf"));
-  };
 
   return (
     <>
@@ -547,7 +470,7 @@ const TrackingLocation = () => {
               </p>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          {/* <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={handleExportPdf} disabled={!canExport}
               className="h-10 px-4 rounded-xl border border-red-100 bg-white text-red-600 text-sm font-semibold hover:bg-red-50 disabled:bg-gray-100 disabled:text-gray-300 disabled:border-gray-100 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
               <MdPictureAsPdf size={16} /> PDF
@@ -556,7 +479,7 @@ const TrackingLocation = () => {
               className="h-10 px-4 rounded-xl border border-emerald-100 bg-white text-emerald-600 text-sm font-semibold hover:bg-emerald-50 disabled:bg-gray-100 disabled:text-gray-300 disabled:border-gray-100 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
               <MdGridOn size={16} /> Excel
             </button>
-          </div>
+          </div> */}
         </div>
 
         {/* Main Card */}
@@ -631,20 +554,20 @@ const TrackingLocation = () => {
               </div>
 
               {/* Date From */}
-              <div className="flex-1 min-w-[160px]">
+              {/* <div className="flex-1 min-w-[160px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                   <MdCalendarToday size={12} className="text-[#FF5934]" /> From
                 </label>
                 <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="att-input" />
-              </div>
+              </div> */}
 
               {/* Date To */}
-              <div className="flex-1 min-w-[160px]">
+              {/* <div className="flex-1 min-w-[160px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                   <MdCalendarToday size={12} className="text-[#FF5934]" /> To
                 </label>
                 <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate || undefined} className="att-input" />
-              </div>
+              </div> */}
 
               {/* Buttons */}
               <div className="flex gap-2 flex-shrink-0">
@@ -654,7 +577,7 @@ const TrackingLocation = () => {
                 </button>
                 <button onClick={() => fetchData()} disabled={!canGenerate}
                   className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2">
-                  <MdBarChart size={16} /> Generate Report
+                  <MdBarChart size={16} /> Live Track
                 </button>
               </div>
             </div>

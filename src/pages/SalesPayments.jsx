@@ -79,7 +79,7 @@ const SalesPayments = () => {
   /* filters */
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');     // 'all' | 'ORDER' | 'PAYMENT' | ...
+  const [typeFilter, setTypeFilter] = useState('all');
 
   /* pagination */
   const [recoveryPage, setRecoveryPage] = useState(1);
@@ -94,18 +94,28 @@ const SalesPayments = () => {
     );
   });
 
-  /* ── recovery rows derived (with type filter) ── */
+  /* ── helper: parse amount string to number ── */
+  const parseAmount = (val) => parseFloat(String(val || '0').replace(/[^0-9.-]/g, ''));
+
+  /* ── recovery rows (pending approval, DR only) ── */
   const recoveryRows = transactionData.filter((t) => {
-    const drNum = parseFloat(String(t.dr || '0').replace(/[^0-9.-]/g, ''));
-    const crNum = parseFloat(String(t.cr || '0').replace(/[^0-9.-]/g, ''));
+    const drNum = parseAmount(t.dr);
+    const crNum = parseAmount(t.cr);
     const isRecovery = !t.isImported && t.isApproved === false && drNum > 0 && (isNaN(crNum) || crNum === 0);
     const matchesType = typeFilter === 'all' || String(t.type || '').toUpperCase() === typeFilter.toUpperCase();
     return isRecovery && matchesType;
   });
 
-  const ledgerRows = transactionData.filter((t) =>
-    typeFilter === 'all' || String(t.type || '').toUpperCase() === typeFilter.toUpperCase()
-  );
+  /* ── ledger rows: DR only (no CR entries shown) ── */
+  const ledgerRows = transactionData.filter((t) => {
+    const drNum = parseAmount(t.dr);
+    const crNum = parseAmount(t.cr);
+    const hasDr = drNum > 0;
+    const hasCr = !isNaN(crNum) && crNum > 0;
+    if (!hasDr || hasCr) return false;
+    return typeFilter === 'all' || String(t.type || '').toUpperCase() === typeFilter.toUpperCase();
+  });
+
   const recoveryTotalPages = Math.ceil(ledgerRows.length / TRANSACTIONS_PER_PAGE) || 1;
   const recoveryStart = (recoveryPage - 1) * TRANSACTIONS_PER_PAGE;
   const recoveryVisible = ledgerRows.slice(recoveryStart, recoveryStart + TRANSACTIONS_PER_PAGE);
@@ -248,8 +258,19 @@ const SalesPayments = () => {
     setActionStatuses({});
   };
 
-  /* ── unique transaction types for type filter ── */
-  const transactionTypes = [...new Set(transactionData.map((t) => t.type).filter(Boolean))];
+  /* ── unique transaction types for type filter (DR-only types) ── */
+  const transactionTypes = [
+    ...new Set(
+      transactionData
+        .filter((t) => {
+          const drNum = parseAmount(t.dr);
+          const crNum = parseAmount(t.cr);
+          return drNum > 0 && !(crNum > 0);
+        })
+        .map((t) => t.type)
+        .filter(Boolean)
+    ),
+  ];
 
   return (
     <>
@@ -279,7 +300,14 @@ const SalesPayments = () => {
             <div className="flex items-center justify-between mt-6 mb-5 flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => { setSelectedUser(null); setTransactionData([]); setStartDate(''); setEndDate(''); setActionStatuses({}); setTypeFilter('all'); }}
+                  onClick={() => {
+                    setSelectedUser(null);
+                    setTransactionData([]);
+                    setStartDate('');
+                    setEndDate('');
+                    setActionStatuses({});
+                    setTypeFilter('all');
+                  }}
                   className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] transition-all shadow-sm"
                 >
                   <MdArrowBack size={18} />
@@ -299,7 +327,7 @@ const SalesPayments = () => {
 
               {/* Filters row */}
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Type filter */}
+                {/* Type filter — only shows DR-only types */}
                 {transactionTypes.length > 0 && (
                   <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
                     <MdFilterList size={14} className="text-[#9CA3AF]" />
@@ -318,20 +346,31 @@ const SalesPayments = () => {
 
                 {/* Date filter */}
                 <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
-                  <input type="date" value={startDate} max={new Date().toISOString().split('T')[0]}
+                  <input
+                    type="date"
+                    value={startDate}
+                    max={new Date().toISOString().split('T')[0]}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="bg-transparent outline-none text-sm text-[#374151]" />
+                    className="bg-transparent outline-none text-sm text-[#374151]"
+                  />
                   <span className="text-[#9CA3AF] text-xs">to</span>
-                  <input type="date" value={endDate} min={startDate} max={new Date().toISOString().split('T')[0]}
+                  <input
+                    type="date"
+                    value={endDate}
+                    min={startDate}
+                    max={new Date().toISOString().split('T')[0]}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="bg-transparent outline-none text-sm text-[#374151]" />
-                  <button onClick={handleDateFilter} disabled={!startDate || !endDate}
-                    className="ml-1 bg-[#FF5934] text-white text-[12px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-40 hover:bg-[#e84d2a] transition-colors">
+                    className="bg-transparent outline-none text-sm text-[#374151]"
+                  />
+                  <button
+                    onClick={handleDateFilter}
+                    disabled={!startDate || !endDate}
+                    className="ml-1 bg-[#FF5934] text-white text-[12px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-40 hover:bg-[#e84d2a] transition-colors"
+                  >
                     Filter
                   </button>
                   {(startDate || endDate) && (
-                    <button onClick={clearDateFilter}
-                      className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
+                    <button onClick={clearDateFilter} className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
                       <MdClose size={15} />
                     </button>
                   )}
@@ -342,7 +381,7 @@ const SalesPayments = () => {
             {/* Stats strip */}
             <div className="grid grid-cols-3 gap-3 mb-5">
               {[
-                { label: 'Total Entries', value: transactionData.length },
+                { label: 'Total DR Entries', value: ledgerRows.length },
                 { label: 'Pending Recovery', value: recoveryRows.length },
                 { label: 'Balance', value: `PKR ${selectedUser.balance}` },
               ].map(({ label, value }) => (
@@ -353,7 +392,7 @@ const SalesPayments = () => {
               ))}
             </div>
 
-            {/* Recovery Table */}
+            {/* Ledger Table */}
             <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-[#FAFAFA]">
                 <div className="flex items-center gap-2">
@@ -362,23 +401,26 @@ const SalesPayments = () => {
                   <span className="bg-[#FF5934]/10 text-[#FF5934] text-[11px] font-bold px-2 py-0.5 rounded-full">
                     {ledgerRows.length}
                   </span>
+                  <span className="text-[11px] text-[#9CA3AF] ml-1">DR only</span>
                 </div>
-                <button onClick={refreshLedger}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-gray-200 text-[#9CA3AF] hover:text-[#FF5934] hover:border-[#FF5934] transition-all">
+                <button
+                  onClick={refreshLedger}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-gray-200 text-[#9CA3AF] hover:text-[#FF5934] hover:border-[#FF5934] transition-all"
+                >
                   <MdRefresh size={15} />
                 </button>
               </div>
 
               {ledgerLoading ? (
                 <div className="flex items-center justify-center py-20">
-                  <div className="w-8 h-8 border-3 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
+                  <div className="w-8 h-8 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-50">
-                        {['ID', 'Details', 'Ref No.', 'V. No.', 'Qty', 'Dr.', 'Cr.', 'Date', 'Balance', 'Action'].map((h) => (
+                        {['ID', 'Details', 'Ref No.', 'V. No.', 'Qty', 'Dr.', 'Date', 'Balance', 'Action'].map((h) => (
                           <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
                         ))}
                       </tr>
@@ -386,12 +428,12 @@ const SalesPayments = () => {
                     <tbody className="divide-y divide-gray-50">
                       {recoveryVisible.length === 0 ? (
                         <tr>
-                          <td colSpan={10} className="py-16 text-center">
+                          <td colSpan={9} className="py-16 text-center">
                             <div className="flex flex-col items-center gap-3">
                               <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
                                 <MdOutlineReceipt size={24} className="text-gray-300" />
                               </div>
-                              <p className="text-[#9CA3AF] text-sm font-medium">No ledger entries found</p>
+                              <p className="text-[#9CA3AF] text-sm font-medium">No DR entries found</p>
                             </div>
                           </td>
                         </tr>
@@ -407,14 +449,7 @@ const SalesPayments = () => {
                           <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">{t.voucherNo ?? '—'}</td>
                           <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">{t.quantity ?? '—'}</td>
                           <td className="px-4 py-3">
-                            {t.dr !== '0'
-                              ? <span className="text-[13px] font-semibold text-emerald-600">PKR {t.dr}</span>
-                              : <span className="text-[#9CA3AF]">—</span>}
-                          </td>
-                          <td className="px-4 py-3">
-                            {t.cr !== '0'
-                              ? <span className="text-[13px] font-semibold text-blue-600">PKR {t.cr}</span>
-                              : <span className="text-[#9CA3AF]">—</span>}
+                            <span className="text-[13px] font-semibold text-emerald-600">PKR {t.dr}</span>
                           </td>
                           <td className="px-4 py-3 text-[12px] text-[#6B7280]">{t.date}</td>
                           <td className="px-4 py-3 text-[13px] font-semibold text-[#111827]">PKR {t.balance}</td>
@@ -432,18 +467,27 @@ const SalesPayments = () => {
                                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-gray-100 text-gray-500 ring-1 ring-gray-200">Imported</span>
                               ) : (
                                 <>
-                                  <button onClick={() => handleApprove(t)} title="Approve"
-                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-100 transition-all">
+                                  <button
+                                    onClick={() => handleApprove(t)}
+                                    title="Approve"
+                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-100 transition-all"
+                                  >
                                     <AiOutlineCheck size={14} />
                                   </button>
-                                  <button onClick={() => handleReject(t)} title="Reject"
-                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-500 border border-red-100 transition-all">
+                                  <button
+                                    onClick={() => handleReject(t)}
+                                    title="Reject"
+                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-500 border border-red-100 transition-all"
+                                  >
                                     <AiOutlineClose size={14} />
                                   </button>
                                 </>
                               )}
-                              <button onClick={() => handleViewImage(t)} title="View Image"
-                                className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-orange-50 text-[#9CA3AF] hover:text-[#FF5934] border border-gray-100 transition-all">
+                              <button
+                                onClick={() => handleViewImage(t)}
+                                title="View Image"
+                                className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-orange-50 text-[#9CA3AF] hover:text-[#FF5934] border border-gray-100 transition-all"
+                              >
                                 <FaRegEye size={13} />
                               </button>
                             </div>
@@ -458,8 +502,11 @@ const SalesPayments = () => {
               {/* Pagination */}
               {ledgerRows.length > TRANSACTIONS_PER_PAGE && (
                 <div className="flex items-center gap-1.5 px-4 py-3 border-t border-gray-100">
-                  <button disabled={recoveryPage === 1} onClick={() => setRecoveryPage((p) => p - 1)}
-                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                  <button
+                    disabled={recoveryPage === 1}
+                    onClick={() => setRecoveryPage((p) => p - 1)}
+                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
                     <GrFormPrevious size={16} />
                   </button>
                   <div className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-[#374151]">
@@ -467,8 +514,11 @@ const SalesPayments = () => {
                     <span className="text-gray-300 mx-1">/</span>
                     <span>{recoveryTotalPages}</span>
                   </div>
-                  <button disabled={recoveryPage >= recoveryTotalPages} onClick={() => setRecoveryPage((p) => p + 1)}
-                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                  <button
+                    disabled={recoveryPage >= recoveryTotalPages}
+                    onClick={() => setRecoveryPage((p) => p + 1)}
+                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
                     <GrFormNext size={16} />
                   </button>
                 </div>
@@ -532,7 +582,7 @@ const SalesPayments = () => {
                 {/* Dropdown panel */}
                 {dropdownOpen && (
                   <div className="sp-dropdown absolute top-full left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg z-30 overflow-hidden">
-                    {/* Search inside dropdown */}
+                    {/* Search */}
                     <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 bg-[#FAFAFA]">
                       <MdSearch size={15} className="text-[#9CA3AF] flex-shrink-0" />
                       <input
@@ -574,8 +624,7 @@ const SalesPayments = () => {
                           </div>
                           <div className="flex flex-col items-end gap-1 flex-shrink-0">
                             <span className="text-[12px] font-semibold text-[#111827]">PKR {retailer.balance}</span>
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full
-                              ${retailer.isActive ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${retailer.isActive ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>
                               {retailer.isActive ? 'Active' : 'Inactive'}
                             </span>
                           </div>
@@ -594,7 +643,7 @@ const SalesPayments = () => {
               </div>
             </div>
 
-            {/* Prompt state — no user selected */}
+            {/* Prompt state */}
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="w-20 h-20 rounded-3xl bg-[#FFF4F2] border border-[#FFD7CE] flex items-center justify-center mb-4 shadow-sm">
                 <MdPerson size={32} className="text-[#FF5934]" />

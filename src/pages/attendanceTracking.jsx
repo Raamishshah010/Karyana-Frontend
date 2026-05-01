@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
-import { GrFormPrevious } from "react-icons/gr";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import jsPDF from "jspdf";
 import * as XLSX from "xlsx";
 import { getAttendanceBySalesId, getAllSalesPersons } from "../APIS";
@@ -8,7 +7,7 @@ import { Loader } from "../components/common/loader";
 import {
   MdSearch, MdClose, MdRefresh, MdPerson, MdCalendarToday,
   MdAccessTime, MdBarChart, MdCheckCircle, MdLogout, MdLogin,
-  MdTimer, MdFilterList, MdPictureAsPdf, MdGridOn,
+  MdTimer, MdFilterList, MdPictureAsPdf, MdGridOn, MdExpandMore,
 } from "react-icons/md";
 
 /* ─── helpers ─── */
@@ -58,29 +57,17 @@ const calcTotal = (data) => {
 
 const statusColor = (checkIn, checkOut) => {
   const { seconds } = calcDiff(checkIn, checkOut);
-  if (!checkIn)         return { pill: "bg-gray-100 text-gray-400 ring-gray-200",           dot: "bg-gray-300",   label: "Absent"   };
-  if (!checkOut)        return { pill: "bg-amber-50 text-amber-600 ring-amber-200",         dot: "bg-amber-400",  label: "Active"   };
-  if (seconds >= 28800) return { pill: "bg-emerald-50 text-emerald-600 ring-emerald-200",   dot: "bg-emerald-400", label: "Full Day" };
-  if (seconds >= 14400) return { pill: "bg-blue-50 text-blue-600 ring-blue-200",            dot: "bg-blue-400",   label: "Half Day" };
-  return                       { pill: "bg-red-50 text-red-500 ring-red-200",               dot: "bg-red-400",    label: "Short"    };
+  if (!checkIn)         return { pill: "bg-gray-100 text-gray-400 ring-gray-200",          dot: "bg-gray-300",    label: "Absent"   };
+  if (!checkOut)        return { pill: "bg-amber-50 text-amber-600 ring-amber-200",        dot: "bg-amber-400",   label: "Active"   };
+  if (seconds >= 28800) return { pill: "bg-emerald-50 text-emerald-600 ring-emerald-200",  dot: "bg-emerald-400", label: "Full Day" };
+  if (seconds >= 14400) return { pill: "bg-blue-50 text-blue-600 ring-blue-200",           dot: "bg-blue-400",    label: "Half Day" };
+  return                       { pill: "bg-red-50 text-red-500 ring-red-200",              dot: "bg-red-400",     label: "Short"    };
 };
 
-const reportHeaders = [
-  "Employee Name",
-  "Date",
-  "Check-In Time",
-  "Check-Out Time",
-  "Total Hours Worked",
-  "Status",
-  "Remarks",
-];
+const reportHeaders = ["Employee Name","Date","Check-In Time","Check-Out Time","Total Hours Worked","Status","Remarks"];
 
 const safeFilePart = (value) =>
-  String(value || "attendance-report")
-    .trim()
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .toLowerCase();
+  String(value || "attendance-report").trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").toLowerCase();
 
 const getRecordDateKey = (record) => {
   const rawDate = record.date || record.checkInTime || record.checkOutTime;
@@ -91,12 +78,8 @@ const getRecordDateKey = (record) => {
 };
 
 const getEmployeeName = (record, selectedPerson) =>
-  selectedPerson?.name ||
-  record.salesPersonID?.name ||
-  record.salesPerson?.name ||
-  record.employeeName ||
-  record.name ||
-  "Unknown";
+  selectedPerson?.name || record.salesPersonID?.name || record.salesPerson?.name ||
+  record.employeeName || record.name || "Unknown";
 
 const getRemarks = (record) => {
   const note = record.remarks || record.remark || record.note || record.notes || record.description;
@@ -125,11 +108,10 @@ const getDateRangeLabel = (rows, startDate, endDate) => {
   if (startDate) return `${formatDate(startDate)} - Latest`;
   if (endDate) return `Up to ${formatDate(endDate)}`;
   const validDates = rows
-    .map((row) => row.Date)
-    .filter((date) => date && date.includes("/"))
+    .map(row => row.Date)
+    .filter(d => d && d.includes("/"))
     .sort((a, b) => {
-      const [ad, am, ay] = a.split("/");
-      const [bd, bm, by] = b.split("/");
+      const [ad,am,ay] = a.split("/"); const [bd,bm,by] = b.split("/");
       return new Date(`${ay}-${am}-${ad}`) - new Date(`${by}-${bm}-${bd}`);
     });
   if (!validDates.length) return "Generated records";
@@ -140,24 +122,71 @@ const getDateRangeLabel = (rows, startDate, endDate) => {
    MAIN COMPONENT
 ════════════════════════════════════════ */
 const AttandanceTracking = () => {
-  
-  const [attendanceData, setAttendanceData]         = useState([]);
-  const [loading, setLoading]                       = useState(false);
-  const [salesPersons, setSalesPersons]             = useState([]);
+  const [attendanceData, setAttendanceData]           = useState([]);
+  const [loading, setLoading]                         = useState(false);
+  const [salesPersons, setSalesPersons]               = useState([]);
   const [selectedSalesPerson, setSelectedSalesPerson] = useState("");
-  const [startDate, setStartDate]                   = useState("");
-  const [endDate, setEndDate]                       = useState("");
-  const [spSearch, setSpSearch]                     = useState("");
-  const [spDropOpen, setSpDropOpen]                 = useState(false);
-  const [generated, setGenerated]                   = useState(false);
+  const [startDate, setStartDate]                     = useState("");
+  const [endDate, setEndDate]                         = useState("");
+  const [spSearch, setSpSearch]                       = useState("");
+  const [spDropOpen, setSpDropOpen]                   = useState(false);
+  const [dateDropOpen, setDateDropOpen]               = useState(false);
+
+  /*
+   * datePreset: "" | "today" | "week" | "month" | "custom"
+   * FIX: "custom" is now a real state value that shows the date inputs.
+   * The old code had an early `return` before `setDatePreset(preset)` which
+   * meant clicking "Custom Dates" never actually set the preset.
+   */
+  const [datePreset, setDatePreset] = useState("");
+  const [generated, setGenerated]   = useState(false);
 
   const [searchParams] = useSearchParams();
-  const salesIdFromUrl  = searchParams.get("salesId");
+  const salesIdFromUrl = searchParams.get("salesId");
+
+  /* ── Date preset helper ── */
+  const applyDatePreset = (preset) => {
+    setDateDropOpen(false); // always close dropdown first
+
+    if (preset === "custom") {
+      // FIX: set the preset so the custom inputs appear — do NOT return early
+      setDatePreset("custom");
+      // keep whatever dates were already set (or blank so user fills them in)
+      return;
+    }
+
+    const today = new Date();
+    let start = "";
+    const end = today.toISOString().slice(0, 10);
+
+    if (preset === "today") {
+      start = end;
+    } else if (preset === "week") {
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay());
+      start = weekStart.toISOString().slice(0, 10);
+    } else if (preset === "month") {
+      start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+    }
+
+    setStartDate(start);
+    setEndDate(end);
+    setDatePreset(preset);
+  };
+
+  const getPresetLabel = () => {
+    const labels = { today: "Today", week: "This Week", month: "This Month", custom: "Custom Dates" };
+    if (datePreset === "custom" && startDate && endDate)
+      return `${formatDate(startDate)} → ${formatDate(endDate)}`;
+    if (datePreset === "custom" && startDate) return `From ${formatDate(startDate)}`;
+    if (datePreset === "custom" && endDate) return `Up to ${formatDate(endDate)}`;
+    return labels[datePreset] || "All Time";
+  };
 
   /* load sales persons once */
   useEffect(() => {
     getAllSalesPersons()
-      .then((res) => setSalesPersons(res.data.data || []))
+      .then(res => setSalesPersons(res.data.data || []))
       .catch(() => {});
     if (salesIdFromUrl) setSelectedSalesPerson(salesIdFromUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -165,9 +194,7 @@ const AttandanceTracking = () => {
 
   /* auto-fetch when coming from URL with salesId */
   useEffect(() => {
-    if (salesIdFromUrl && salesPersons.length > 0) {
-      fetchData(salesIdFromUrl);
-    }
+    if (salesIdFromUrl && salesPersons.length > 0) fetchData(salesIdFromUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salesIdFromUrl, salesPersons]);
 
@@ -201,12 +228,9 @@ const AttandanceTracking = () => {
   };
 
   const handleReset = () => {
-    setStartDate("");
-    setEndDate("");
-    setSelectedSalesPerson("");
-    setAttendanceData([]);
-    setGenerated(false);
-    setSpSearch("");
+    setStartDate(""); setEndDate(""); setDatePreset("");
+    setSelectedSalesPerson(""); setAttendanceData([]);
+    setGenerated(false); setSpSearch("");
   };
 
   const sortedData = [...attendanceData].sort((a, b) => {
@@ -216,149 +240,97 @@ const AttandanceTracking = () => {
          - (a.checkInTime ? new Date(a.checkInTime).getTime() : 0);
   });
 
-  const selectedPersonObj = salesPersons.find((sp) => sp._id === selectedSalesPerson);
-  const filteredSP        = salesPersons.filter((sp) =>
+  const selectedPersonObj = salesPersons.find(sp => sp._id === selectedSalesPerson);
+  const filteredSP        = salesPersons.filter(sp =>
     (sp.name || "").toLowerCase().includes(spSearch.toLowerCase())
   );
-  const reportRows = buildReportRows(sortedData, selectedPersonObj);
-
+  const reportRows  = buildReportRows(sortedData, selectedPersonObj);
   const canGenerate = !!(selectedSalesPerson || salesIdFromUrl);
-  const canExport = generated && reportRows.length > 0 && !loading;
+  const canExport   = generated && reportRows.length > 0 && !loading;
 
-  const getReportFileName = (extension) => {
+  const getReportFileName = (ext) => {
     const person = safeFilePart(selectedPersonObj?.name || selectedSalesPerson || salesIdFromUrl || "all");
-    const from = startDate || "latest";
-    const to = endDate || new Date().toISOString().slice(0, 10);
-    return `attendance-report-${person}-${from}-to-${to}.${extension}`;
+    return `attendance-report-${person}-${startDate || "latest"}-to-${endDate || new Date().toISOString().slice(0,10)}.${ext}`;
   };
 
   const handleExportExcel = () => {
-    if (!canExport) {
-      alert("Please generate a report with attendance records first.");
-      return;
-    }
-
-    const worksheet = XLSX.utils.json_to_sheet(reportRows, { header: reportHeaders });
-    worksheet["!cols"] = [
-      { wch: 24 },
-      { wch: 14 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 20 },
-      { wch: 14 },
-      { wch: 32 },
-    ];
-    if (worksheet["!ref"]) {
-      worksheet["!autofilter"] = { ref: worksheet["!ref"] };
-    }
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance Report");
-    XLSX.writeFile(workbook, getReportFileName("xlsx"));
+    if (!canExport) { alert("Please generate a report with attendance records first."); return; }
+    const ws = XLSX.utils.json_to_sheet(reportRows, { header: reportHeaders });
+    ws["!cols"] = [{ wch:24 },{ wch:14 },{ wch:16 },{ wch:16 },{ wch:20 },{ wch:14 },{ wch:32 }];
+    if (ws["!ref"]) ws["!autofilter"] = { ref: ws["!ref"] };
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Attendance Report");
+    XLSX.writeFile(wb, getReportFileName("xlsx"));
   };
 
   const handleExportPdf = () => {
-    if (!canExport) {
-      alert("Please generate a report with attendance records first.");
-      return;
-    }
-
+    if (!canExport) { alert("Please generate a report with attendance records first."); return; }
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 10;
-    const footerHeight = 12;
-    const rowMinHeight = 8;
-    const columns = [
-      { key: "Employee Name", width: 44 },
-      { key: "Date", width: 24 },
-      { key: "Check-In Time", width: 28 },
-      { key: "Check-Out Time", width: 28 },
-      { key: "Total Hours Worked", width: 34 },
-      { key: "Status", width: 24 },
+    const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
+    const margin = 10; const footerH = 12; const rowMinH = 8;
+    const cols = [
+      { key: "Employee Name", width: 44 },{ key: "Date", width: 24 },
+      { key: "Check-In Time", width: 28 },{ key: "Check-Out Time", width: 28 },
+      { key: "Total Hours Worked", width: 34 },{ key: "Status", width: 24 },
       { key: "Remarks", width: 95 },
     ];
     const dateRange = getDateRangeLabel(reportRows, startDate, endDate);
-
-    const drawReportHeader = () => {
-      doc.setFillColor(255, 89, 52);
-      doc.rect(0, 0, pageWidth, 17, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
+    const drawHeader = () => {
+      doc.setFillColor(255,89,52); doc.rect(0,0,pw,17,"F");
+      doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(14);
       doc.text("Prime Link Distribution", margin, 10.5);
-      doc.setFontSize(9);
-      doc.text("Attendance Report", pageWidth - margin, 10.5, { align: "right" });
-
-      doc.setTextColor(17, 24, 39);
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9); doc.text("Attendance Report", pw-margin, 10.5, { align:"right" });
+      doc.setTextColor(17,24,39); doc.setFontSize(10); doc.setFont("helvetica","bold");
       doc.text("Attendance Report", margin, 25);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
-      doc.setTextColor(75, 85, 99);
+      doc.setFont("helvetica","normal"); doc.setFontSize(8.5); doc.setTextColor(75,85,99);
       doc.text(`Sales Person: ${selectedPersonObj?.name || "Selected salesperson"}`, margin, 31);
-      doc.text(`Date Range: ${dateRange}`, margin + 92, 31);
-      doc.text(`Records: ${reportRows.length}`, margin + 175, 31);
-      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, pageWidth - margin, 31, { align: "right" });
-
-      let x = margin;
-      const y = 38;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-      columns.forEach((column) => {
-        doc.setFillColor(255, 239, 235);
-        doc.rect(x, y, column.width, 8, "F");
-        doc.setDrawColor(255, 183, 167);
-        doc.rect(x, y, column.width, 8, "S");
-        doc.setTextColor(17, 24, 39);
-        doc.text(doc.splitTextToSize(column.key, column.width - 4), x + 2, y + 5);
-        x += column.width;
+      doc.text(`Date Range: ${dateRange}`, margin+92, 31);
+      doc.text(`Records: ${reportRows.length}`, margin+175, 31);
+      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, pw-margin, 31, { align:"right" });
+      let x = margin; const y = 38;
+      doc.setFont("helvetica","bold"); doc.setFontSize(7);
+      cols.forEach(c => {
+        doc.setFillColor(255,239,235); doc.rect(x,y,c.width,8,"F");
+        doc.setDrawColor(255,183,167); doc.rect(x,y,c.width,8,"S");
+        doc.setTextColor(17,24,39);
+        doc.text(doc.splitTextToSize(c.key, c.width-4), x+2, y+5);
+        x += c.width;
       });
-      return y + 8;
+      return y+8;
     };
-
-    let y = drawReportHeader();
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-
-    reportRows.forEach((row) => {
-      const cellLines = columns.map((column) =>
-        doc.splitTextToSize(String(row[column.key] || "-"), column.width - 4)
-      );
-      const rowHeight = Math.max(rowMinHeight, ...cellLines.map((lines) => lines.length * 4 + 4));
-
-      if (y + rowHeight > pageHeight - footerHeight) {
-        doc.addPage();
-        y = drawReportHeader();
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(7.5);
-      }
-
+    let y = drawHeader();
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+    reportRows.forEach(row => {
+      const cellLines = cols.map(c => doc.splitTextToSize(String(row[c.key]||"-"), c.width-4));
+      const rowH = Math.max(rowMinH, ...cellLines.map(l => l.length*4+4));
+      if (y+rowH > ph-footerH) { doc.addPage(); y = drawHeader(); doc.setFont("helvetica","normal"); doc.setFontSize(7.5); }
       let x = margin;
-      doc.setDrawColor(229, 231, 235);
-      doc.setTextColor(31, 41, 55);
-      cellLines.forEach((lines, index) => {
-        const column = columns[index];
-        doc.rect(x, y, column.width, rowHeight);
-        doc.text(lines, x + 2, y + 5);
-        x += column.width;
+      doc.setDrawColor(229,231,235); doc.setTextColor(31,41,55);
+      cellLines.forEach((lines,i) => {
+        doc.rect(x,y,cols[i].width,rowH); doc.text(lines,x+2,y+5); x+=cols[i].width;
       });
-      y += rowHeight;
+      y+=rowH;
     });
-
-    const pageCount = doc.getNumberOfPages();
-    for (let page = 1; page <= pageCount; page += 1) {
-      doc.setPage(page);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      doc.setTextColor(107, 114, 128);
-      doc.text(`Page ${page} of ${pageCount}`, pageWidth - margin, pageHeight - 6, { align: "right" });
+    const pc = doc.getNumberOfPages();
+    for (let p=1;p<=pc;p++) {
+      doc.setPage(p); doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(107,114,128);
+      doc.text(`Page ${p} of ${pc}`, pw-margin, ph-6, { align:"right" });
     }
-
     doc.save(getReportFileName("pdf"));
   };
+
+  /* ─── preset option item ─── */
+  const PresetOption = ({ preset, label }) => (
+    <button
+      onClick={() => applyDatePreset(preset)}
+      className={`w-full text-left px-4 py-2.5 text-sm hover:bg-orange-50 transition-colors flex items-center gap-2 border-b border-gray-100 last:border-0
+        ${datePreset === preset ? "bg-orange-50 text-[#FF5934] font-semibold" : "text-[#111827]"}`}
+    >
+      <MdCheckCircle size={14} className={datePreset === preset ? "text-[#FF5934]" : "text-transparent"} />
+      {label}
+    </button>
+  );
 
   return (
     <>
@@ -367,85 +339,58 @@ const AttandanceTracking = () => {
         .att-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
         .att-page .table-row { transition: background 0.15s, box-shadow 0.15s; }
         .att-page .table-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
-        .att-tab { transition: all 0.2s; border-bottom: 2.5px solid transparent; padding: 10px 16px; cursor: pointer; }
-        .att-tab.active { border-bottom-color: #FF5934; color: #FF5934; background: #fff8f6; border-radius: 8px 8px 0 0; }
-        .att-tab:not(.active) { color: #6B7280; }
-        .att-tab:not(.active):hover { color: #111827; background: #F9FAFB; border-radius: 8px 8px 0 0; }
-        @keyframes attModalIn   { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:none; } }
-        @keyframes attOverlayIn { from { opacity:0; } to { opacity:1; } }
-        .att-modal-overlay { animation: attOverlayIn 0.2s ease; }
-        .att-modal-card    { animation: attModalIn 0.25s cubic-bezier(0.34,1.2,0.64,1); }
-        .att-dur-track { height:4px; border-radius:9999px; background:#F3F4F6; overflow:hidden; }
-        .att-dur-bar   { height:4px; border-radius:9999px; background:#FF5934; transition: width 0.6s ease; }
         .att-no-scroll::-webkit-scrollbar { display:none; }
         .att-no-scroll { scrollbar-width: none; }
-        .att-select {
-          appearance: none; -webkit-appearance: none;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-          background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px;
-        }
         .att-input {
-          background: #F9FAFB; border: 1px solid #E5E7EB;
-          border-radius: 12px; padding: 10px 14px;
-          font-size: 13px; color: #111827; outline: none;
+          background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 12px;
+          padding: 10px 14px; font-size: 13px; color: #111827; outline: none;
           font-family: 'DM Sans', sans-serif; width: 100%;
           transition: border-color 0.15s, box-shadow 0.15s;
         }
         .att-input:focus { border-color: #FF5934; box-shadow: 0 0 0 3px rgba(255,89,52,0.1); }
         .att-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+        @keyframes slideDown { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: none; } }
+        .att-custom-row { animation: slideDown 0.2s ease both; }
       `}</style>
 
       <div className="att-page">
 
-        {/* ── Page Header ── */}
+        {/* ── Header ── */}
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
-          <div className="flex items-center gap-3">
-            
-            <div>
-              <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">CheckIn/Out</h1>
-              {generated && attendanceData.length > 0 && (
-                <p className="text-sm text-[#9CA3AF] mt-0.5">
-                  Total: <span className="text-[#FF5934] font-semibold">{calcTotal(attendanceData)}</span>
-                  &nbsp;·&nbsp;{attendanceData.length} record{attendanceData.length !== 1 ? "s" : ""}
-                </p>
-              )}
-            </div>
+          <div>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Check In / Out</h1>
+            {generated && attendanceData.length > 0 && (
+              <p className="text-sm text-[#9CA3AF] mt-0.5">
+                Total: <span className="text-[#FF5934] font-semibold">{calcTotal(attendanceData)}</span>
+                &nbsp;·&nbsp;{attendanceData.length} record{attendanceData.length !== 1 ? "s" : ""}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleExportPdf}
-              disabled={!canExport}
-              className="h-10 px-4 rounded-xl border border-red-100 bg-white text-red-600 text-sm font-semibold hover:bg-red-50 disabled:bg-gray-100 disabled:text-gray-300 disabled:border-gray-100 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-            >
+            <button type="button" onClick={handleExportPdf} disabled={!canExport}
+              className="h-10 px-4 rounded-xl border border-red-100 bg-white text-red-600 text-sm font-semibold hover:bg-red-50 disabled:bg-gray-100 disabled:text-gray-300 disabled:border-gray-100 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
               <MdPictureAsPdf size={16} /> PDF
             </button>
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              disabled={!canExport}
-              className="h-10 px-4 rounded-xl border border-emerald-100 bg-white text-emerald-600 text-sm font-semibold hover:bg-emerald-50 disabled:bg-gray-100 disabled:text-gray-300 disabled:border-gray-100 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-            >
+            <button type="button" onClick={handleExportExcel} disabled={!canExport}
+              className="h-10 px-4 rounded-xl border border-emerald-100 bg-white text-emerald-600 text-sm font-semibold hover:bg-emerald-50 disabled:bg-gray-100 disabled:text-gray-300 disabled:border-gray-100 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
               <MdGridOn size={16} /> Excel
             </button>
           </div>
         </div>
 
-        {/* ── Tabs ── */}
-        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-visible mb-0">
+        {/* ── Main Card ── */}
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-visible">
 
-          {/* Tab bar */}
-          
-
-          {/* ── Shared Filter Card ── */}
+          {/* Filter Section */}
           <div className="px-5 py-5 border-b border-gray-100 bg-[#FAFAFA]">
             <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-4 flex items-center gap-2">
               <MdFilterList size={13} className="text-[#FF5934]" /> Filters
             </p>
 
+            {/* Row 1: Sales Person + Date Range + Buttons */}
             <div className="flex flex-wrap gap-4 items-end">
 
-              {/* ── Sales Person Picker ── */}
+              {/* Sales Person Picker */}
               <div className="flex-1 min-w-[220px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                   <MdPerson size={12} className="text-[#FF5934]" /> Sales Person
@@ -458,9 +403,7 @@ const AttandanceTracking = () => {
                     {selectedPersonObj ? (
                       <div className="flex items-center gap-2 flex-1 min-w-0">
                         <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
-                          <span className="text-[#FF5934] text-[10px] font-bold">
-                            {(selectedPersonObj.name || "?")[0].toUpperCase()}
-                          </span>
+                          <span className="text-[#FF5934] text-[10px] font-bold">{(selectedPersonObj.name||"?")[0].toUpperCase()}</span>
                         </div>
                         <span className="text-[13px] text-[#111827] font-medium truncate">{selectedPersonObj.name}</span>
                       </div>
@@ -470,19 +413,13 @@ const AttandanceTracking = () => {
                     <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
                   </div>
 
-                  {/* Dropdown */}
                   {spDropOpen && (
                     <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
                       <div className="p-2 border-b border-gray-100">
                         <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
                           <MdSearch size={14} className="text-[#9CA3AF]" />
-                          <input
-                            autoFocus
-                            value={spSearch}
-                            onChange={e => setSpSearch(e.target.value)}
-                            placeholder="Search…"
-                            className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
-                          />
+                          <input autoFocus value={spSearch} onChange={e => setSpSearch(e.target.value)}
+                            placeholder="Search…" className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
                           {spSearch && (
                             <button onClick={() => setSpSearch("")} className="text-[#9CA3AF] hover:text-[#FF5934]">
                               <MdClose size={13} />
@@ -492,21 +429,18 @@ const AttandanceTracking = () => {
                       </div>
                       <div className="max-h-52 overflow-y-auto att-no-scroll">
                         {filteredSP.length ? filteredSP.map(sp => (
-                          <div
-                            key={sp._id}
+                          <div key={sp._id}
                             onClick={() => { setSelectedSalesPerson(sp._id); setSpDropOpen(false); setSpSearch(""); }}
                             className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSalesPerson === sp._id ? "bg-orange-50" : ""}`}
                           >
                             <div className="w-7 h-7 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
-                              <span className="text-[#FF5934] text-[11px] font-bold">{(sp.name || "?")[0].toUpperCase()}</span>
+                              <span className="text-[#FF5934] text-[11px] font-bold">{(sp.name||"?")[0].toUpperCase()}</span>
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="text-[13px] font-medium text-[#111827] truncate">{sp.name}</p>
                               <p className="text-[11px] text-[#9CA3AF] truncate">{sp.email}</p>
                             </div>
-                            {selectedSalesPerson === sp._id && (
-                              <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0" />
-                            )}
+                            {selectedSalesPerson === sp._id && <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0" />}
                           </div>
                         )) : (
                           <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No results found</div>
@@ -517,176 +451,212 @@ const AttandanceTracking = () => {
                 </div>
               </div>
 
-              {/* ── Date From ── */}
-              <div className="flex-1 min-w-[160px]">
+              {/* Date Range Preset Dropdown */}
+              <div className="flex-1 min-w-[220px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdCalendarToday size={12} className="text-[#FF5934]" /> From
+                  <MdCalendarToday size={12} className="text-[#FF5934]" /> Date Range
                 </label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={e => setStartDate(e.target.value)}
-                  className="att-input"
-                />
+                <div className="relative">
+                  <div
+                    className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                    onClick={() => setDateDropOpen(p => !p)}
+                  >
+                    <span className="text-[13px] text-[#111827] font-medium flex-1 truncate">{getPresetLabel()}</span>
+                    <MdExpandMore size={18} className={`text-[#9CA3AF] flex-shrink-0 transition-transform ${dateDropOpen ? "rotate-180" : ""}`} />
+                  </div>
+
+                  {dateDropOpen && (
+                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
+                      <PresetOption preset="today" label="Today" />
+                      <PresetOption preset="week"  label="This Week" />
+                      <PresetOption preset="month" label="This Month" />
+                      <PresetOption preset="custom" label="Custom Dates…" />
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* ── Date To ── */}
-              <div className="flex-1 min-w-[160px]">
-                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdCalendarToday size={12} className="text-[#FF5934]" /> To
-                </label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={e => setEndDate(e.target.value)}
-                  min={startDate || undefined}
-                  className="att-input"
-                />
-              </div>
-
-              {/* ── Buttons ── */}
+              {/* Buttons */}
               <div className="flex gap-2 flex-shrink-0">
-                <button
-                  onClick={handleReset}
-                  className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
-                >
+                <button onClick={handleReset}
+                  className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
                   <MdRefresh size={15} /> Reset
                 </button>
-                <button
-                  onClick={() => fetchData()}
-                  disabled={!canGenerate}
-                  className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2"
-                >
+                <button onClick={() => fetchData()} disabled={!canGenerate}
+                  className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2">
                   <MdBarChart size={16} /> Generate Report
                 </button>
               </div>
             </div>
 
+            {/* ── FIX: Custom date inputs — shown when datePreset === "custom" ──
+                These were never rendered before because applyDatePreset("custom")
+                had an early `return` before `setDatePreset(preset)` was called.
+                Now the preset is set correctly and these inputs always appear. ── */}
+            {datePreset === "custom" && (
+              <div className="att-custom-row mt-5 pt-5 border-t border-dashed border-gray-200 flex flex-wrap gap-4 items-end">
+                <div className="flex items-center gap-2 w-full mb-1">
+                  <MdCalendarToday size={13} className="text-[#FF5934]" />
+                  <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Custom Date Range</p>
+                </div>
+
+                {/* From */}
+                <div className="flex-1 min-w-[180px]">
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> From
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                    className="att-input"
+                  />
+                </div>
+
+                {/* Arrow separator */}
+                <div className="flex items-center pb-1 text-[#9CA3AF] font-bold text-lg flex-shrink-0 self-end mb-2">→</div>
+
+                {/* To */}
+                <div className="flex-1 min-w-[180px]">
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                    <span className="w-2 h-2 rounded-full bg-red-400 inline-block" /> To
+                  </label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    min={startDate || undefined}
+                    onChange={e => setEndDate(e.target.value)}
+                    className="att-input"
+                  />
+                </div>
+
+                {/* Quick clear */}
+                {(startDate || endDate) && (
+                  <button
+                    onClick={() => { setStartDate(""); setEndDate(""); }}
+                    className="h-10 px-3 rounded-xl border border-gray-200 bg-white text-[#9CA3AF] hover:text-[#FF5934] hover:border-[#FF5934] text-sm flex items-center gap-1.5 transition-colors self-end flex-shrink-0"
+                  >
+                    <MdClose size={14} /> Clear dates
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Active filter chips */}
-            {(selectedPersonObj || startDate || endDate) && (
+            {(selectedPersonObj || datePreset) && (
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 {selectedPersonObj && (
                   <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-3 py-1.5">
                     <div className="w-5 h-5 rounded-full bg-[#FF5934]/20 flex items-center justify-center flex-shrink-0">
-                      <span className="text-[#FF5934] text-[9px] font-bold">{(selectedPersonObj.name || "?")[0].toUpperCase()}</span>
+                      <span className="text-[#FF5934] text-[9px] font-bold">{(selectedPersonObj.name||"?")[0].toUpperCase()}</span>
                     </div>
                     <span className="text-[12px] font-semibold text-[#FF5934]">{selectedPersonObj.name}</span>
-                    <button onClick={() => { setSelectedSalesPerson(""); setAttendanceData([]); setGenerated(false); }} className="text-[#FF5934]/50 hover:text-[#FF5934] ml-1">
-                      <MdClose size={13} />
-                    </button>
+                    <button onClick={() => { setSelectedSalesPerson(""); setAttendanceData([]); setGenerated(false); }}
+                      className="text-[#FF5934]/50 hover:text-[#FF5934] ml-1"><MdClose size={13} /></button>
                   </div>
                 )}
-                {(startDate || endDate) && (
+                {datePreset && datePreset !== "custom" && (
                   <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
                     <MdCalendarToday size={12} className="text-blue-500" />
-                    <span className="text-[12px] font-semibold text-blue-600">{startDate || "Start"} to {endDate || "Latest"}</span>
-                    <button onClick={() => { setStartDate(""); setEndDate(""); }} className="text-blue-400 hover:text-blue-600 ml-1">
-                      <MdClose size={13} />
-                    </button>
+                    <span className="text-[12px] font-semibold text-blue-600">{getPresetLabel()}</span>
+                    <button onClick={() => { setDatePreset(""); setStartDate(""); setEndDate(""); }}
+                      className="text-blue-400 hover:text-blue-600 ml-1"><MdClose size={13} /></button>
+                  </div>
+                )}
+                {datePreset === "custom" && (startDate || endDate) && (
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
+                    <MdCalendarToday size={12} className="text-blue-500" />
+                    <span className="text-[12px] font-semibold text-blue-600">
+                      {formatDate(startDate) || "Start"} → {formatDate(endDate) || "Latest"}
+                    </span>
+                    <button onClick={() => { setDatePreset(""); setStartDate(""); setEndDate(""); }}
+                      className="text-blue-400 hover:text-blue-600 ml-1"><MdClose size={13} /></button>
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          {/* ═══ TAB CONTENT ═══ */}
-
-          {/* ── Check-In / Out ── */}
-          
-            <>
-              {loading ? (
-                <div className="py-20 flex justify-center"><Loader /></div>
-              ) : !generated ? (
-                <div className="py-20 text-center flex flex-col items-center gap-3">
-                  <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                    <MdBarChart size={24} className="text-gray-300" />
-                  </div>
-                  <p className="text-[#9CA3AF] text-sm font-medium">Select a sales person and click Generate Report</p>
-                </div>
-              ) : attendanceData.length === 0 ? (
-                <div className="py-20 text-center flex flex-col items-center gap-3">
-                  <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                    <MdAccessTime size={24} className="text-gray-300" />
-                  </div>
-                  <p className="text-[#9CA3AF] text-sm font-medium">No attendance records found for this period</p>
-                  <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline font-medium">Clear filters</button>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-[#FAFAFA] border-b border-gray-100">
-                        {["Date", "Check In", "Check Out", "Duration", "Status"].map(h => (
-                          <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
-                        ))}
+          {/* ── Table Content ── */}
+          {loading ? (
+            <div className="py-20 flex justify-center"><Loader /></div>
+          ) : !generated ? (
+            <div className="py-20 text-center flex flex-col items-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+                <MdBarChart size={24} className="text-gray-300" />
+              </div>
+              <p className="text-[#9CA3AF] text-sm font-medium">Select a sales person and click Generate Report</p>
+            </div>
+          ) : attendanceData.length === 0 ? (
+            <div className="py-20 text-center flex flex-col items-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+                <MdAccessTime size={24} className="text-gray-300" />
+              </div>
+              <p className="text-[#9CA3AF] text-sm font-medium">No attendance records found for this period</p>
+              <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline font-medium">Clear filters</button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-[#FAFAFA] border-b border-gray-100">
+                    {["Date", "Check In", "Check Out", "Duration", "Status"].map(h => (
+                      <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {sortedData.map((record, i) => {
+                    const { display } = calcDiff(record.checkInTime, record.checkOutTime);
+                    const sc = statusColor(record.checkInTime, record.checkOutTime);
+                    return (
+                      <tr key={record._id || i} className="table-row">
+                        <td className="px-4 py-3">
+                          <p className="text-[13px] font-semibold text-[#111827]">{formatDate(record.date)}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                              <MdLogin size={12} className="text-emerald-500" />
+                            </div>
+                            <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkInTime)}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                              <MdLogout size={12} className="text-red-400" />
+                            </div>
+                            <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkOutTime)}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-[13px] font-semibold text-[#111827]">{display}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${sc.pill}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
+                            {sc.label}
+                          </span>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {sortedData.map((record, i) => {
-                        const { display } = calcDiff(record.checkInTime, record.checkOutTime);
-                        const sc = statusColor(record.checkInTime, record.checkOutTime);
-                        return (
-                          <tr key={record._id || i} className="table-row">
+                    );
+                  })}
+                </tbody>
+              </table>
 
-                            {/* Date */}
-                            <td className="px-4 py-3">
-                              <p className="text-[13px] font-semibold text-[#111827]">{formatDate(record.date)}</p>
-                            </td>
-
-                            {/* Check In */}
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
-                                  <MdLogin size={12} className="text-emerald-500" />
-                                </div>
-                                <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkInTime)}</span>
-                              </div>
-                            </td>
-
-                            {/* Check Out */}
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                                  <MdLogout size={12} className="text-red-400" />
-                                </div>
-                                <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkOutTime)}</span>
-                              </div>
-                            </td>
-
-                            {/* Duration */}
-                            <td className="px-4 py-3">
-                              <span className="text-[13px] font-semibold text-[#111827]">{display}</span>
-                            </td>
-
-                            {/* Status */}
-                            <td className="px-4 py-3">
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${sc.pill}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-                                {sc.label}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-
-                  {/* Summary footer */}
-                  <div className="px-5 py-4 bg-[#FAFAFA] border-t border-gray-100 flex items-center justify-between">
-                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
-                      {sortedData.length} record{sortedData.length !== 1 ? "s" : ""}
-                    </p>
-                    <span className="inline-flex items-center gap-2 text-[14px] font-bold text-[#111827]">
-                      <MdTimer size={16} className="text-[#FF5934]" />
-                      Total: {calcTotal(attendanceData)}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </>
-          
-
-          
+              {/* Summary footer */}
+              <div className="px-5 py-4 bg-[#FAFAFA] border-t border-gray-100 flex items-center justify-between">
+                <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
+                  {sortedData.length} record{sortedData.length !== 1 ? "s" : ""}
+                </p>
+                <span className="inline-flex items-center gap-2 text-[14px] font-bold text-[#111827]">
+                  <MdTimer size={16} className="text-[#FF5934]" />
+                  Total: {calcTotal(attendanceData)}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>

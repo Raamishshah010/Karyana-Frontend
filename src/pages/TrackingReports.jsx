@@ -489,7 +489,7 @@ const TrackingReports = () => {
               </div>
 
               {/* Date From */}
-              <div className="flex-1 min-w-[150px]">
+              {/* <div className="flex-1 min-w-[150px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                   <MdCalendarToday size={12} className="text-[#FF5934]" /> From
                 </label>
@@ -499,10 +499,10 @@ const TrackingReports = () => {
                   onChange={e => setStartDate(e.target.value)}
                   className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-[#111827] outline-none w-full focus:border-[#FF5934] transition-all"
                 />
-              </div>
+              </div> */}
 
               {/* Date To */}
-              <div className="flex-1 min-w-[150px]">
+              {/* <div className="flex-1 min-w-[150px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                   <MdCalendarToday size={12} className="text-[#FF5934]" /> To
                 </label>
@@ -513,7 +513,7 @@ const TrackingReports = () => {
                   onChange={e => setEndDate(e.target.value)}
                   className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-[#111827] outline-none w-full focus:border-[#FF5934] transition-all"
                 />
-              </div>
+              </div> */}
 
               {/* Buttons */}
               <div className="flex gap-2 flex-shrink-0">
