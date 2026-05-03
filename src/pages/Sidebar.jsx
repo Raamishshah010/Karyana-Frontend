@@ -34,6 +34,7 @@ import {
   MdSupervisorAccount,
   MdWarehouse,
   MdBadge,
+  MdMenuBook,   // ← Catalogue group icon
 } from 'react-icons/md';
 import { useSelector } from 'react-redux';
 import { ROLES } from '../utils';
@@ -69,8 +70,6 @@ const NavItem = ({ to, icon: Icon, label, badge, collapsed }) => (
 
 /* ─────────────────────────────────────────
    Portal-based flyout for collapsed mode
-   Renders into document.body so it is NEVER
-   clipped by overflow:hidden / overflow:auto
 ───────────────────────────────────────── */
 const FlyoutPortal = ({ anchorRef, children, label, onMouseEnter, onMouseLeave }) => {
   const [style, setStyle] = useState({});
@@ -114,7 +113,6 @@ const NavGroup = ({ icon: Icon, label, children, collapsed, defaultOpen = false 
   const showFlyout = () => { clearTimeout(hideTimer.current); setFlyoutOpen(true); };
   const hideFlyout = () => { hideTimer.current = setTimeout(() => setFlyoutOpen(false), 150); };
 
-  /* Close flyout if sidebar expands */
   useEffect(() => { if (!collapsed) setFlyoutOpen(false); }, [collapsed]);
 
   if (collapsed) {
@@ -146,7 +144,6 @@ const NavGroup = ({ icon: Icon, label, children, collapsed, defaultOpen = false 
     );
   }
 
-  /* ── Expanded: accordion ── */
   return (
     <div className="mx-2 my-[2px]">
       <button
@@ -282,9 +279,7 @@ const Sidebar = () => {
           )}
         </div>
 
-        {/* ── Navigation ──
-            KEY FIX: when collapsed, use overflow-visible so portal flyouts
-            aren't visually clipped. Scrolling still works via the inner wrapper. ── */}
+        {/* ── Navigation ── */}
         <nav
           className={`flex-1 py-2 nav-scroll ${collapsed ? 'overflow-visible' : 'overflow-y-auto'}`}
         >
@@ -305,10 +300,13 @@ const Sidebar = () => {
               <NavItem to="/Users/Sales"         icon={FaRegUser}       label="Users"                 collapsed={collapsed} />
               <NavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Attendance & Tracking" collapsed={collapsed} />
 
-              <SectionLabel collapsed={collapsed}>Catalog</SectionLabel>
-              <NavItem to="/Product"    icon={MdInventory2} label="Product"    collapsed={collapsed} />
-              <NavItem to="/Categories" icon={MdCategory}   label="Categories" collapsed={collapsed} />
-              <NavItem to="/Brands"     icon={SlDiamond}    label="Brands"     collapsed={collapsed} />
+              {/* Catalogue group for Coordinator */}
+              <SectionLabel collapsed={collapsed}>Catalogue</SectionLabel>
+              <NavGroup icon={MdMenuBook} label="Catalogue" collapsed={collapsed}>
+                <SubNavItem to="/Product"    icon={MdInventory2} label="Inventory"   />
+                <SubNavItem to="/Brands"     icon={SlDiamond}    label="Brands"      />
+                <SubNavItem to="/Categories" icon={MdCategory}   label="Categories"  />
+              </NavGroup>
 
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
               <NavItem to="/Order"  icon={MdShoppingCart} label="Orders" collapsed={collapsed} />
@@ -322,7 +320,6 @@ const Sidebar = () => {
               <SectionLabel collapsed={collapsed}>Overview</SectionLabel>
               <NavItem to="/Dashboard" icon={MdDashboard} label="Dashboard" collapsed={collapsed} />
 
-              
               <NavGroup icon={MdPointOfSale} label="Sales" collapsed={collapsed}>
                 <SubNavItem to="/Users/Retailers" icon={MdPeople}       label="Customers" />
                 <SubNavItem to="/Order"           icon={MdShoppingCart} label="Orders"    />
@@ -330,14 +327,9 @@ const Sidebar = () => {
                 <SubNavItem to="/Sales/Payments"  icon={MdPayment}      label="Payments"  />
               </NavGroup>
 
-              {/* <NavGroup icon={MdAutorenew} label="Recovery" collapsed={collapsed}>
-                <SubNavItem to="/Recovery"     icon={MdListAlt}          label="Recovery Listing" />
-                <SubNavItem to="/Recovery/Add" icon={MdAddCircleOutline} label="Add Recovery"     />
-              </NavGroup> */}
-
               <NavGroup icon={MdFingerprint} label="Attendance" collapsed={collapsed}>
-                <SubNavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Check-In/Out"       />
-                <SubNavItem to="/visit-duration"  icon={MdHistory}       label="Visit Duration" />
+                <SubNavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Check-In/Out"   />
+                <SubNavItem to="/visit-duration"      icon={MdHistory}       label="Visit Duration" />
               </NavGroup>
 
               <NavGroup icon={MdMap} label="Tracking" collapsed={collapsed}>
@@ -356,34 +348,26 @@ const Sidebar = () => {
                 <SubNavItem to="/Users/Sales"             icon={MdBadge}             label="Sales Person"       />
               </NavGroup>
 
+              {/* ── Catalogue group (replaces the flat Catalog section) ── */}
+              <NavGroup icon={MdMenuBook} label="Catalogue" collapsed={collapsed}>
+                <SubNavItem to="/Product"    icon={MdInventory2}  label="Inventory"   />
+                <SubNavItem to="/Brands"     icon={SlDiamond}     label="Brands"      />
+                <SubNavItem to="/Categories" icon={MdCategory}    label="Categories"  />
+              </NavGroup>
 
               <NavGroup icon={MdAssessment} label="Reports" collapsed={collapsed}>
                 <SubNavItem to="/Reports/Sales"           icon={MdPointOfSale} label="Sales"                 />
-                <SubNavItem to="/Product"                 icon={MdInventory2}  label="Inventory"             />
+                {/* <SubNavItem to="/Product"                 icon={MdInventory2}  label="Inventory"             /> */}
                 <SubNavItem to="/Reports/Recovery"        icon={MdAutorenew}   label="Recovery"              />
                 <SubNavItem to="/Reports/Attendance"      icon={MdFingerprint} label="Attendance"            />
                 <SubNavItem to="/Reports/CustomerLedger"  icon={MdReceipt}     label="Customer Ledger"       />
                 <SubNavItem to="/Reports/TargetVsAchieve" icon={FaBullseye}    label="Target vs Achievement" />
               </NavGroup>
 
-              <SectionLabel collapsed={collapsed}>Catalog</SectionLabel>
-              <NavItem to="/Brands"     icon={MdCategory}    label="Categories" collapsed={collapsed} />
-              <NavItem to="/Categories" icon={SlDiamond}     label="Brands"     collapsed={collapsed} />
-              <NavItem to="/coupon"     icon={RiCoupon3Line} label="Coupon"     collapsed={collapsed} />
-
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
-              <NavItem to="/Cities" icon={MdLocationOn} label="Locations" collapsed={collapsed} />
-              <NavItem to="/target" icon={FaBullseye}   label="Target"    collapsed={collapsed} />
-
-              <SectionLabel collapsed={collapsed}>Settings</SectionLabel>
-              <NavGroup icon={MdSettings} label="Settings" collapsed={collapsed}>
-                <SubNavItem to="/Settings/Profile" icon={MdPerson} label="Profile" />
-                <SubNavItem to="/login"            icon={CiLogout} label="Logout"  />
-              </NavGroup>
-
-              <SectionLabel collapsed={collapsed}>Legal</SectionLabel>
-              <NavItem to="/PrivacyPolicy" icon={MdPrivacyTip} label="Privacy Policy"     collapsed={collapsed} />
-              <NavItem to="/Terms"         icon={MdArticle}    label="Terms & Conditions" collapsed={collapsed} />
+              <NavItem to="/coupon" icon={RiCoupon3Line} label="Coupon"    collapsed={collapsed} />
+              <NavItem to="/Cities" icon={MdLocationOn}  label="Locations" collapsed={collapsed} />
+              <NavItem to="/target" icon={FaBullseye}    label="Target"    collapsed={collapsed} />
             </>
           )}
         </nav>
