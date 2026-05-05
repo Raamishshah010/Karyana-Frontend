@@ -58,6 +58,9 @@ import SalesPayments from './pages/SalesPayments.jsx';
 import VisitDuration from './pages/VisitDuration.jsx';
 import TrackingLoaction from './pages/TrackingLoaction.jsx';
 import TrackingReports from './pages/TrackingReports.jsx';
+import ReportsSales from './pages/ReportsSales.jsx';
+import ReportsRecovery from './pages/ReportsRecovery.jsx';
+import ReportsTargetVsAchieve from './pages/ReportsTargetVsAchieve.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -168,6 +171,11 @@ const App = () => {
               </Route>
               <Route path="/PrivacyPolicy" element={<PrivacyPolicy />} />
               <Route path="/Terms" element={<Terms />} />
+
+
+              <Route path="/Reports/Sales" element={<ReportsSales />} />
+              <Route path="/Reports/Recovery" element={<ReportsRecovery />} />
+              <Route path="/Reports/TargetVsAchieve" element={<ReportsTargetVsAchieve />} />
             </Routes>
           </div>
         </div>
