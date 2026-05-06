@@ -1,1055 +1,662 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { getAllSalesPersons, getTargetsBySalesperson } from '../APIS';
+import { toast } from 'react-toastify';
+import { GrFormPrevious, GrFormNext } from 'react-icons/gr';
 import {
-  getAllSalesPersons,
-  getTargetsBySalesperson,
-  getOrdersBySalesPersonAndDate,
-} from "../APIS";
-import { Loader } from "../components/common/loader";
-import {
-  MdRefresh,
-  MdFilterList,
-  MdExpandMore,
-  MdPictureAsPdf,
-  MdGridOn,
-  MdWarning,
-  MdBarChart,
-  MdBugReport,
-} from "react-icons/md";
-import jsPDF from "jspdf";
-import * as XLSX from "xlsx";
+  MdRefresh, MdFilterList, MdExpandMore,
+  MdPictureAsPdf, MdGridOn, MdBarChart, MdCalendarToday,
+  MdCheckCircle, MdSearch, MdClose,
+} from 'react-icons/md';
+import jsPDF from 'jspdf';
+import * as XLSX from 'xlsx';
+import placeholder from '../assets/placehold.jpg';
 
-// ============================================================
-// UTILITY FUNCTIONS
-// ============================================================
+/* ─── constants ─── */
+const MONTHS = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+];
+const getMonthName   = (n) => MONTHS[parseInt(n) - 1] || '';
+const getMonthNumber = (name) => MONTHS.indexOf(name) + 1;
+const fmtNum = (n) => (!n && n !== 0 ? 0 : Number(n).toLocaleString('en-PK'));
+const pctColor = (p) => p >= 80 ? '#16a34a' : p >= 60 ? '#d97706' : '#dc2626';
+const pctBg    = (p) => p >= 80 ? '#f0fdf4' : p >= 60 ? '#fffbeb' : '#fef2f2';
+const ROWS_PER_PAGE  = 10;
 
-const formatCurrency = (val) => {
-  if (val === null || val === undefined || val === "") return "—";
-  const num = Number(val);
-  if (Number.isNaN(num)) return "—";
-  return new Intl.NumberFormat("en-PK", {
-    style: "currency",
-    currency: "PKR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(num);
+/* ─── status badge ─── */
+const getStatus = (pct) => {
+  if (pct >= 100) return { label: 'Achieved',    color: 'emerald' };
+  if (pct >= 80)  return { label: 'On Track',    color: 'blue'    };
+  if (pct >= 60)  return { label: 'In Progress', color: 'amber'   };
+  return           { label: 'Behind',            color: 'red'     };
+};
+const statusColors = {
+  emerald: { bg:'#f0fdf4', border:'#bbf7d0', text:'#16a34a', dot:'#16a34a' },
+  blue:    { bg:'#eff6ff', border:'#bfdbfe', text:'#2563eb', dot:'#2563eb' },
+  amber:   { bg:'#fffbeb', border:'#fde68a', text:'#d97706', dot:'#f59e0b' },
+  red:     { bg:'#fef2f2', border:'#fecaca', text:'#dc2626', dot:'#ef4444' },
 };
 
-const formatNumber = (val) => {
-  if (val === null || val === undefined || val === "") return "0";
-  const num = Number(val);
-  if (Number.isNaN(num)) return "0";
-  return num.toLocaleString("en-PK", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
-};
-
-const formatPercent = (val) => {
-  if (val === null || val === undefined || val === "") return "0%";
-  const num = Number(val);
-  if (Number.isNaN(num)) return "0%";
-  return `${num.toFixed(1)}%`;
-};
-
-const safeNumber = (val) => {
-  const num = Number(val);
-  return Number.isFinite(num) ? num : 0;
-};
-
-const getLocalDateString = (date) => {
-  const d = date instanceof Date ? date : new Date(date);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const getTodayLocal = () => getLocalDateString(new Date());
-
-const getFirstDayOfMonthLocal = () => {
-  const d = new Date();
-  d.setDate(1);
-  return getLocalDateString(d);
-};
-
-const extractArray = (res) => {
-  const candidates = [
-    res?.data,
-    res?.data?.data,
-    res?.data?.records,
-    res?.data?.result,
-    res?.data?.items,
-    res?.records,
-    res?.result,
-    res?.items,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) return candidate;
-  }
-  return [];
-};
-
-const pickNumber = (obj, keys = []) => {
-  for (const key of keys) {
-    const value = obj?.[key];
-    const num = Number(value);
-    if (Number.isFinite(num)) return num;
-  }
-  return 0;
-};
-
-const getAuthToken = () => {
-  return (
-    localStorage.getItem("token") ||
-    localStorage.getItem("authToken") ||
-    localStorage.getItem("x-auth-token") ||
-    ""
-  );
-};
-
-const getStatusColor = (achieved, target) => {
-  if (!target || target === 0) return { label: "N/A", color: "gray" };
-  const percent = (achieved / target) * 100;
-  if (percent >= 100) return { label: "Achieved", color: "emerald" };
-  if (percent >= 80) return { label: "On Track", color: "blue" };
-  if (percent >= 60) return { label: "In Progress", color: "amber" };
-  return { label: "Behind", color: "red" };
-};
-
-const sumTargets = (targets = []) => {
-  return targets.reduce((sum, t) => {
-    return (
-      sum +
-      pickNumber(t, [
-        "targetAmount",
-        "targetValue",
-        "target",
-        "amount",
-        "monthlyTarget",
-        "currentTarget",
-        "targetQty",
-      ])
-    );
-  }, 0);
-};
-
-const sumAchievements = (orders = []) => {
-  return orders.reduce((sum, o) => {
-    return (
-      sum +
-      pickNumber(o, [
-        "achievedAmount",
-        "totalAmount",
-        "grandTotal",
-        "netAmount",
-        "total",
-        "amount",
-        "orderTotal",
-        "invoiceTotal",
-      ])
-    );
-  }, 0);
-};
-
-// ============================================================
-// MAIN COMPONENT
-// ============================================================
-
+/* ════════════════════════════════════════
+   MAIN COMPONENT
+════════════════════════════════════════ */
 const ReportsTargetVsAchieve = () => {
+  /* ── data ── */
   const [salesPersons, setSalesPersons] = useState([]);
-  const [selectedSalesPerson, setSelectedSalesPerson] = useState(null);
-  const [dateFrom, setDateFrom] = useState(getFirstDayOfMonthLocal());
-  const [dateTo, setDateTo] = useState(getTodayLocal());
-  const [reportData, setReportData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [spSearch, setSpSearch] = useState("");
-  const [spDropOpen, setSpDropOpen] = useState(false);
-  const [generated, setGenerated] = useState(false);
-  const [error, setError] = useState("");
-  const [debugMode, setDebugMode] = useState(false); // Debug toggle
-  const [apiErrors, setApiErrors] = useState([]); // Track API errors for debugging
+  const [reportData,   setReportData]   = useState([]);
+  const [loading,      setLoading]      = useState(false);
+  const [generated,    setGenerated]    = useState(false);
 
-  const loadSalesPersons = useCallback(async () => {
-    try {
-      console.log("📥 Loading sales persons...");
-      const res = await getAllSalesPersons();
-      const list = extractArray(res);
-      
-      console.log(`✅ Loaded ${list.length} sales persons`, list);
-      setSalesPersons(list);
-      
-      if (list.length === 0) {
-        setError("No sales persons found in the system");
+  /* ── filters ── */
+  const [selectedMonth, setSelectedMonth]       = useState(String(new Date().getMonth() + 1));
+  const [selectedSP,    setSelectedSP]          = useState('');     // '' = all
+  const [spDropOpen,    setSpDropOpen]           = useState(false);
+  const [spSearch,      setSpSearch]             = useState('');
+  const [monthDropOpen, setMonthDropOpen]        = useState(false);
+
+  /* ── pagination ── */
+  const [currentPage, setCurrentPage] = useState(1);
+
+  /* ── close dropdowns on outside click ── */
+  useEffect(() => {
+    const h = (e) => {
+      if (!e.target.closest('.rta-dropdown-wrap')) {
+        setSpDropOpen(false);
+        setMonthDropOpen(false);
       }
-    } catch (err) {
-      console.error("❌ Error loading sales persons:", err);
-      setError(`Failed to load sales persons: ${err?.message || "Unknown error"}`);
-      setSalesPersons([]);
-    }
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const fetchReport = useCallback(
-    async ({ salespersonId = null, from = dateFrom, to = dateTo } = {}) => {
-      setLoading(true);
-      setError("");
-      setApiErrors([]); // Clear previous errors
+  /* ── load sales persons ── */
+  useEffect(() => {
+    getAllSalesPersons()
+      .then(res => setSalesPersons(res?.data?.data || []))
+      .catch(() => toast.error('Failed to load sales persons'));
+  }, []);
 
-      try {
-        const token = getAuthToken();
-        
-        if (!token) {
-          setError("⚠️ Authentication token not found. Please login again.");
-          setLoading(false);
-          return;
-        }
+  /* ── FETCH REPORT ──────────────────────────────────────────
+     Uses getTargetsBySalesperson exactly like Target.jsx does.
+     Target.jsx reads:  t.target, t.achieved, t.month, t.salesperson
+     We do the same — just also filter by the selected month.
+  ─────────────────────────────────────────────────────────── */
+  const fetchReport = useCallback(async ({ spId = '', month = selectedMonth } = {}) => {
+    setLoading(true);
+    setGenerated(false);
+    setReportData([]);
+    setCurrentPage(1);
 
-        console.log(`\n🔍 Fetching report for:`, {
-          salespersonId: salespersonId || "All",
-          from,
-          to,
-          tokenExists: !!token,
-        });
+    try {
+      const monthName = getMonthName(month); // e.g. "May"
 
-        const personsToProcess = salespersonId
-          ? salesPersons.filter((sp) => sp?._id === salespersonId)
-          : salesPersons;
+      /* persons to process */
+      const persons = spId
+        ? salesPersons.filter(s => s._id === spId)
+        : salesPersons;
 
-        if (!personsToProcess.length) {
-          setReportData([]);
-          setGenerated(true);
-          setError("No sales persons found to process");
-          setLoading(false);
-          return;
-        }
-
-        console.log(`📊 Processing ${personsToProcess.length} salesperson(s)`);
-
-        const rows = await Promise.all(
-          personsToProcess.map(async (sp) => {
-            try {
-              console.log(`\n  📍 Processing: ${sp.name} (${sp._id})`);
-
-              // Log what we're sending to the API
-              const requestData = {
-                salesPersonId: sp._id,
-                startDate: from,
-                endDate: to,
-              };
-              console.log(`     📤 Sending request:`, requestData);
-
-              const [targetsRes, ordersRes] = await Promise.all([
-                getTargetsBySalesperson(sp._id),
-                getOrdersBySalesPersonAndDate(requestData, token),
-              ]);
-
-              const targets = extractArray(targetsRes);
-              const orders = extractArray(ordersRes);
-
-              console.log(`     ✅ Got ${targets.length} targets and ${orders.length} orders`);
-
-              const totalTarget = sumTargets(targets);
-              const totalAchievement = sumAchievements(orders);
-              const pending = Math.max(totalTarget - totalAchievement, 0);
-
-              return {
-                salespersonId: sp._id,
-                salespersonName: sp.name || sp.fullName || sp.email || "—",
-                email: sp.email || "",
-                totalTarget,
-                totalAchievement,
-                pending,
-                achievementPercent:
-                  totalTarget > 0 ? (totalAchievement / totalTarget) * 100 : 0,
-                status: getStatusColor(totalAchievement, totalTarget),
-              };
-            } catch (err) {
-              console.error(`  ❌ Error processing ${sp.name}:`, err);
-              
-              // Capture error details for debugging
-              const errorInfo = {
-                salespersonName: sp.name,
-                salespersonId: sp._id,
-                errorStatus: err.response?.status,
-                errorMessage: err.response?.data?.message || err.message,
-                errorData: err.response?.data,
-              };
-              
-              setApiErrors((prev) => [...prev, errorInfo]);
-
-              return {
-                salespersonId: sp._id,
-                salespersonName: sp.name || sp.fullName || sp.email || "—",
-                email: sp.email || "",
-                totalTarget: 0,
-                totalAchievement: 0,
-                pending: 0,
-                achievementPercent: 0,
-                status: { label: "Error", color: "gray" },
-                error: err?.response?.data?.message || err?.message || "Failed to load",
-              };
-            }
-          })
-        );
-
-        rows.sort((a, b) => b.achievementPercent - a.achievementPercent);
-
-        console.log(`\n✨ Report generated with ${rows.length} rows`, rows);
-        setReportData(rows);
-        setGenerated(true);
-
-        if (!rows.length) {
-          setError("No data found for the selected date range");
-        }
-      } catch (err) {
-        console.error("❌ Error fetching report:", err);
-        setError(`Failed to fetch report: ${err?.message || "Unknown error"}`);
-        setReportData([]);
-        setGenerated(true);
-      } finally {
+      if (!persons.length) {
+        toast.info('No sales persons found');
         setLoading(false);
+        setGenerated(true);
+        return;
       }
-    },
-    [dateFrom, dateTo, salesPersons]
-  );
 
-  useEffect(() => {
-    loadSalesPersons();
-  }, [loadSalesPersons]);
+      /* fetch targets for each person in parallel */
+      const results = await Promise.allSettled(
+        persons.map(async sp => {
+          try {
+            const res = await getTargetsBySalesperson(sp._id);
 
-  useEffect(() => {
-    if (salesPersons.length > 0 && !generated) {
-      fetchReport({ salespersonId: null, from: dateFrom, to: dateTo });
+            /* getTargetsBySalesperson returns { data: { data: [...] } }
+               same shape as getAllTargets → response.data.data           */
+            const targets = res?.data?.data || res?.data || [];
+            const arr = Array.isArray(targets) ? targets : [];
+
+            /* filter to selected month (same logic as Target.jsx) */
+            const monthTargets = arr.filter(t => {
+              const tMonth = typeof t.month === 'string'
+                ? t.month
+                : getMonthName(t.month);
+              return tMonth === monthName;
+            });
+
+            /* sum up (a salesperson may have multiple target entries) */
+            const totalTarget   = monthTargets.reduce((s, t) => s + (Number(t.target)   || 0), 0);
+            const totalAchieved = monthTargets.reduce((s, t) => s + (Number(t.achieved)  || 0), 0);
+            const pending       = Math.max(totalTarget - totalAchieved, 0);
+            const pct           = totalTarget > 0 ? (totalAchieved / totalTarget) * 100 : 0;
+
+            return {
+              spId:       sp._id,
+              name:       sp.name  || '—',
+              email:      sp.email || '',
+              image:      sp.image || null,
+              city:       sp.city?.name || '',
+              totalTarget,
+              totalAchieved,
+              pending,
+              pct,
+              status:     getStatus(pct),
+              hasTarget:  monthTargets.length > 0,
+            };
+          } catch {
+            return {
+              spId:       sp._id,
+              name:       sp.name || '—',
+              email:      sp.email || '',
+              image:      sp.image || null,
+              city:       '',
+              totalTarget:   0,
+              totalAchieved: 0,
+              pending:       0,
+              pct:           0,
+              status:     getStatus(0),
+              hasTarget:  false,
+            };
+          }
+        })
+      );
+
+      const rows = results
+        .filter(r => r.status === 'fulfilled')
+        .map(r => r.value)
+        .filter(r => r.hasTarget) // only show rows that actually have a target for this month
+        .sort((a, b) => b.pct - a.pct);
+
+      setReportData(rows);
+      setGenerated(true);
+
+      if (!rows.length) toast.info(`No targets found for ${monthName}`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to generate report');
+      setGenerated(true);
+    } finally {
+      setLoading(false);
     }
+  }, [salesPersons, selectedMonth]);
+
+  /* auto-generate when salesPersons first load */
+  useEffect(() => {
+    if (salesPersons.length && !generated) {
+      fetchReport({ spId: selectedSP, month: selectedMonth });
+    }
+  // eslint-disable-next-line
   }, [salesPersons.length]);
 
-  const filteredSP = useMemo(() => {
-    const q = spSearch.toLowerCase().trim();
-    if (!q) return salesPersons;
-    return salesPersons.filter((sp) => {
-      const name = (sp?.name || "").toLowerCase();
-      const email = (sp?.email || "").toLowerCase();
-      return name.includes(q) || email.includes(q);
-    });
-  }, [salesPersons, spSearch]);
+  /* ── derived totals ── */
+  const totals = useMemo(() => ({
+    target:   reportData.reduce((s, r) => s + r.totalTarget,   0),
+    achieved: reportData.reduce((s, r) => s + r.totalAchieved, 0),
+    pending:  reportData.reduce((s, r) => s + r.pending,       0),
+  }), [reportData]);
+  const overallPct = totals.target > 0
+    ? ((totals.achieved / totals.target) * 100).toFixed(1)
+    : '0.0';
 
-  const selectedPerson = useMemo(
-    () => salesPersons.find((s) => s?._id === selectedSalesPerson),
-    [salesPersons, selectedSalesPerson]
+  /* ── pagination ── */
+  const totalPages = Math.max(1, Math.ceil(reportData.length / ROWS_PER_PAGE));
+  const paginated  = reportData.slice(
+    (currentPage - 1) * ROWS_PER_PAGE,
+    currentPage * ROWS_PER_PAGE,
   );
 
-  const totals = useMemo(() => {
-    return reportData.reduce(
-      (acc, r) => {
-        acc.targetQty += safeNumber(r.totalTarget);
-        acc.achievedQty += safeNumber(r.totalAchievement);
-        acc.pendingQty += safeNumber(r.pending);
-        return acc;
-      },
-      { targetQty: 0, achievedQty: 0, pendingQty: 0 }
-    );
-  }, [reportData]);
+  /* ── dropdown helpers ── */
+  const filteredSPs = salesPersons.filter(s =>
+    (s.name || '').toLowerCase().includes(spSearch.toLowerCase()) ||
+    (s.email || '').toLowerCase().includes(spSearch.toLowerCase())
+  );
+  const selectedSPObj = salesPersons.find(s => s._id === selectedSP);
 
-  const overallPercent =
-    totals.targetQty > 0 ? ((totals.achievedQty / totals.targetQty) * 100).toFixed(1) : "0.0";
-
-  const handleGenerateReport = async () => {
-    if (!dateFrom || !dateTo) {
-      setError("Please select both From and To dates");
-      return;
-    }
-
-    if (new Date(dateFrom) > new Date(dateTo)) {
-      setError("From date cannot be after To date");
-      return;
-    }
-
-    await fetchReport({
-      salespersonId: selectedSalesPerson,
-      from: dateFrom,
-      to: dateTo,
-    });
+  /* ── handlers ── */
+  const handleGenerate = () => {
+    fetchReport({ spId: selectedSP, month: selectedMonth });
   };
 
-  const handleReset = async () => {
-    const from = getFirstDayOfMonthLocal();
-    const to = getTodayLocal();
-
-    setSelectedSalesPerson(null);
-    setDateFrom(from);
-    setDateTo(to);
-    setSpSearch("");
-    setSpDropOpen(false);
+  const handleReset = () => {
+    setSelectedSP('');
+    setSelectedMonth(String(new Date().getMonth() + 1));
+    setSpSearch('');
+    setCurrentPage(1);
     setGenerated(false);
-    setError("");
     setReportData([]);
-    setApiErrors([]);
-
-    await fetchReport({
-      salespersonId: null,
-      from,
-      to,
-    });
+    setTimeout(() => {
+      fetchReport({ spId: '', month: String(new Date().getMonth() + 1) });
+    }, 0);
   };
 
+  /* ── export Excel ── */
   const handleExportExcel = () => {
-    if (!reportData.length) {
-      alert("No data to export");
-      return;
-    }
-
-    const data = reportData.map((r) => ({
-      "Sales Person": r.salespersonName,
-      Email: r.email,
-      "Total Target": r.totalTarget,
-      "Total Achievement": r.totalAchievement,
-      Pending: r.pending,
-      "Achievement %": `${safeNumber(r.achievementPercent).toFixed(1)}%`,
-      Status: r.status?.label || "—",
+    if (!reportData.length) { toast.info('No data to export'); return; }
+    const rows = reportData.map(r => ({
+      'Sales Person':     r.name,
+      'Email':            r.email,
+      'City':             r.city,
+      'Month':            getMonthName(selectedMonth),
+      'Target':           r.totalTarget,
+      'Achieved':         r.totalAchieved,
+      'Pending':          r.pending,
+      'Achievement %':    `${r.pct.toFixed(1)}%`,
+      'Status':           r.status.label,
     }));
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    ws["!cols"] = [
-      { wch: 24 },
-      { wch: 28 },
-      { wch: 16 },
-      { wch: 18 },
-      { wch: 12 },
-      { wch: 16 },
-      { wch: 14 },
-    ];
-
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch:22 },{ wch:28 },{ wch:15 },{ wch:12 },{ wch:12 },{ wch:12 },{ wch:12 },{ wch:14 },{ wch:14 }];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Report");
-
-    const person = selectedPerson?.name || "All-Salespersons";
-    XLSX.writeFile(wb, `target-report-${person}-${dateFrom}-${dateTo}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Target Report');
+    XLSX.writeFile(wb, `Target_Report_${getMonthName(selectedMonth)}.xlsx`);
+    toast.success('Exported successfully');
   };
 
+  /* ── export PDF ── */
   const handleExportPdf = () => {
-    if (!reportData.length) {
-      alert("No data to export");
-      return;
-    }
+    if (!reportData.length) { toast.info('No data to export'); return; }
+    const doc      = new jsPDF();
+    const pw       = doc.internal.pageSize.getWidth();
+    const ph       = doc.internal.pageSize.getHeight();
+    const margin   = 12;
+    let y          = 0;
 
-    const doc = new jsPDF();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 10;
-    let y = 15;
-
+    /* header band */
     doc.setFillColor(255, 89, 52);
-    doc.rect(0, 0, pageWidth, 20, "F");
+    doc.rect(0, 0, pw, 22, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("Target vs Achievement Report", margin, 12);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Target vs Achievement Report', margin, 14);
+    doc.setFontSize(9);
+    doc.text(`${getMonthName(selectedMonth)} • Generated ${new Date().toLocaleDateString('en-GB')}`, pw - margin, 14, { align:'right' });
 
-    const person = selectedPerson?.name || "All Salespersons";
+    y = 30;
     doc.setTextColor(80, 80, 80);
-    doc.setFont("helvetica", "normal");
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.text(`Sales Person: ${person}`, margin, y + 10);
-    doc.text(`Date Range: ${dateFrom} to ${dateTo}`, margin + 70, y + 10);
-    doc.text(
-      `Generated: ${new Date().toLocaleDateString("en-GB")}`,
-      pageWidth - margin - 55,
-      y + 10
-    );
-
-    y += 20;
-
-    const cols = ["Sales Person", "Target", "Achieved", "Pending", "Achievement %"];
-    const colWidths = [55, 30, 30, 30, 30];
-
-    doc.setFillColor(240, 240, 240);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-
-    let x = margin;
-    cols.forEach((col, i) => {
-      doc.rect(x, y, colWidths[i], 8, "FD");
-      doc.text(col, x + 2, y + 5);
-      x += colWidths[i];
-    });
-
+    doc.text(`Overall: ${overallPct}% achieved | Target: ${fmtNum(totals.target)} | Achieved: ${fmtNum(totals.achieved)} | Pending: ${fmtNum(totals.pending)}`, margin, y);
     y += 8;
-    doc.setFont("helvetica", "normal");
+
+    const cols    = ['Sales Person', 'City', 'Target', 'Achieved', 'Pending', 'Achiev. %', 'Status'];
+    const widths  = [50, 28, 24, 24, 24, 22, 22];
+
+    /* thead */
+    doc.setFillColor(250, 250, 250);
+    doc.setDrawColor(229, 231, 235);
+    doc.rect(margin, y, pw - margin * 2, 8, 'FD');
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
+    doc.setTextColor(107, 114, 128);
+    let x = margin + 2;
+    cols.forEach((c, i) => { doc.text(c, x, y + 5); x += widths[i]; });
+    y += 8;
 
-    reportData.forEach((row) => {
-      if (y > pageHeight - 15) {
-        doc.addPage();
-        y = 15;
-      }
-
-      x = margin;
-      const rowData = [
-        row.salespersonName || "—",
-        `${row.totalTarget || 0}`,
-        `${row.totalAchievement || 0}`,
-        `${row.pending || 0}`,
-        `${safeNumber(row.achievementPercent).toFixed(1)}%`,
+    /* rows */
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(55, 65, 81);
+    reportData.forEach(row => {
+      if (y > ph - 16) { doc.addPage(); y = 16; }
+      doc.setDrawColor(243, 244, 246);
+      doc.rect(margin, y, pw - margin * 2, 7, 'D');
+      x = margin + 2;
+      const cells = [
+        String(row.name).substring(0, 26),
+        String(row.city).substring(0, 14),
+        fmtNum(row.totalTarget),
+        fmtNum(row.totalAchieved),
+        fmtNum(row.pending),
+        `${row.pct.toFixed(1)}%`,
+        row.status.label,
       ];
-
-      rowData.forEach((val, i) => {
-        doc.rect(x, y, colWidths[i], 6, "D");
-        doc.text(String(val).substring(0, 22), x + 2, y + 4);
-        x += colWidths[i];
-      });
-
-      y += 6;
+      cells.forEach((val, i) => { doc.text(val, x, y + 4.5); x += widths[i]; });
+      y += 7;
     });
 
-    doc.save(`target-report-${person}-${dateFrom}-${dateTo}.pdf`);
+    doc.save(`Target_Report_${getMonthName(selectedMonth)}.pdf`);
+    toast.success('PDF exported');
   };
+
+  /* ── active filter count ── */
+  const activeFilters = [selectedSP, selectedMonth !== String(new Date().getMonth() + 1)].filter(Boolean).length;
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
-        .rta-page {
-          font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          background: linear-gradient(135deg, #f5f5f5 0%, #fafafa 100%);
-          min-height: 100vh;
-          padding: 24px 16px;
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+        .rta-page { font-family:'DM Sans','Segoe UI',sans-serif; }
+        .rta-page .table-row { transition:background 0.15s,box-shadow 0.15s; }
+        .rta-page .table-row:hover { background:#FFFAF9; box-shadow:0 0 0 1px #FFD7CE inset; }
+        .rta-page .rta-fselect {
+          appearance:none; -webkit-appearance:none;
+          background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+          background-repeat:no-repeat; background-position:right 10px center; padding-right:28px;
         }
-        .rta-card {
-          background: white;
-          border-radius: 12px;
-          border: 1px solid #e5e7eb;
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-          transition: all 0.2s;
-        }
-        .rta-card:hover { border-color: #d1d5db; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); }
-        .rta-btn {
-          padding: 8px 16px;
-          border-radius: 8px;
-          border: 1px solid transparent;
-          font-size: 13px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.15s;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          font-family: inherit;
-        }
-        .rta-btn-primary {
-          background: linear-gradient(135deg, #ff5934 0%, #ff4522 100%);
-          color: white;
-          box-shadow: 0 2px 8px rgba(255, 89, 52, 0.2);
-        }
-        .rta-btn-primary:hover:not(:disabled) {
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(255, 89, 52, 0.3);
-        }
-        .rta-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-        .rta-btn-secondary {
-          background: #f3f4f6;
-          color: #374151;
-          border: 1px solid #e5e7eb;
-        }
-        .rta-btn-secondary:hover { background: #eff0f5; }
+        .rta-no-scroll::-webkit-scrollbar { display:none; }
+        .rta-no-scroll { scrollbar-width:none; }
+        .rta-dropdown-wrap { position:relative; }
         .rta-input {
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-          border-radius: 8px;
-          padding: 8px 12px;
-          font-size: 13px;
-          font-family: inherit;
-          transition: all 0.15s;
+          background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px;
+          padding:10px 14px; font-size:13px; color:#111827; outline:none;
+          font-family:'DM Sans',sans-serif; width:100%; transition:border-color 0.15s,box-shadow 0.15s;
         }
-        .rta-input:focus {
-          outline: none;
-          border-color: #ff5934;
-          background: white;
-          box-shadow: 0 0 0 3px rgba(255, 89, 52, 0.1);
-        }
-        .rta-dropdown {
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          margin-top: 4px;
-          background: white;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-          max-height: 300px;
-          overflow-y: auto;
-          z-index: 50;
-        }
-        .rta-dropdown-item {
-          padding: 10px 12px;
-          cursor: pointer;
-          border-bottom: 1px solid #f3f4f6;
-          transition: background 0.1s;
-        }
-        .rta-dropdown-item:hover { background: #f9fafb; }
-        .rta-dropdown-item.active { background: rgba(255, 89, 52, 0.1); color: #ff5934; }
-        .rta-stat-card {
-          padding: 16px;
-          border-radius: 10px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-        }
-        .rta-stat-label {
-          font-size: 11px;
-          font-weight: 600;
-          color: #6b7280;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          margin-bottom: 6px;
-        }
-        .rta-stat-value {
-          font-size: 24px;
-          font-weight: 700;
-          color: #111827;
-        }
-        .rta-table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-        .rta-table thead tr { background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
-        .rta-table th {
-          padding: 12px;
-          text-align: left;
-          font-size: 12px;
-          font-weight: 600;
-          color: #6b7280;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          white-space: nowrap;
-        }
-        .rta-table td {
-          padding: 12px;
-          border-bottom: 1px solid #f3f4f6;
-          font-size: 13px;
-          color: #374151;
-          white-space: nowrap;
-        }
-        .rta-table tbody tr:hover { background: #f9fafb; }
-        .rta-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 10px;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          border: 1px solid;
-        }
-        @keyframes slideIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
-        .rta-animate { animation: slideIn 0.3s cubic-bezier(0.34, 1.2, 0.64, 1); }
-        .rta-empty { padding: 32px 16px; text-align: center; color: #9ca3af; }
-        .rta-error {
-          background: #fee2e2;
-          border: 1px solid #fecaca;
-          color: #991b1b;
-          padding: 12px;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 16px;
-        }
-        .rta-debug {
-          background: #f0f9ff;
-          border: 1px solid #bfdbfe;
-          color: #1e40af;
-          padding: 12px;
-          border-radius: 8px;
-          margin-bottom: 16px;
-          font-family: monospace;
-          font-size: 11px;
-          max-height: 300px;
-          overflow-y: auto;
-        }
-        .rta-no-scroll::-webkit-scrollbar { width: 6px; }
-        .rta-no-scroll::-webkit-scrollbar-track { background: #f3f4f6; }
-        .rta-no-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        .rta-input:focus { border-color:#FF5934; box-shadow:0 0 0 3px rgba(255,89,52,0.1); }
+        @keyframes rta-in { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
+        .rta-animate { animation:rta-in 0.22s ease both; }
+        @keyframes shimmer { 0%,100%{opacity:1} 50%{opacity:.4} }
+        .rta-skeleton { animation:shimmer 1.4s infinite; background:#F3F4F6; border-radius:8px; }
       `}</style>
 
       <div className="rta-page">
-        <div className="rta-animate" style={{ maxWidth: "1200px", margin: "0 auto" }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              marginBottom: "24px",
-              flexWrap: "wrap",
-              gap: "16px",
-            }}
-          >
-            <div>
-              <h2 style={{ fontSize: "24px", fontWeight: 700, color: "#111827", marginBottom: "4px" }}>
-                {selectedPerson?.name || "All Salespersons"}
-              </h2>
-              <p style={{ fontSize: "13px", color: "#6b7280" }}>
-                {dateFrom} to {dateTo}
-              </p>
+
+        {/* ── Page Header ── */}
+        <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
+          <div>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Target vs Achievement</h1>
+            <p className="text-sm text-[#9CA3AF] mt-0.5">
+              {generated
+                ? `${reportData.length} salesperson${reportData.length !== 1 ? 's' : ''} · ${getMonthName(selectedMonth)}${selectedSPObj ? ` · ${selectedSPObj.name}` : ''}`
+                : 'Select filters and generate report'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {generated && reportData.length > 0 && (
+              <>
+                <button onClick={handleExportExcel}
+                  className="flex items-center gap-1.5 bg-white border border-gray-200 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600 text-[#374151] text-sm font-semibold px-3 py-2 rounded-xl transition-all">
+                  <MdGridOn size={15} /> Excel
+                </button>
+                <button onClick={handleExportPdf}
+                  className="flex items-center gap-1.5 bg-white border border-gray-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 text-[#374151] text-sm font-semibold px-3 py-2 rounded-xl transition-all">
+                  <MdPictureAsPdf size={15} /> PDF
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Filter Card ── */}
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-5 mb-5">
+          <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-4 flex items-center gap-2">
+            <MdFilterList size={13} className="text-[#FF5934]" /> Filters
+            {activeFilters > 0 && (
+              <span className="w-5 h-5 rounded-full bg-[#FF5934] text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                {activeFilters}
+              </span>
+            )}
+          </p>
+
+          <div className="flex flex-wrap gap-4 items-end">
+
+            {/* Sales Person dropdown */}
+            <div className="flex-1 min-w-[200px] rta-dropdown-wrap">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdCalendarToday size={12} className="text-[#FF5934]" /> Sales Person
+              </label>
+              <div
+                className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                onClick={() => { setSpDropOpen(p => !p); setMonthDropOpen(false); }}
+              >
+                {selectedSPObj ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <img src={selectedSPObj.image || placeholder} alt=""
+                      className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                      onError={e => { e.target.src = placeholder; }} />
+                    <span className="text-[13px] text-[#111827] font-medium truncate">{selectedSPObj.name}</span>
+                  </div>
+                ) : (
+                  <span className="text-[13px] text-[#9CA3AF] flex-1">All salespersons</span>
+                )}
+                <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform flex-shrink-0 ${spDropOpen ? 'rotate-180' : ''}`} />
+              </div>
+
+              {spDropOpen && (
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden" style={{ top:'100%' }}>
+                  <div className="p-2 border-b border-gray-100">
+                    <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
+                      <MdSearch size={14} className="text-[#9CA3AF]" />
+                      <input autoFocus value={spSearch} onChange={e => setSpSearch(e.target.value)}
+                        placeholder="Search…"
+                        className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
+                      {spSearch && <button onClick={() => setSpSearch('')} className="text-[#9CA3AF] hover:text-[#FF5934]"><MdClose size={13} /></button>}
+                    </div>
+                  </div>
+                  <div className="max-h-52 overflow-y-auto rta-no-scroll">
+                    {/* All option */}
+                    <div onClick={() => { setSelectedSP(''); setSpDropOpen(false); setSpSearch(''); }}
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${!selectedSP ? 'bg-orange-50' : ''}`}>
+                      <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-[11px] font-bold text-gray-400">All</div>
+                      <div className="flex-1">
+                        <p className="text-[13px] font-medium text-[#374151]">All Salespersons</p>
+                        <p className="text-[11px] text-[#9CA3AF]">Combined report</p>
+                      </div>
+                      {!selectedSP && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                    </div>
+                    {filteredSPs.map(sp => (
+                      <div key={sp._id} onClick={() => { setSelectedSP(sp._id); setSpDropOpen(false); setSpSearch(''); }}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSP === sp._id ? 'bg-orange-50' : ''}`}>
+                        <img src={sp.image || placeholder} alt=""
+                          className="w-7 h-7 rounded-full object-cover flex-shrink-0 border border-gray-100"
+                          onError={e => { e.target.src = placeholder; }} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-medium text-[#111827] truncate">{sp.name}</p>
+                          <p className="text-[11px] text-[#9CA3AF] truncate">{sp.email}</p>
+                        </div>
+                        {selectedSP === sp._id && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                      </div>
+                    ))}
+                    {filteredSPs.length === 0 && (
+                      <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No results</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              <button 
-                className="rta-btn rta-btn-secondary" 
-                onClick={() => setDebugMode(!debugMode)}
-                title="Toggle debug mode"
+            {/* Month dropdown */}
+            <div className="flex-1 min-w-[180px] rta-dropdown-wrap">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdCalendarToday size={12} className="text-[#FF5934]" /> Month
+              </label>
+              <div
+                className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                onClick={() => { setMonthDropOpen(p => !p); setSpDropOpen(false); }}
               >
-                <MdBugReport size={16} /> Debug
+                <span className="text-[13px] text-[#111827] font-medium flex-1">{getMonthName(selectedMonth)}</span>
+                <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform flex-shrink-0 ${monthDropOpen ? 'rotate-180' : ''}`} />
+              </div>
+
+              {monthDropOpen && (
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden" style={{ top:'100%' }}>
+                  <div className="max-h-64 overflow-y-auto rta-no-scroll">
+                    {MONTHS.map((m, i) => {
+                      const val = String(i + 1);
+                      const isSelected = val === selectedMonth;
+                      return (
+                        <div key={m} onClick={() => { setSelectedMonth(val); setMonthDropOpen(false); }}
+                          className={`flex items-center justify-between px-4 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 last:border-0 ${isSelected ? 'bg-orange-50' : ''}`}>
+                          <span className={`text-[13px] font-medium ${isSelected ? 'text-[#FF5934]' : 'text-[#374151]'}`}>{m}</span>
+                          {isSelected && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-2 flex-shrink-0">
+              <button onClick={handleReset}
+                className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
+                <MdRefresh size={15} /> Reset
               </button>
-              <button className="rta-btn rta-btn-secondary" onClick={handleExportPdf} disabled={!reportData.length}>
-                <MdPictureAsPdf size={16} /> PDF
-              </button>
-              <button className="rta-btn rta-btn-secondary" onClick={handleExportExcel} disabled={!reportData.length}>
-                <MdGridOn size={16} /> Excel
-              </button>
-              <button className="rta-btn rta-btn-secondary" onClick={handleReset}>
-                <MdRefresh size={16} /> Refresh
+              <button onClick={handleGenerate} disabled={loading || !salesPersons.length}
+                className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2">
+                {loading
+                  ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Loading…</>
+                  : <><MdBarChart size={16} /> Generate</>
+                }
               </button>
             </div>
           </div>
+        </div>
 
-          {debugMode && apiErrors.length > 0 && (
-            <div className="rta-debug">
-              <strong>🐛 API Errors ({apiErrors.length}):</strong>
-              {apiErrors.map((err, idx) => (
-                <div key={idx} style={{ marginTop: "8px", padding: "8px", background: "white", borderRadius: "4px" }}>
-                  <div><strong>{err.salespersonName}</strong> ({err.salespersonId})</div>
-                  <div>Status: {err.errorStatus || "Unknown"}</div>
-                  <div>Message: {err.errorMessage}</div>
-                  {err.errorData && (
-                    <div style={{ marginTop: "4px", fontSize: "10px" }}>
-                      Data: {JSON.stringify(err.errorData)}
-                    </div>
-                  )}
+        {/* ── Loading ── */}
+        {loading && (
+          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm py-20 flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
+            <p className="text-[13px] text-[#9CA3AF]">Fetching targets for {getMonthName(selectedMonth)}…</p>
+          </div>
+        )}
+
+        {/* ── Results ── */}
+        {!loading && generated && (
+          <div className="rta-animate">
+            {/* Stat cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+              {[
+                { label:'Total Target',   value: fmtNum(totals.target),               color:'text-[#111827]',   bg:'bg-gray-50',        icon:'🎯' },
+                { label:'Total Achieved', value: fmtNum(totals.achieved),             color:'text-[#FF5934]',   bg:'bg-[#FF5934]/10',   icon:'✅' },
+                { label:'Overall %',      value: `${overallPct}%`,                    color: Number(overallPct) >= 80 ? 'text-emerald-600' : 'text-amber-600', bg: Number(overallPct) >= 80 ? 'bg-emerald-50' : 'bg-amber-50', icon:'📊' },
+                { label:'Pending',        value: fmtNum(totals.pending),              color:'text-red-500',     bg:'bg-red-50',         icon:'⏳' },
+              ].map(({ label, value, color, bg, icon }) => (
+                <div key={label} className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4">
+                  <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center flex-shrink-0 text-xl`}>{icon}</div>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-0.5">{label}</p>
+                    <p className={`text-[15px] font-bold truncate ${color}`}>{value}</p>
+                  </div>
                 </div>
               ))}
             </div>
-          )}
 
-          {error && (
-            <div className="rta-error">
-              <MdWarning size={18} />
-              <span>{error}</span>
-            </div>
-          )}
+            {/* Table */}
+            <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+              {reportData.length === 0 ? (
+                <div className="py-16 text-center flex flex-col items-center gap-3">
+                  <div className="text-4xl">📊</div>
+                  <p className="text-[#9CA3AF] text-sm font-medium">No targets found for {getMonthName(selectedMonth)}</p>
+                  <p className="text-[11px] text-[#9CA3AF]">Try a different month or add targets in Target Management</p>
+                </div>
+              ) : (
+                <>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-[#FAFAFA] border-b border-gray-100">
+                        {['#','Salesperson','City','Target','Achieved','Pending','Progress','Status'].map(h => (
+                          <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {paginated.map((row, i) => {
+                        const n  = (currentPage - 1) * ROWS_PER_PAGE + i + 1;
+                        const sc = statusColors[row.status.color] || statusColors.red;
+                        return (
+                          <tr key={row.spId} className="table-row">
+                            <td className="px-4 py-3 text-[12px] font-bold text-[#C4C9D4]">{n}</td>
 
-          <div className="rta-card" style={{ padding: "24px", marginBottom: "24px" }}>
-            <p
-              style={{
-                fontSize: "12px",
-                fontWeight: 600,
-                color: "#6b7280",
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-                marginBottom: "16px",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <MdFilterList size={16} style={{ color: "#ff5934" }} /> Filters
-            </p>
+                            {/* Salesperson */}
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="relative flex-shrink-0">
+                                  <img src={row.image || placeholder} alt={row.name}
+                                    className="w-9 h-9 rounded-full object-cover ring-2 ring-white shadow-sm"
+                                    onError={e => { e.target.src = placeholder; }} />
+                                </div>
+                                <div>
+                                  <p className="text-[13px] font-semibold text-[#111827] leading-tight">{row.name}</p>
+                                  <p className="text-[11px] text-[#9CA3AF]">{row.email}</p>
+                                </div>
+                              </div>
+                            </td>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: "16px",
-                marginBottom: "16px",
-              }}
-            >
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "#6b7280",
-                    marginBottom: "6px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Sales Person
-                </label>
+                            {/* City */}
+                            <td className="px-4 py-3 text-[13px] text-[#6B7280]">{row.city || '—'}</td>
 
-                <div style={{ position: "relative" }}>
-                  <div
-                    className="rta-input"
-                    onClick={() => setSpDropOpen((prev) => !prev)}
-                    style={{
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "10px 12px",
-                    }}
-                  >
-                    <span style={{ color: selectedPerson ? "#111827" : "#111827" }}>
-                      {selectedPerson ? selectedPerson.name : "All Salespersons"}
-                    </span>
-                    <MdExpandMore
-                      size={18}
-                      style={{ transform: spDropOpen ? "rotate(180deg)" : "", transition: "transform 0.2s" }}
-                    />
-                  </div>
+                            {/* Target */}
+                            <td className="px-4 py-3">
+                              <span className="text-[13px] font-semibold text-[#111827]">{fmtNum(row.totalTarget)}</span>
+                              <div className="text-[11px] text-[#9CA3AF]">cartons</div>
+                            </td>
 
-                  {spDropOpen && (
-                    <div className="rta-dropdown rta-no-scroll">
-                      <div style={{ padding: "8px", borderBottom: "1px solid #f3f4f6" }}>
-                        <input
-                          autoFocus
-                          type="text"
-                          className="rta-input"
-                          value={spSearch}
-                          onChange={(e) => setSpSearch(e.target.value)}
-                          placeholder="Search..."
-                          style={{ width: "100%" }}
-                        />
+                            {/* Achieved */}
+                            <td className="px-4 py-3">
+                              <span className="text-[13px] font-semibold text-[#FF5934]">{fmtNum(row.totalAchieved)}</span>
+                              <div className="text-[11px] text-[#9CA3AF]">cartons</div>
+                            </td>
+
+                            {/* Pending */}
+                            <td className="px-4 py-3">
+                              <span className="text-[13px] font-semibold text-red-500">{fmtNum(row.pending)}</span>
+                              <div className="text-[11px] text-[#9CA3AF]">remaining</div>
+                            </td>
+
+                            {/* Progress bar + % */}
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <span style={{ color: pctColor(row.pct), background: pctBg(row.pct) }}
+                                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold">
+                                  {row.pct.toFixed(1)}%
+                                </span>
+                              </div>
+                              <div className="mt-1 w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full transition-all duration-500"
+                                  style={{ width:`${Math.min(row.pct, 100)}%`, background: pctColor(row.pct) }} />
+                              </div>
+                            </td>
+
+                            {/* Status */}
+                            <td className="px-4 py-3">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border"
+                                style={{ background:sc.bg, borderColor:sc.border, color:sc.text }}>
+                                <span style={{ width:5, height:5, borderRadius:'50%', background:sc.dot, display:'inline-block' }} />
+                                {row.status.label}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  {/* Footer: total + pagination */}
+                  <div className="border-t border-gray-100 bg-[#FAFAFA] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-6">
+                      <div>
+                        <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total Target</p>
+                        <p className="text-[14px] font-bold text-[#111827]">{fmtNum(totals.target)}</p>
                       </div>
-
-                      <div
-                        className={`rta-dropdown-item ${selectedSalesPerson === null ? "active" : ""}`}
-                        onClick={() => {
-                          setSelectedSalesPerson(null);
-                          setSpDropOpen(false);
-                          setSpSearch("");
-                        }}
-                      >
-                        <div style={{ fontWeight: 500, fontSize: "13px" }}>All Salespersons</div>
-                        <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>
-                          Show combined report
-                        </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total Achieved</p>
+                        <p className="text-[14px] font-bold text-[#FF5934]">{fmtNum(totals.achieved)}</p>
                       </div>
-
-                      {filteredSP.length > 0 ? (
-                        filteredSP.map((sp) => (
-                          <div
-                            key={sp._id}
-                            className={`rta-dropdown-item ${selectedSalesPerson === sp._id ? "active" : ""}`}
-                            onClick={() => {
-                              setSelectedSalesPerson(sp._id);
-                              setSpDropOpen(false);
-                              setSpSearch("");
-                            }}
-                          >
-                            <div style={{ fontWeight: 500, fontSize: "13px" }}>{sp.name}</div>
-                            <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>
-                              {sp.email}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rta-empty" style={{ padding: "16px" }}>
-                          No results
-                        </div>
-                      )}
+                      <div>
+                        <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">Overall</p>
+                        <p className={`text-[14px] font-bold ${Number(overallPct) >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>{overallPct}%</p>
+                      </div>
                     </div>
-                  )}
-                </div>
-              </div>
 
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "#6b7280",
-                    marginBottom: "6px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  From Date *
-                </label>
-                <input
-                  type="date"
-                  className="rta-input"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  style={{ width: "100%" }}
-                />
-              </div>
-
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "#6b7280",
-                    marginBottom: "6px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  To Date *
-                </label>
-                <input
-                  type="date"
-                  className="rta-input"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  min={dateFrom || undefined}
-                  style={{ width: "100%" }}
-                />
-              </div>
+                    {totalPages > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}
+                          className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                          <GrFormPrevious size={16} />
+                        </button>
+                        <div className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm">
+                          <span className="font-semibold text-[#FF5934]">{currentPage}</span>
+                          <span className="text-gray-300">/</span>
+                          <span className="text-[#374151]">{totalPages}</span>
+                        </div>
+                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}
+                          className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                          <GrFormNext size={16} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
-
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              <button className="rta-btn rta-btn-secondary" onClick={handleReset}>
-                <MdRefresh size={16} /> Reset & Reload
-              </button>
-              <button
-                className="rta-btn rta-btn-primary"
-                onClick={handleGenerateReport}
-                disabled={!dateFrom || !dateTo || loading}
-              >
-                {loading ? <Loader /> : <MdBarChart size={16} />}
-                Generate Report
-              </button>
-            </div>
-
-            <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "12px" }}>
-              Leave the salesperson on <strong>All Salespersons</strong> to see the combined report.
-            </p>
           </div>
-
-          {loading ? (
-            <div className="rta-card" style={{ padding: "40px", textAlign: "center" }}>
-              <Loader />
-              <div style={{ marginTop: "12px", fontSize: "13px", color: "#6b7280" }}>
-                Loading report...
-              </div>
-            </div>
-          ) : generated && reportData.length > 0 ? (
-            <>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                  gap: "12px",
-                  marginBottom: "24px",
-                }}
-              >
-                <div className="rta-stat-card">
-                  <div className="rta-stat-label">Total Target</div>
-                  <div className="rta-stat-value">{formatNumber(totals.targetQty)}</div>
-                </div>
-                <div className="rta-stat-card">
-                  <div className="rta-stat-label">Total Achieved</div>
-                  <div className="rta-stat-value" style={{ color: "#ff5934" }}>
-                    {formatNumber(totals.achievedQty)}
-                  </div>
-                </div>
-                <div className="rta-stat-card">
-                  <div className="rta-stat-label">Overall Achievement</div>
-                  <div
-                    className="rta-stat-value"
-                    style={{ color: Number(overallPercent) >= 100 ? "#10b981" : "#ff5934" }}
-                  >
-                    {formatPercent(overallPercent)}
-                  </div>
-                </div>
-                <div className="rta-stat-card">
-                  <div className="rta-stat-label">Pending</div>
-                  <div className="rta-stat-value">{formatNumber(totals.pendingQty)}</div>
-                </div>
-              </div>
-
-              <div className="rta-card" style={{ overflow: "auto" }}>
-                <table className="rta-table">
-                  <thead>
-                    <tr>
-                      <th>Sales Person</th>
-                      <th>Email</th>
-                      <th>Target</th>
-                      <th>Achieved</th>
-                      <th>Pending</th>
-                      <th>Achievement %</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reportData.map((row, i) => {
-                      const status = row.status || getStatusColor(row.totalAchievement, row.totalTarget);
-                      const colors = {
-                        emerald: "#10b981",
-                        blue: "#3b82f6",
-                        amber: "#f59e0b",
-                        red: "#ef4444",
-                        gray: "#6b7280",
-                      };
-
-                      return (
-                        <tr key={row.salespersonId || i}>
-                          <td style={{ fontWeight: 500 }}>{row.salespersonName || "—"}</td>
-                          <td>{row.email || "—"}</td>
-                          <td>{formatCurrency(row.totalTarget)}</td>
-                          <td style={{ color: "#ff5934", fontWeight: 500 }}>
-                            {formatCurrency(row.totalAchievement)}
-                          </td>
-                          <td>{formatCurrency(row.pending)}</td>
-                          <td style={{ fontWeight: 600, color: "#ff5934" }}>
-                            {formatPercent(row.achievementPercent)}
-                          </td>
-                          <td>
-                            <span
-                              className="rta-badge"
-                              style={{
-                                backgroundColor: `${colors[status.color] || colors.gray}20`,
-                                borderColor: colors[status.color] || colors.gray,
-                                color: colors[status.color] || colors.gray,
-                              }}
-                            >
-                              <span
-                                style={{
-                                  width: "6px",
-                                  height: "6px",
-                                  borderRadius: "50%",
-                                  backgroundColor: colors[status.color] || colors.gray,
-                                  display: "inline-block",
-                                }}
-                              />
-                              {status.label}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div
-                style={{
-                  marginTop: "16px",
-                  padding: "12px",
-                  background: "#f9fafb",
-                  borderRadius: "8px",
-                  textAlign: "center",
-                  fontSize: "12px",
-                  color: "#6b7280",
-                }}
-              >
-                {reportData.length} record{reportData.length !== 1 ? "s" : ""} • Overall Achievement:{" "}
-                {formatPercent(overallPercent)}
-              </div>
-            </>
-          ) : generated ? (
-            <div className="rta-card" style={{ padding: "40px", textAlign: "center" }}>
-              <div style={{ fontSize: "48px", marginBottom: "12px" }}>📊</div>
-              <div style={{ fontSize: "16px", fontWeight: 600, color: "#374151", marginBottom: "4px" }}>
-                No Data Found
-              </div>
-              <div style={{ fontSize: "13px", color: "#6b7280" }}>
-                No records match your selection. Try adjusting the date range or salesperson.
-              </div>
-            </div>
-          ) : null}
-        </div>
+        )}
       </div>
     </>
   );

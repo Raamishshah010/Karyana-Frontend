@@ -1,794 +1,818 @@
-import { useState, useEffect } from "react";
-import { GrFormNext } from "react-icons/gr";
-import { Link, useSearchParams } from "react-router-dom";
-import jsPDF from "jspdf";
-import * as XLSX from "xlsx";
-import { getAttendanceBySalesId, getAllSalesPersons } from "../APIS";
-import { Loader } from "../components/common/loader";
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { getTransactionsByRetailerId, getAllRetailers, getAllSalesPersons, getAllCities } from '../APIS';
+import { toast } from 'react-toastify';
 import {
   MdSearch, MdClose, MdRefresh, MdPerson, MdCalendarToday,
-  MdAccessTime, MdBarChart, MdCheckCircle, MdLogout, MdLogin,
-  MdTimer, MdFilterList, MdPictureAsPdf, MdGridOn, MdExpandMore,
-} from "react-icons/md";
+  MdFilterList, MdBarChart, MdCheckCircle, MdDownload,
+  MdStorefront, MdLocationOn, MdTrendingUp, MdGroup, MdExpandMore,
+  MdAttachMoney, MdDateRange,
+} from 'react-icons/md';
+import { GrFormPrevious, GrFormNext } from 'react-icons/gr';
+import * as XLSX from 'xlsx';
 
 /* ─── helpers ─── */
-const formatTime = (time) => {
-  if (!time) return "—";
-  try {
-    const date = time.includes("T") ? new Date(time) : (() => {
-      const [h, m] = time.split(":");
-      const d = new Date(); d.setHours(+h, +m, 0, 0); return d;
-    })();
-    return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
-  } catch { return "—"; }
+const fmt = (n) => {
+  const num = parseFloat(n);
+  if (isNaN(num)) return '—';
+  return num.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const fmtQty = (n) => {
+  const num = parseFloat(n);
+  if (isNaN(num)) return '—';
+  return num.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 };
 
 const formatDate = (dateString) => {
-  if (!dateString) return "—";
-  try { return new Date(dateString).toLocaleDateString("en-GB"); } catch { return "—"; }
+  if (!dateString) return '';
+  const d = new Date(dateString);
+  return d.toISOString().slice(0, 10);
 };
 
-const calcDiff = (checkIn, checkOut) => {
-  if (!checkIn || !checkOut) return { display: "—", seconds: 0 };
-  const ms = new Date(checkOut) - new Date(checkIn);
-  if (ms <= 0) return { display: "—", seconds: 0 };
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  let display = "";
-  if (h > 0) display += `${h}h `;
-  if (m > 0 || h > 0) display += `${m}m `;
-  display += `${sec}s`;
-  return { display: display.trim(), seconds: s };
+const formatDisplayDate = (dateString) => {
+  if (!dateString) return '—';
+  const d = new Date(dateString);
+  return d.toLocaleDateString('en-GB');
 };
 
-const calcTotal = (data) => {
-  let total = 0;
-  data.forEach((r) => { const { seconds } = calcDiff(r.checkInTime, r.checkOutTime); total += seconds; });
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  let out = "";
-  if (h > 0) out += `${h}h `;
-  if (m > 0 || h > 0) out += `${m}m `;
-  out += `${s}s`;
-  return out.trim() || "0s";
-};
-
-const statusColor = (checkIn, checkOut) => {
-  const { seconds } = calcDiff(checkIn, checkOut);
-  if (!checkIn)         return { pill: "bg-gray-100 text-gray-400 ring-gray-200",           dot: "bg-gray-300",   label: "Absent"   };
-  if (!checkOut)        return { pill: "bg-amber-50 text-amber-600 ring-amber-200",         dot: "bg-amber-400",  label: "Active"   };
-  if (seconds >= 28800) return { pill: "bg-emerald-50 text-emerald-600 ring-emerald-200",   dot: "bg-emerald-400", label: "Full Day" };
-  if (seconds >= 14400) return { pill: "bg-blue-50 text-blue-600 ring-blue-200",            dot: "bg-blue-400",   label: "Half Day" };
-  return                       { pill: "bg-red-50 text-red-500 ring-red-200",               dot: "bg-red-400",    label: "Short"    };
-};
-
-const reportHeaders = [
-  "Employee Name",
-  "Date",
-  "Check-In Time",
-  "Check-Out Time",
-  "Total Hours Worked",
-  "Status",
-  "Remarks",
-];
-
-const safeFilePart = (value) =>
-  String(value || "attendance-report")
-    .trim()
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .toLowerCase();
-
-const getRecordDateKey = (record) => {
-  const rawDate = record.date || record.checkInTime || record.checkOutTime;
-  if (!rawDate) return "";
-  if (typeof rawDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(rawDate)) return rawDate.slice(0, 10);
-  const parsed = new Date(rawDate);
-  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
-};
-
-const getEmployeeName = (record, selectedPerson) =>
-  selectedPerson?.name ||
-  record.salesPersonID?.name ||
-  record.salesPerson?.name ||
-  record.employeeName ||
-  record.name ||
-  "Unknown";
-
-const getRemarks = (record) => {
-  const note = record.remarks || record.remark || record.note || record.notes || record.description;
-  if (note) return String(note);
-  if (!record.checkInTime) return "No check-in recorded";
-  if (!record.checkOutTime) return "Check-out pending";
-  return "";
-};
-
-const buildReportRows = (data, selectedPerson) =>
-  data.map((record) => {
-    const { display } = calcDiff(record.checkInTime, record.checkOutTime);
-    return {
-      "Employee Name": getEmployeeName(record, selectedPerson),
-      Date: formatDate(getRecordDateKey(record)),
-      "Check-In Time": formatTime(record.checkInTime),
-      "Check-Out Time": formatTime(record.checkOutTime),
-      "Total Hours Worked": display,
-      Status: statusColor(record.checkInTime, record.checkOutTime).label,
-      Remarks: getRemarks(record),
-    };
-  });
-
-const getDateRangeLabel = (rows, startDate, endDate) => {
-  if (startDate && endDate) return `${formatDate(startDate)} - ${formatDate(endDate)}`;
-  if (startDate) return `${formatDate(startDate)} - Latest`;
-  if (endDate) return `Up to ${formatDate(endDate)}`;
-  const validDates = rows
-    .map((row) => row.Date)
-    .filter((date) => date && date.includes("/"))
-    .sort((a, b) => {
-      const [ad, am, ay] = a.split("/");
-      const [bd, bm, by] = b.split("/");
-      return new Date(`${ay}-${am}-${ad}`) - new Date(`${by}-${bm}-${bd}`);
-    });
-  if (!validDates.length) return "Generated records";
-  return `${validDates[0]} - ${validDates[validDates.length - 1]}`;
-};
+const ROWS_PER_PAGE = 15;
 
 /* ════════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════════ */
-const AttandanceTracking = () => {
-  
-  const [attendanceData, setAttendanceData]         = useState([]);
-  const [loading, setLoading]                       = useState(false);
-  const [salesPersons, setSalesPersons]             = useState([]);
-  const [selectedSalesPerson, setSelectedSalesPerson] = useState("");
-  const [startDate, setStartDate]                   = useState("");
-  const [endDate, setEndDate]                       = useState("");
-  const [spSearch, setSpSearch]                     = useState("");
-  const [spDropOpen, setSpDropOpen]                 = useState(false);
-  const [dateDropOpen, setDateDropOpen]             = useState(false);
-  const [datePreset, setDatePreset]                 = useState(""); // "", "today", "week", "month", "custom"
-  const [generated, setGenerated]                   = useState(false);
+const ReportsRecovery = () => {
+  /* data */
+  const [reportData, setReportData]   = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [generated, setGenerated]     = useState(false);
 
-  const [searchParams] = useSearchParams();
-  const salesIdFromUrl  = searchParams.get("salesId");
+  /* filter options */
+  const [retailers, setRetailers]       = useState([]);
+  const [salesPersons, setSalesPersons] = useState([]);
+  const [cities, setCities]             = useState([]);
+
+  /* filter values */
+  const [startDate, setStartDate]       = useState('');
+  const [endDate, setEndDate]           = useState('');
+  const [selectedRetailer, setSelectedRetailer] = useState('');
+  const [selectedSP, setSelectedSP]     = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
+  const [searchRecovery, setSearchRecovery] = useState('');
+  const [datePreset, setDatePreset]     = useState('all');
+
+  /* dropdowns */
+  const [retDropOpen, setRetDropOpen] = useState(false);
+  const [retSearch, setRetSearch]     = useState('');
+  const [spDropOpen, setSpDropOpen] = useState(false);
+  const [spSearch, setSpSearch]     = useState('');
+  const [dateDropOpen, setDateDropOpen] = useState(false);
+
+  /* pagination */
+  const [currentPage, setCurrentPage] = useState(1);
+
+  /* ── Core fetch using Retailers API ── */
+  const fetchReport = useCallback(async ({ sd = '', ed = '', ret = '', sp = '', city = '' } = {}) => {
+    setLoading(true);
+    setGenerated(false);
+    try {
+      console.log('📥 Fetching retailers...');
+      
+      // Get all retailers with transactions
+      const retRes = await getAllRetailers();
+      let allRetailers = retRes?.data?.data || [];
+      
+      if (!Array.isArray(allRetailers)) {
+        console.warn('⚠️ Retailers response is not an array');
+        allRetailers = [];
+      }
+
+      console.log(`📊 Got ${allRetailers.length} retailers`);
+
+      // Fetch transactions for each retailer and build report
+      let allTransactions = [];
+
+      for (const retailer of allRetailers) {
+        try {
+          const txnRes = await getTransactionsByRetailerId(retailer._id);
+          const transactions = txnRes?.data?.data || [];
+          
+          if (Array.isArray(transactions)) {
+            transactions.forEach(txn => {
+              allTransactions.push({
+                ...txn,
+                retailerId: retailer._id,
+                retailerName: retailer.shopName || retailer.name || 'Unknown',
+                retailerCity: retailer.city?.name || retailer.city || '',
+                accountNo: retailer.userId || '—',
+                salesPerson: retailer.salesPersonID?.name || retailer.salesPersonName || 'Unknown',
+              });
+            });
+          }
+        } catch (err) {
+          console.warn(`⚠️ Error fetching transactions for retailer ${retailer._id}:`, err.message);
+        }
+      }
+
+      console.log(`💰 Got ${allTransactions.length} transactions`);
+
+      // Filter transactions based on criteria
+      let filtered = allTransactions;
+
+      // Filter by date range
+      if (sd || ed) {
+        filtered = filtered.filter(t => {
+          const txnDate = formatDate(t.createdAt || t.date);
+          if (sd && txnDate < sd) return false;
+          if (ed && txnDate > ed) return false;
+          return true;
+        });
+        console.log(`📅 After date filter: ${filtered.length} transactions`);
+      }
+
+      // Filter by retailer
+      if (ret) {
+        filtered = filtered.filter(t => t.retailerId === ret);
+        console.log(`🏪 After retailer filter: ${filtered.length} transactions`);
+      }
+
+      // Filter by salesperson
+      if (sp) {
+        filtered = filtered.filter(t => {
+          const spId = t.retailerId;
+          const retailer = allRetailers.find(r => r._id === spId);
+          const salesPersonId = retailer?.salesPersonID?._id || retailer?.salesPersonID;
+          return salesPersonId === sp;
+        });
+        console.log(`👤 After salesperson filter: ${filtered.length} transactions`);
+      }
+
+      // Filter by city
+      if (city) {
+        filtered = filtered.filter(t => {
+          const cityId = t.retailerId;
+          const retailer = allRetailers.find(r => r._id === cityId);
+          const cityObj = retailer?.city;
+          const cityIdVal = typeof cityObj === 'object' ? cityObj?._id : cityObj;
+          return cityIdVal === city;
+        });
+        console.log(`🏙️ After city filter: ${filtered.length} transactions`);
+      }
+
+      // Transform to report format
+      const reportRows = filtered.map(txn => {
+        const amount = parseFloat(txn.amount || txn.paidAmount || 0);
+        const approvalStatus = txn.isApproved ? 'Approved' : txn.isRejected ? 'Rejected' : 'Pending';
+
+        return {
+          _id: txn._id,
+          accountNo: txn.accountNo,
+          retailerName: txn.retailerName,
+          salesPerson: txn.salesPerson,
+          city: txn.retailerCity,
+          amount: amount,
+          date: formatDate(txn.createdAt || txn.date),
+          displayDate: formatDisplayDate(txn.createdAt || txn.date),
+          status: approvalStatus,
+          remarks: txn.remarks || txn.note || txn.description || '—',
+          paymentMethod: txn.paymentMethod || txn.method || '—',
+        };
+      });
+
+      console.log(`✨ Transformed to ${reportRows.length} report rows`);
+
+      setReportData(reportRows);
+      setGenerated(true);
+      setCurrentPage(1);
+      
+      if (reportRows.length === 0 && (sd || ed || ret || sp || city)) {
+        toast.info('No recovery payments found for the selected filters');
+      }
+    } catch (err) {
+      console.error('❌ Error fetching report:', err?.response?.data || err?.message || err);
+      toast.error('Failed to fetch recovery data');
+      setReportData([]);
+      setGenerated(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /* ── Load dropdowns + initial data on mount ── */
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        // Load dropdowns
+        const [retRes, spRes, citRes] = await Promise.all([
+          getAllRetailers(),
+          getAllSalesPersons(),
+          getAllCities(),
+        ]);
+        setRetailers(retRes?.data?.data || []);
+        setSalesPersons(spRes?.data?.data || []);
+        setCities(citRes?.data?.data || []);
+        
+        // Load initial report
+        await fetchReport({});
+      } catch (err) {
+        console.error('Error initializing:', err);
+      }
+    };
+    
+    initializeData();
+  }, [fetchReport]);
 
   /* ── Date preset helper ── */
   const applyDatePreset = (preset) => {
-    const today = new Date();
-    let start = "";
+    setDateDropOpen(false);
+    if (preset === 'custom') {
+      setDatePreset('custom');
+      return;
+    }
+    let today = new Date();
     let end = today.toISOString().slice(0, 10);
+    let start = end;
 
-    if (preset === "today") {
+    if (preset === 'today') {
       start = end;
-    } else if (preset === "week") {
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay());
-      start = weekStart.toISOString().slice(0, 10);
-    } else if (preset === "month") {
+    } else if (preset === 'week') {
+      const d = new Date(today);
+      d.setDate(today.getDate() - today.getDay());
+      start = d.toISOString().slice(0, 10);
+    } else if (preset === 'month') {
       start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
-    } else if (preset === "custom") {
-      setDateDropOpen(false);
-      return; // Keep existing dates
+    } else if (preset === 'all') {
+      start = '';
+      end = '';
     }
 
     setStartDate(start);
     setEndDate(end);
     setDatePreset(preset);
-    setDateDropOpen(false);
   };
 
   const getPresetLabel = () => {
-    const labels = {
-      "today": "Today",
-      "week": "This Week",
-      "month": "This Month",
-      "custom": "Custom Dates",
-    };
-    return labels[datePreset] || "All Time";
+    if (datePreset === 'custom' && startDate && endDate) return `${startDate} → ${endDate}`;
+    if (datePreset === 'custom' && startDate) return `From ${startDate}`;
+    if (datePreset === 'custom' && endDate) return `Up to ${endDate}`;
+    return { all: 'All Time', today: 'Today', week: 'This Week', month: 'This Month', custom: 'Custom Dates' }[datePreset] || 'All Time';
   };
 
-  /* load sales persons once */
-  useEffect(() => {
-    getAllSalesPersons()
-      .then((res) => setSalesPersons(res.data.data || []))
-      .catch(() => {});
-    if (salesIdFromUrl) setSelectedSalesPerson(salesIdFromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* auto-fetch when coming from URL with salesId */
-  useEffect(() => {
-    if (salesIdFromUrl && salesPersons.length > 0) {
-      fetchData(salesIdFromUrl);
+  const handleGenerate = () => {
+    if (startDate && endDate && startDate > endDate) {
+      toast.error('"From" date must be before "To" date');
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [salesIdFromUrl, salesPersons]);
-
-  const fetchData = async (overrideSid) => {
-    const sid = overrideSid || selectedSalesPerson || salesIdFromUrl;
-    if (!sid) { alert("Please select a sales person first."); return; }
-    try {
-      setLoading(true);
-      setGenerated(false);
-      const daysToFetch = startDate || endDate ? 365 : 30;
-      const response = await getAttendanceBySalesId(sid, daysToFetch);
-      if (response.data.msg === "success") {
-        let data = Array.isArray(response.data.data) ? response.data.data : [];
-        if (startDate || endDate) {
-          data = data.filter((r) => {
-            const dStr = r.date || (r.checkInTime ? new Date(r.checkInTime).toISOString().slice(0, 10) : null);
-            if (!dStr) return false;
-            if (startDate && dStr < startDate) return false;
-            if (endDate && dStr > endDate) return false;
-            return true;
-          });
-        }
-        setAttendanceData(data);
-        setGenerated(true);
-      }
-    } catch (e) {
-      console.error("Attendance fetch error:", e);
-    } finally {
-      setLoading(false);
-    }
+    fetchReport({ sd: startDate, ed: endDate, ret: selectedRetailer, sp: selectedSP, city: selectedCity });
   };
 
   const handleReset = () => {
-    setStartDate("");
-    setEndDate("");
-    setDatePreset("");
-    setSelectedSalesPerson("");
-    setAttendanceData([]);
-    setGenerated(false);
-    setSpSearch("");
+    setStartDate('');
+    setEndDate('');
+    setSelectedRetailer('');
+    setSelectedSP('');
+    setSelectedCity('');
+    setSearchRecovery('');
+    setRetSearch('');
+    setSpSearch('');
+    setDatePreset('all');
+    setCurrentPage(1);
+    fetchReport({});
   };
 
-  const sortedData = [...attendanceData].sort((a, b) => {
-    const diff = new Date(b.date || 0) - new Date(a.date || 0);
-    if (diff !== 0) return diff;
-    return (b.checkInTime ? new Date(b.checkInTime).getTime() : 0)
-         - (a.checkInTime ? new Date(a.checkInTime).getTime() : 0);
-  });
+  /* ── Client-side search ── */
+  const filtered = useMemo(() => {
+    if (!searchRecovery.trim()) return reportData;
+    const q = searchRecovery.toLowerCase();
+    return reportData.filter(r =>
+      r.retailerName.toLowerCase().includes(q) ||
+      r.salesPerson.toLowerCase().includes(q) ||
+      String(r.accountNo).toLowerCase().includes(q)
+    );
+  }, [reportData, searchRecovery]);
 
-  const selectedPersonObj = salesPersons.find((sp) => sp._id === selectedSalesPerson);
-  const filteredSP        = salesPersons.filter((sp) =>
-    (sp.name || "").toLowerCase().includes(spSearch.toLowerCase())
-  );
-  const reportRows = buildReportRows(sortedData, selectedPersonObj);
+  /* ── Summary stats ── */
+  const stats = useMemo(() => {
+    const totalAmount = filtered.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+    const approved = filtered.filter(r => r.status === 'Approved').length;
+    const pending = filtered.filter(r => r.status === 'Pending').length;
+    const rejected = filtered.filter(r => r.status === 'Rejected').length;
+    return { totalAmount, approved, pending, rejected, count: filtered.length };
+  }, [filtered]);
 
-  const canGenerate = !!(selectedSalesPerson || salesIdFromUrl);
-  const canExport = generated && reportRows.length > 0 && !loading;
+  /* ── Pagination ── */
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
+  const paginated  = filtered.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE);
 
-  const getReportFileName = (extension) => {
-    const person = safeFilePart(selectedPersonObj?.name || selectedSalesPerson || salesIdFromUrl || "all");
-    const from = startDate || "latest";
-    const to = endDate || new Date().toISOString().slice(0, 10);
-    return `attendance-report-${person}-${from}-to-${to}.${extension}`;
-  };
-
-  const handleExportExcel = () => {
-    if (!canExport) {
-      alert("Please generate a report with attendance records first.");
+  /* ── Export ── */
+  const handleExport = () => {
+    if (!filtered.length) {
+      toast.info('No data to export');
       return;
     }
-
-    const worksheet = XLSX.utils.json_to_sheet(reportRows, { header: reportHeaders });
-    worksheet["!cols"] = [
-      { wch: 24 },
-      { wch: 14 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 20 },
-      { wch: 14 },
-      { wch: 32 },
-    ];
-    if (worksheet["!ref"]) {
-      worksheet["!autofilter"] = { ref: worksheet["!ref"] };
-    }
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance Report");
-    XLSX.writeFile(workbook, getReportFileName("xlsx"));
-  };
-
-  const handleExportPdf = () => {
-    if (!canExport) {
-      alert("Please generate a report with attendance records first.");
-      return;
-    }
-
-    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 10;
-    const footerHeight = 12;
-    const rowMinHeight = 8;
-    const columns = [
-      { key: "Employee Name", width: 44 },
-      { key: "Date", width: 24 },
-      { key: "Check-In Time", width: 28 },
-      { key: "Check-Out Time", width: 28 },
-      { key: "Total Hours Worked", width: 34 },
-      { key: "Status", width: 24 },
-      { key: "Remarks", width: 95 },
-    ];
-    const dateRange = getDateRangeLabel(reportRows, startDate, endDate);
-
-    const drawReportHeader = () => {
-      doc.setFillColor(255, 89, 52);
-      doc.rect(0, 0, pageWidth, 17, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
-      doc.text("Prime Link Distribution", margin, 10.5);
-      doc.setFontSize(9);
-      doc.text("Attendance Report", pageWidth - margin, 10.5, { align: "right" });
-
-      doc.setTextColor(17, 24, 39);
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.text("Attendance Report", margin, 25);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
-      doc.setTextColor(75, 85, 99);
-      doc.text(`Sales Person: ${selectedPersonObj?.name || "Selected salesperson"}`, margin, 31);
-      doc.text(`Date Range: ${dateRange}`, margin + 92, 31);
-      doc.text(`Records: ${reportRows.length}`, margin + 175, 31);
-      doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, pageWidth - margin, 31, { align: "right" });
-
-      let x = margin;
-      const y = 38;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-      columns.forEach((column) => {
-        doc.setFillColor(255, 239, 235);
-        doc.rect(x, y, column.width, 8, "F");
-        doc.setDrawColor(255, 183, 167);
-        doc.rect(x, y, column.width, 8, "S");
-        doc.setTextColor(17, 24, 39);
-        doc.text(doc.splitTextToSize(column.key, column.width - 4), x + 2, y + 5);
-        x += column.width;
-      });
-      return y + 8;
-    };
-
-    let y = drawReportHeader();
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-
-    reportRows.forEach((row) => {
-      const cellLines = columns.map((column) =>
-        doc.splitTextToSize(String(row[column.key] || "-"), column.width - 4)
-      );
-      const rowHeight = Math.max(rowMinHeight, ...cellLines.map((lines) => lines.length * 4 + 4));
-
-      if (y + rowHeight > pageHeight - footerHeight) {
-        doc.addPage();
-        y = drawReportHeader();
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(7.5);
-      }
-
-      let x = margin;
-      doc.setDrawColor(229, 231, 235);
-      doc.setTextColor(31, 41, 55);
-      cellLines.forEach((lines, index) => {
-        const column = columns[index];
-        doc.rect(x, y, column.width, rowHeight);
-        doc.text(lines, x + 2, y + 5);
-        x += column.width;
-      });
-      y += rowHeight;
+    const rows = filtered.map(r => ({
+      'A/C No.': r.accountNo,
+      'Retailer': r.retailerName,
+      'Salesperson': r.salesPerson,
+      'City': r.city,
+      'Amount (Rs)': parseFloat(r.amount || 0),
+      'Date': r.displayDate,
+      'Status': r.status,
+      'Payment Method': r.paymentMethod,
+      'Remarks': r.remarks,
+    }));
+    rows.push({
+      'A/C No.': 'TOTAL',
+      'Retailer': '',
+      'Salesperson': '',
+      'City': '',
+      'Amount (Rs)': stats.totalAmount,
+      'Date': '',
+      'Status': '',
+      'Payment Method': '',
+      'Remarks': '',
     });
-
-    const pageCount = doc.getNumberOfPages();
-    for (let page = 1; page <= pageCount; page += 1) {
-      doc.setPage(page);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      doc.setTextColor(107, 114, 128);
-      doc.text(`Page ${page} of ${pageCount}`, pageWidth - margin, pageHeight - 6, { align: "right" });
-    }
-
-    doc.save(getReportFileName("pdf"));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 12 }, { wch: 30 }, { wch: 20 }, { wch: 15 },
+      { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 20 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Recovery Report');
+    const fileSuffix = startDate && endDate ? `${startDate}_to_${endDate}` : 'all-time';
+    XLSX.writeFile(wb, `Recovery_Report_${fileSuffix}.xlsx`);
+    toast.success('Report exported');
   };
+
+  /* ── Helpers ── */
+  const selectedRetailerObj = retailers.find(r => r._id === selectedRetailer);
+  const filteredRetList = retailers.filter(r =>
+    (r.shopName || r.name || '').toLowerCase().includes(retSearch.toLowerCase())
+  );
+
+  const selectedSPObj = salesPersons.find(s => s._id === selectedSP);
+  const filteredSPList = salesPersons.filter(s =>
+    (s.name || '').toLowerCase().includes(spSearch.toLowerCase())
+  );
+
+  /* ── Active filter count for badge ── */
+  const activeFilterCount = [selectedRetailer, selectedSP, selectedCity, startDate || endDate, datePreset !== 'all'].filter(Boolean).length;
 
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
-        .att-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
-        .att-page .table-row { transition: background 0.15s, box-shadow 0.15s; }
-        .att-page .table-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
-        .att-tab { transition: all 0.2s; border-bottom: 2.5px solid transparent; padding: 10px 16px; cursor: pointer; }
-        .att-tab.active { border-bottom-color: #FF5934; color: #FF5934; background: #fff8f6; border-radius: 8px 8px 0 0; }
-        .att-tab:not(.active) { color: #6B7280; }
-        .att-tab:not(.active):hover { color: #111827; background: #F9FAFB; border-radius: 8px 8px 0 0; }
-        @keyframes attModalIn   { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:none; } }
-        @keyframes attOverlayIn { from { opacity:0; } to { opacity:1; } }
-        .att-modal-overlay { animation: attOverlayIn 0.2s ease; }
-        .att-modal-card    { animation: attModalIn 0.25s cubic-bezier(0.34,1.2,0.64,1); }
-        .att-dur-track { height:4px; border-radius:9999px; background:#F3F4F6; overflow:hidden; }
-        .att-dur-bar   { height:4px; border-radius:9999px; background:#FF5934; transition: width 0.6s ease; }
-        .att-no-scroll::-webkit-scrollbar { display:none; }
-        .att-no-scroll { scrollbar-width: none; }
-        .att-select {
+        .rr-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
+        .rr-page .table-row { transition: background 0.15s, box-shadow 0.15s; }
+        .rr-page .table-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
+        .rr-page .rr-select {
           appearance: none; -webkit-appearance: none;
           background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
           background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px;
         }
-        .att-input {
-          background: #F9FAFB; border: 1px solid #E5E7EB;
-          border-radius: 12px; padding: 10px 14px;
-          font-size: 13px; color: #111827; outline: none;
+        .rr-input {
+          background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 12px;
+          padding: 10px 14px; font-size: 13px; color: #111827; outline: none;
           font-family: 'DM Sans', sans-serif; width: 100%;
           transition: border-color 0.15s, box-shadow 0.15s;
         }
-        .att-input:focus { border-color: #FF5934; box-shadow: 0 0 0 3px rgba(255,89,52,0.1); }
-        .att-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+        .rr-input:focus { border-color: #FF5934; box-shadow: 0 0 0 3px rgba(255,89,52,0.1); }
+        .rr-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+        .rr-no-scroll::-webkit-scrollbar { display: none; }
+        .rr-no-scroll { scrollbar-width: none; }
       `}</style>
 
-      <div className="att-page">
+      <div className="rr-page">
 
         {/* ── Page Header ── */}
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
-          <div className="flex items-center gap-3">
-            
-            <div>
-              <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">CheckIn/Out</h1>
-              {generated && attendanceData.length > 0 && (
-                <p className="text-sm text-[#9CA3AF] mt-0.5">
-                  Total: <span className="text-[#FF5934] font-semibold">{calcTotal(attendanceData)}</span>
-                  &nbsp;·&nbsp;{attendanceData.length} record{attendanceData.length !== 1 ? "s" : ""}
-                </p>
+          <div>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Recovery Report</h1>
+            <p className="text-sm text-[#9CA3AF] mt-0.5">
+              {generated
+                ? startDate && endDate
+                  ? `${startDate} → ${endDate}${selectedRetailerObj ? ` · ${selectedRetailerObj.shopName || selectedRetailerObj.name}` : ''}`
+                  : `All time${selectedRetailerObj ? ` · ${selectedRetailerObj.shopName || selectedRetailerObj.name}` : ''}`
+                : 'Loading recovery data…'}
+            </p>
+          </div>
+          {generated && filtered.length > 0 && (
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-2 bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md shadow-orange-100 transition-all"
+            >
+              <MdDownload size={16} /> Export Excel
+            </button>
+          )}
+        </div>
+
+        {/* ── Filter Card ── */}
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-5 mb-5">
+          <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-4 flex items-center gap-2">
+            <MdFilterList size={13} className="text-[#FF5934]" /> Filters
+            {activeFilterCount > 0 && (
+              <span className="w-5 h-5 rounded-full bg-[#FF5934] text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                {activeFilterCount}
+              </span>
+            )}
+          </p>
+
+          <div className="flex flex-wrap gap-4 items-end">
+
+            {/* Date Preset Dropdown */}
+            <div className="flex-1 min-w-[220px]">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdCalendarToday size={12} className="text-[#FF5934]" /> Date Range
+              </label>
+              <div className="relative">
+                <div
+                  className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                  onClick={() => setDateDropOpen(p => !p)}
+                >
+                  <span className="text-[13px] text-[#111827] font-medium flex-1">{getPresetLabel()}</span>
+                  <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform ${dateDropOpen ? 'rotate-180' : ''}`} />
+                </div>
+
+                {dateDropOpen && (
+                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
+                    {[['all', 'All Time'], ['today', 'Today'], ['week', 'This Week'], ['month', 'This Month'], ['custom', 'Custom Dates']].map(([p, l]) => (
+                      <button key={p} onClick={() => applyDatePreset(p)}
+                        className={`w-full text-left px-4 py-2.5 text-[13px] hover:bg-orange-50 transition-colors flex items-center gap-2 border-b border-gray-50 last:border-0 ${datePreset === p ? 'text-[#FF5934] font-semibold bg-orange-50' : 'text-[#111827]'}`}>
+                        <MdCheckCircle size={14} className={datePreset === p ? 'text-[#FF5934]' : 'text-transparent'} />
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Custom Date Inputs */}
+            {datePreset === 'custom' && (
+              <>
+                <div className="flex-1 min-w-[150px]">
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                    <MdCalendarToday size={12} className="text-[#FF5934]" /> From
+                  </label>
+                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="rr-input" />
+                </div>
+
+                <div className="flex-1 min-w-[150px]">
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                    <MdCalendarToday size={12} className="text-[#FF5934]" /> To
+                  </label>
+                  <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)} className="rr-input" />
+                </div>
+              </>
+            )}
+
+            {/* Retailer Picker */}
+            <div className="flex-1 min-w-[200px]">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdStorefront size={12} className="text-[#FF5934]" /> Retailer
+              </label>
+              <div className="relative">
+                <div
+                  className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                  onClick={() => setRetDropOpen(p => !p)}
+                >
+                  {selectedRetailerObj ? (
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-[#FF5934] text-[10px] font-bold">{(selectedRetailerObj.shopName || selectedRetailerObj.name || '?')[0].toUpperCase()}</span>
+                      </div>
+                      <span className="text-[13px] text-[#111827] font-medium truncate">{selectedRetailerObj.shopName || selectedRetailerObj.name}</span>
+                    </div>
+                  ) : (
+                    <span className="text-[13px] text-[#9CA3AF] flex-1">All retailers</span>
+                  )}
+                  <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
+                </div>
+
+                {retDropOpen && (
+                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
+                        <MdSearch size={14} className="text-[#9CA3AF]" />
+                        <input autoFocus value={retSearch} onChange={e => setRetSearch(e.target.value)}
+                          placeholder="Search…"
+                          className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
+                        {retSearch && <button onClick={() => setRetSearch('')} className="text-[#9CA3AF] hover:text-[#FF5934]"><MdClose size={13} /></button>}
+                      </div>
+                    </div>
+                    <div className="max-h-52 overflow-y-auto rr-no-scroll">
+                      <div
+                        onClick={() => { setSelectedRetailer(''); setRetDropOpen(false); setRetSearch(''); }}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${!selectedRetailer ? 'bg-orange-50' : ''}`}
+                      >
+                        <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                          <MdStorefront size={14} className="text-gray-400" />
+                        </div>
+                        <p className="text-[13px] font-medium text-[#374151]">All Retailers</p>
+                        {!selectedRetailer && <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0 ml-auto" />}
+                      </div>
+                      {filteredRetList.map(ret => (
+                        <div key={ret._id}
+                          onClick={() => { setSelectedRetailer(ret._id); setRetDropOpen(false); setRetSearch(''); }}
+                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedRetailer === ret._id ? 'bg-orange-50' : ''}`}
+                        >
+                          <div className="w-7 h-7 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-[#FF5934] text-[11px] font-bold">{(ret.shopName || ret.name || '?')[0].toUpperCase()}</span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13px] font-medium text-[#111827] truncate">{ret.shopName || ret.name}</p>
+                            <p className="text-[11px] text-[#9CA3AF] truncate">{ret.userId || 'N/A'}</p>
+                          </div>
+                          {selectedRetailer === ret._id && <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0" />}
+                        </div>
+                      ))}
+                      {filteredRetList.length === 0 && (
+                        <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No results</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Salesperson Picker */}
+            <div className="flex-1 min-w-[200px]">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdPerson size={12} className="text-[#FF5934]" /> Salesperson
+              </label>
+              <div className="relative">
+                <div
+                  className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                  onClick={() => setSpDropOpen(p => !p)}
+                >
+                  {selectedSPObj ? (
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-[#FF5934] text-[10px] font-bold">{(selectedSPObj.name || '?')[0].toUpperCase()}</span>
+                      </div>
+                      <span className="text-[13px] text-[#111827] font-medium truncate">{selectedSPObj.name}</span>
+                    </div>
+                  ) : (
+                    <span className="text-[13px] text-[#9CA3AF] flex-1">All salespersons</span>
+                  )}
+                  <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
+                </div>
+
+                {spDropOpen && (
+                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
+                        <MdSearch size={14} className="text-[#9CA3AF]" />
+                        <input autoFocus value={spSearch} onChange={e => setSpSearch(e.target.value)}
+                          placeholder="Search…"
+                          className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
+                        {spSearch && <button onClick={() => setSpSearch('')} className="text-[#9CA3AF] hover:text-[#FF5934]"><MdClose size={13} /></button>}
+                      </div>
+                    </div>
+                    <div className="max-h-52 overflow-y-auto rr-no-scroll">
+                      <div
+                        onClick={() => { setSelectedSP(''); setSpDropOpen(false); setSpSearch(''); }}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${!selectedSP ? 'bg-orange-50' : ''}`}
+                      >
+                        <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                          <MdGroup size={14} className="text-gray-400" />
+                        </div>
+                        <p className="text-[13px] font-medium text-[#374151]">All Salespersons</p>
+                        {!selectedSP && <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0 ml-auto" />}
+                      </div>
+                      {filteredSPList.map(sp => (
+                        <div key={sp._id}
+                          onClick={() => { setSelectedSP(sp._id); setSpDropOpen(false); setSpSearch(''); }}
+                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSP === sp._id ? 'bg-orange-50' : ''}`}
+                        >
+                          <div className="w-7 h-7 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-[#FF5934] text-[11px] font-bold">{(sp.name || '?')[0].toUpperCase()}</span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13px] font-medium text-[#111827] truncate">{sp.name}</p>
+                            <p className="text-[11px] text-[#9CA3AF] truncate">{sp.email}</p>
+                          </div>
+                          {selectedSP === sp._id && <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0" />}
+                        </div>
+                      ))}
+                      {filteredSPList.length === 0 && (
+                        <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No results</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-2 flex-shrink-0">
+              <button onClick={handleReset}
+                className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
+                <MdRefresh size={15} /> Reset
+              </button>
+              <button onClick={handleGenerate} disabled={loading}
+                className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2">
+                {loading
+                  ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Loading…</>
+                  : <><MdBarChart size={16} /> Generate Report</>}
+              </button>
+            </div>
+          </div>
+
+          {/* Active filter chips */}
+          {(selectedRetailerObj || selectedSPObj || selectedCity || startDate || endDate || datePreset !== 'all') && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {datePreset !== 'all' && (
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
+                  <MdDateRange size={12} className="text-blue-500" />
+                  <span className="text-[12px] font-semibold text-blue-600">{getPresetLabel()}</span>
+                  <button onClick={() => { setDatePreset('all'); setStartDate(''); setEndDate(''); }} className="text-blue-400 hover:text-blue-600 ml-1"><MdClose size={13} /></button>
+                </div>
+              )}
+              {selectedRetailerObj && (
+                <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-3 py-1.5">
+                  <div className="w-5 h-5 rounded-full bg-[#FF5934]/20 flex items-center justify-center flex-shrink-0">
+                    <span className="text-[#FF5934] text-[9px] font-bold">{(selectedRetailerObj.shopName || selectedRetailerObj.name || '?')[0].toUpperCase()}</span>
+                  </div>
+                  <span className="text-[12px] font-semibold text-[#FF5934]">{selectedRetailerObj.shopName || selectedRetailerObj.name}</span>
+                  <button onClick={() => setSelectedRetailer('')} className="text-[#FF5934]/50 hover:text-[#FF5934] ml-1"><MdClose size={13} /></button>
+                </div>
+              )}
+              {selectedSPObj && (
+                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-1.5">
+                  <MdPerson size={12} className="text-emerald-500" />
+                  <span className="text-[12px] font-semibold text-emerald-600">{selectedSPObj.name}</span>
+                  <button onClick={() => setSelectedSP('')} className="text-emerald-400 hover:text-emerald-600 ml-1"><MdClose size={13} /></button>
+                </div>
               )}
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleExportPdf}
-              disabled={!canExport}
-              className="h-10 px-4 rounded-xl border border-red-100 bg-white text-red-600 text-sm font-semibold hover:bg-red-50 disabled:bg-gray-100 disabled:text-gray-300 disabled:border-gray-100 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-            >
-              <MdPictureAsPdf size={16} /> PDF
-            </button>
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              disabled={!canExport}
-              className="h-10 px-4 rounded-xl border border-emerald-100 bg-white text-emerald-600 text-sm font-semibold hover:bg-emerald-50 disabled:bg-gray-100 disabled:text-gray-300 disabled:border-gray-100 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-            >
-              <MdGridOn size={16} /> Excel
-            </button>
-          </div>
+          )}
         </div>
 
-        {/* ── Tabs ── */}
-        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-visible mb-0">
+        {/* ── Loading ── */}
+        {loading && !generated && (
+          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm py-20 flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
+            <p className="text-[13px] text-[#9CA3AF]">Loading recovery data…</p>
+          </div>
+        )}
 
-          {/* ── Shared Filter Card ── */}
-          <div className="px-5 py-5 border-b border-gray-100 bg-[#FAFAFA]">
-            <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-4 flex items-center gap-2">
-              <MdFilterList size={13} className="text-[#FF5934]" /> Filters
-            </p>
-
-            {/* First Row: Sales Person + Date Range + Buttons */}
-            <div className="flex flex-wrap gap-4 items-end">
-
-              {/* ── Sales Person Picker ── */}
-              <div className="flex-1 min-w-[220px]">
-                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdPerson size={12} className="text-[#FF5934]" /> Sales Person
-                </label>
-                <div className="relative">
-                  <div
-                    className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                    onClick={() => setSpDropOpen(p => !p)}
-                  >
-                    {selectedPersonObj ? (
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
-                          <span className="text-[#FF5934] text-[10px] font-bold">
-                            {(selectedPersonObj.name || "?")[0].toUpperCase()}
-                          </span>
-                        </div>
-                        <span className="text-[13px] text-[#111827] font-medium truncate">{selectedPersonObj.name}</span>
-                      </div>
-                    ) : (
-                      <span className="text-[13px] text-gray-300 flex-1">Select sales person…</span>
-                    )}
-                    <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
+        {/* ── Results ── */}
+        {!loading && generated && (
+          <>
+            {/* Stats row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+              {[
+                { icon: MdAttachMoney, label: 'Total Recovered', value: `Rs. ${fmt(stats.totalAmount)}`, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                { icon: MdCheckCircle, label: 'Approved', value: stats.approved.toLocaleString(), color: 'text-green-600', bg: 'bg-green-50' },
+                { icon: MdBarChart, label: 'Pending', value: stats.pending.toLocaleString(), color: 'text-amber-600', bg: 'bg-amber-50' },
+                { icon: MdStorefront, label: 'Total Records', value: stats.count.toLocaleString(), color: 'text-[#FF5934]', bg: 'bg-[#FF5934]/10' },
+              ].map(({ icon: Icon, label, value, color, bg }) => (
+                <div key={label} className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4">
+                  <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center flex-shrink-0`}>
+                    <Icon size={20} className={color} />
                   </div>
-
-                  {/* Dropdown */}
-                  {spDropOpen && (
-                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
-                      <div className="p-2 border-b border-gray-100">
-                        <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
-                          <MdSearch size={14} className="text-[#9CA3AF]" />
-                          <input
-                            autoFocus
-                            value={spSearch}
-                            onChange={e => setSpSearch(e.target.value)}
-                            placeholder="Search…"
-                            className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
-                          />
-                          {spSearch && (
-                            <button onClick={() => setSpSearch("")} className="text-[#9CA3AF] hover:text-[#FF5934]">
-                              <MdClose size={13} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <div className="max-h-52 overflow-y-auto att-no-scroll">
-                        {filteredSP.length ? filteredSP.map(sp => (
-                          <div
-                            key={sp._id}
-                            onClick={() => { setSelectedSalesPerson(sp._id); setSpDropOpen(false); setSpSearch(""); }}
-                            className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSalesPerson === sp._id ? "bg-orange-50" : ""}`}
-                          >
-                            <div className="w-7 h-7 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
-                              <span className="text-[#FF5934] text-[11px] font-bold">{(sp.name || "?")[0].toUpperCase()}</span>
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[13px] font-medium text-[#111827] truncate">{sp.name}</p>
-                              <p className="text-[11px] text-[#9CA3AF] truncate">{sp.email}</p>
-                            </div>
-                            {selectedSalesPerson === sp._id && (
-                              <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0" />
-                            )}
-                          </div>
-                        )) : (
-                          <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No results found</div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* ── Date Preset Dropdown ── */}
-              <div className="flex-1 min-w-[220px]">
-                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdCalendarToday size={12} className="text-[#FF5934]" /> Date Range
-                </label>
-                <div className="relative">
-                  <div
-                    className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                    onClick={() => setDateDropOpen(p => !p)}
-                  >
-                    <span className="text-[13px] text-[#111827] font-medium flex-1">{getPresetLabel()}</span>
-                    <MdExpandMore size={18} className="text-[#9CA3AF] flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-0.5">{label}</p>
+                    <p className={`text-[15px] font-bold truncate ${color}`}>{value}</p>
                   </div>
-
-                  {/* Date Preset Dropdown */}
-                  {dateDropOpen && (
-                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
-                      <button
-                        onClick={() => applyDatePreset("today")}
-                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-orange-50 transition-colors flex items-center gap-2 border-b border-gray-100 ${datePreset === "today" ? "bg-orange-50 text-[#FF5934] font-semibold" : "text-[#111827]"}`}
-                      >
-                        <MdCheckCircle size={14} className={datePreset === "today" ? "text-[#FF5934]" : "text-transparent"} />
-                        Today
-                      </button>
-                      <button
-                        onClick={() => applyDatePreset("week")}
-                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-orange-50 transition-colors flex items-center gap-2 border-b border-gray-100 ${datePreset === "week" ? "bg-orange-50 text-[#FF5934] font-semibold" : "text-[#111827]"}`}
-                      >
-                        <MdCheckCircle size={14} className={datePreset === "week" ? "text-[#FF5934]" : "text-transparent"} />
-                        This Week
-                      </button>
-                      <button
-                        onClick={() => applyDatePreset("month")}
-                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-orange-50 transition-colors flex items-center gap-2 border-b border-gray-100 ${datePreset === "month" ? "bg-orange-50 text-[#FF5934] font-semibold" : "text-[#111827]"}`}
-                      >
-                        <MdCheckCircle size={14} className={datePreset === "month" ? "text-[#FF5934]" : "text-transparent"} />
-                        This Month
-                      </button>
-                      <button
-                        onClick={() => applyDatePreset("custom")}
-                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-orange-50 transition-colors flex items-center gap-2 ${datePreset === "custom" ? "bg-orange-50 text-[#FF5934] font-semibold" : "text-[#111827]"}`}
-                      >
-                        <MdCheckCircle size={14} className={datePreset === "custom" ? "text-[#FF5934]" : "text-transparent"} />
-                        Custom Dates
-                      </button>
-                    </div>
-                  )}
                 </div>
-              </div>
-
-              {/* ── Buttons ── */}
-              <div className="flex gap-2 flex-shrink-0">
-                <button
-                  onClick={handleReset}
-                  className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
-                >
-                  <MdRefresh size={15} /> Reset
-                </button>
-                <button
-                  onClick={() => fetchData()}
-                  disabled={!canGenerate}
-                  className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2"
-                >
-                  <MdBarChart size={16} /> Generate Report
-                </button>
-              </div>
+              ))}
             </div>
 
-            {/* ── Custom Date Inputs Row (shown only when Custom Dates is selected) ── */}
-            {datePreset === "custom" && (
-              <div className="w-full flex flex-wrap gap-4 items-end mt-4 pt-4 border-t border-gray-200">
-                <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest w-full mb-2">
-                  <MdFilterList size={13} className="text-[#FF5934] inline mr-1" /> Custom Date Range
-                </p>
-                
-                <div className="flex-1 min-w-[200px]">
-                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                    <MdCalendarToday size={12} className="text-[#FF5934]" /> From Date
-                  </label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={e => setStartDate(e.target.value)}
-                    className="att-input"
-                  />
-                </div>
-
-                <div className="flex-1 min-w-[200px]">
-                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                    <MdCalendarToday size={12} className="text-[#FF5934]" /> To Date
-                  </label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={e => setEndDate(e.target.value)}
-                    min={startDate || undefined}
-                    className="att-input"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Active filter chips */}
-            {(selectedPersonObj || datePreset || startDate || endDate) && (
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                {selectedPersonObj && (
-                  <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-3 py-1.5">
-                    <div className="w-5 h-5 rounded-full bg-[#FF5934]/20 flex items-center justify-center flex-shrink-0">
-                      <span className="text-[#FF5934] text-[9px] font-bold">{(selectedPersonObj.name || "?")[0].toUpperCase()}</span>
-                    </div>
-                    <span className="text-[12px] font-semibold text-[#FF5934]">{selectedPersonObj.name}</span>
-                    <button onClick={() => { setSelectedSalesPerson(""); setAttendanceData([]); setGenerated(false); }} className="text-[#FF5934]/50 hover:text-[#FF5934] ml-1">
-                      <MdClose size={13} />
-                    </button>
-                  </div>
-                )}
-                {datePreset && (
-                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
-                    <MdCalendarToday size={12} className="text-blue-500" />
-                    <span className="text-[12px] font-semibold text-blue-600">{getPresetLabel()}</span>
-                    <button onClick={() => { setDatePreset(""); setStartDate(""); setEndDate(""); }} className="text-blue-400 hover:text-blue-600 ml-1">
-                      <MdClose size={13} />
-                    </button>
-                  </div>
-                )}
-                {datePreset === "custom" && (startDate || endDate) && (
-                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
-                    <MdCalendarToday size={12} className="text-blue-500" />
-                    <span className="text-[12px] font-semibold text-blue-600">{formatDate(startDate) || "Start"} to {formatDate(endDate) || "Latest"}</span>
-                    <button onClick={() => { setStartDate(""); setEndDate(""); setDatePreset(""); }} className="text-blue-400 hover:text-blue-600 ml-1">
-                      <MdClose size={13} />
-                    </button>
-                  </div>
+            {/* Search inside results */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 flex-1 max-w-sm shadow-sm">
+                <MdSearch size={16} className="text-[#9CA3AF] flex-shrink-0" />
+                <input
+                  type="search" value={searchRecovery}
+                  onChange={e => { setSearchRecovery(e.target.value); setCurrentPage(1); }}
+                  placeholder="Search retailer, salesperson, A/C no…"
+                  className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
+                />
+                {searchRecovery && (
+                  <button onClick={() => { setSearchRecovery(''); setCurrentPage(1); }} className="text-[#9CA3AF] hover:text-[#FF5934]">
+                    <MdClose size={13} />
+                  </button>
                 )}
               </div>
-            )}
-          </div>
+              <p className="text-[12px] text-[#9CA3AF] flex-shrink-0">
+                {filtered.length !== reportData.length
+                  ? `${filtered.length} of ${reportData.length} records`
+                  : `${reportData.length} record${reportData.length !== 1 ? 's' : ''}`}
+              </p>
+            </div>
 
-          {/* ═══ TAB CONTENT ═══ */}
-
-          {/* ── Check-In / Out ── */}
-          <>
-            {loading ? (
-              <div className="py-20 flex justify-center"><Loader /></div>
-            ) : !generated ? (
-              <div className="py-20 text-center flex flex-col items-center gap-3">
-                <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                  <MdBarChart size={24} className="text-gray-300" />
-                </div>
-                <p className="text-[#9CA3AF] text-sm font-medium">Select a sales person and click Generate Report</p>
-              </div>
-            ) : attendanceData.length === 0 ? (
-              <div className="py-20 text-center flex flex-col items-center gap-3">
-                <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                  <MdAccessTime size={24} className="text-gray-300" />
-                </div>
-                <p className="text-[#9CA3AF] text-sm font-medium">No attendance records found for this period</p>
-                <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline font-medium">Clear filters</button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-[#FAFAFA] border-b border-gray-100">
-                      {["Date", "Check In", "Check Out", "Duration", "Status"].map(h => (
-                        <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {sortedData.map((record, i) => {
-                      const { display } = calcDiff(record.checkInTime, record.checkOutTime);
-                      const sc = statusColor(record.checkInTime, record.checkOutTime);
-                      return (
-                        <tr key={record._id || i} className="table-row">
-
-                          {/* Date */}
-                          <td className="px-4 py-3">
-                            <p className="text-[13px] font-semibold text-[#111827]">{formatDate(record.date)}</p>
-                          </td>
-
-                          {/* Check In */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
-                                <MdLogin size={12} className="text-emerald-500" />
-                              </div>
-                              <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkInTime)}</span>
-                            </div>
-                          </td>
-
-                          {/* Check Out */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                                <MdLogout size={12} className="text-red-400" />
-                              </div>
-                              <span className="text-[13px] text-[#374151] font-medium">{formatTime(record.checkOutTime)}</span>
-                            </div>
-                          </td>
-
-                          {/* Duration */}
-                          <td className="px-4 py-3">
-                            <span className="text-[13px] font-semibold text-[#111827]">{display}</span>
-                          </td>
-
-                          {/* Status */}
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${sc.pill}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-                              {sc.label}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-
-                {/* Summary footer */}
-                <div className="px-5 py-4 bg-[#FAFAFA] border-t border-gray-100 flex items-center justify-between">
-                  <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
-                    {sortedData.length} record{sortedData.length !== 1 ? "s" : ""}
+            {/* Table */}
+            <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+              {filtered.length === 0 ? (
+                <div className="py-16 text-center flex flex-col items-center gap-3">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+                    <MdAttachMoney size={22} className="text-gray-300" />
+                  </div>
+                  <p className="text-[#9CA3AF] text-sm font-medium">
+                    {searchRecovery ? 'No records match your search' : 'No recovery data found'}
                   </p>
-                  <span className="inline-flex items-center gap-2 text-[14px] font-bold text-[#111827]">
-                    <MdTimer size={16} className="text-[#FF5934]" />
-                    Total: {calcTotal(attendanceData)}
-                  </span>
+                  {searchRecovery && (
+                    <button onClick={() => setSearchRecovery('')} className="text-[#FF5934] text-xs hover:underline">Clear search</button>
+                  )}
                 </div>
-              </div>
-            )}
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-[#FAFAFA] border-b border-gray-100">
+                          <th className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-16">#</th>
+                          <th className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-24">A/C No.</th>
+                          <th className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Retailer</th>
+                          <th className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Salesperson</th>
+                          <th className="text-right text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Amount (Rs.)</th>
+                          <th className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-24">Date</th>
+                          <th className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {paginated.map((row, i) => {
+                          const rowNum = (currentPage - 1) * ROWS_PER_PAGE + i + 1;
+                          const statusColor = row.status === 'Approved' ? 'bg-green-50 text-green-600 ring-green-200' : row.status === 'Rejected' ? 'bg-red-50 text-red-600 ring-red-200' : 'bg-amber-50 text-amber-600 ring-amber-200';
+
+                          return (
+                            <tr key={row._id} className="table-row">
+                              <td className="px-4 py-3">
+                                <span className="text-[12px] font-bold text-[#C4C9D4]">{rowNum}</span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="text-[12px] font-mono font-semibold text-[#6B7280] bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg">
+                                  {row.accountNo}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <p className="text-[13px] font-semibold text-[#111827] leading-tight">{row.retailerName}</p>
+                                <p className="text-[11px] text-[#9CA3AF]">{row.city}</p>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                                    <span className="text-[#FF5934] text-[9px] font-bold">
+                                      {(row.salesPerson[0] || '?').toUpperCase()}
+                                    </span>
+                                  </div>
+                                  <span className="text-[13px] text-[#374151] font-medium">{row.salesPerson}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className="text-[13px] font-bold text-emerald-600">
+                                  Rs. {fmt(row.amount)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="text-[12px] text-[#6B7280] font-medium">{row.displayDate}</span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${statusColor}`}>
+                                  {row.status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Footer: totals + pagination */}
+                  <div className="border-t border-gray-100 bg-[#FAFAFA] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total Recovered</p>
+                      <p className="text-[16px] font-bold text-emerald-600">Rs. {fmt(stats.totalAmount)}</p>
+                    </div>
+
+                    {totalPages > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                          disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}
+                        ><GrFormPrevious size={16} /></button>
+                        <div className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm">
+                          <span className="font-semibold text-[#FF5934]">{currentPage}</span>
+                          <span className="text-gray-300">/</span>
+                          <span className="text-[#374151]">{totalPages}</span>
+                        </div>
+                        <button
+                          className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                          disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}
+                        ><GrFormNext size={16} /></button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </>
-        </div>
+        )}
       </div>
     </>
   );
 };
 
-export default AttandanceTracking;
+export default ReportsRecovery;

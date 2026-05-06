@@ -359,8 +359,9 @@ const Sidebar = () => {
                 <SubNavItem to="/Reports/Sales"           icon={MdPointOfSale} label="Sales"                 />
                 {/* <SubNavItem to="/Product"                 icon={MdInventory2}  label="Inventory"             /> */}
                 <SubNavItem to="/Reports/Recovery"        icon={MdAutorenew}   label="Recovery"              />
-                <SubNavItem to="/Reports/Attendance"      icon={MdFingerprint} label="Attendance"            />
+                {/* <SubNavItem to="/Reports/Attendance"      icon={MdFingerprint} label="Attendance"            /> */}
                 <SubNavItem to="/Reports/CustomerLedger"  icon={MdReceipt}     label="Customer Ledger"       />
+                <SubNavItem to="/Reports/ProductAndInventory"  icon={MdReceipt}     label="Product & Inventory Report"       />
                 <SubNavItem to="/Reports/TargetVsAchieve" icon={FaBullseye}    label="Target vs Achievement" />
               </NavGroup>
 
