@@ -24,125 +24,119 @@ const formatDate = (dateString) => {
 };
 
 /* ─────────────────────────────────────────
-   PDF EXPORT — Professional ledger layout
+   PDF EXPORT — Matches Karyana ledger layout exactly
+   Columns: Date | Details | Bank Name | Ref No. | V. No. | Quantity | Debit | Credit | Balance
 ───────────────────────────────────────── */
 const exportToPdf = (ledgerData, retailer, totals) => {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pw   = doc.internal.pageSize.getWidth();
-  const ph   = doc.internal.pageSize.getHeight();
-  const ml   = 10; // margin left
-  const mr   = 10; // margin right
-  const cw   = pw - ml - mr; // content width = 190mm
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  const ml = 10;
+  const mr = 10;
+  const cw = pw - ml - mr;
 
-  const ORANGE = [255, 89, 52];
-  const DARK   = [17, 24, 39];
-  const GRAY   = [107, 114, 128];
-  const LGRAY  = [243, 244, 246];
-  const WHITE  = [255, 255, 255];
-  const GREEN  = [5, 150, 105];
-  const RED    = [220, 38, 38];
+  const BLACK = [0, 0, 0];
+  const DARK  = [17, 24, 39];
+  const GRAY  = [100, 100, 100];
+  const LGRAY = [220, 220, 220];
 
-  /* column definitions: x offset, width, label, align */
   const cols = [
-    { x: 0,    w: 8,   label: 'Sr.',         align: 'center' },
-    { x: 8,    w: 22,  label: 'Date',        align: 'left'   },
-    { x: 30,   w: 65,  label: 'Description', align: 'left'   },
-    { x: 95,   w: 22,  label: 'Type',        align: 'center' },
-    { x: 117,  w: 24,  label: 'Debit (Dr)',  align: 'right'  },
-    { x: 141,  w: 24,  label: 'Credit (Cr)', align: 'right'  },
-    { x: 165,  w: 25,  label: 'Balance',     align: 'right'  },
+    { x: 0,   w: 22, label: 'Date',      align: 'left'   },
+    { x: 22,  w: 28, label: 'Details',   align: 'left'   },
+    { x: 50,  w: 25, label: 'Bank Name', align: 'left'   },
+    { x: 75,  w: 28, label: 'Ref No.',   align: 'left'   },
+    { x: 103, w: 14, label: 'V. No.',    align: 'center' },
+    { x: 117, w: 15, label: 'Quantity',  align: 'right'  },
+    { x: 132, w: 20, label: 'Debit',     align: 'right'  },
+    { x: 152, w: 20, label: 'Credit',    align: 'right'  },
+    { x: 172, w: 18, label: 'Balance',   align: 'right'  },
   ];
 
   const drawPageHeader = (pageNum, totalPages) => {
-    /* orange header bar */
-    doc.setFillColor(...ORANGE);
-    doc.rect(0, 0, pw, 22, 'F');
-
-    /* company name */
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(15);
-    doc.setTextColor(...WHITE);
-    doc.text('Prime Link Distribution', ml, 10);
+    doc.setFontSize(18);
+    doc.setTextColor(...BLACK);
+    doc.text('Karyana', pw / 2, 12, { align: 'center' });
 
-    /* report title */
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Customer Ledger Report', pw - mr, 10, { align: 'right' });
-    doc.text(`Page ${pageNum} of ${totalPages}`, pw - mr, 16, { align: 'right' });
+    doc.setFontSize(13);
+    doc.text('Customer Ledger', pw / 2, 20, { align: 'center' });
 
-    /* customer info row */
-    doc.setFillColor(250, 250, 250);
-    doc.rect(0, 22, pw, 16, 'F');
-    doc.setDrawColor(229, 231, 235);
-    doc.line(0, 22, pw, 22);
-    doc.line(0, 38, pw, 38);
+    doc.setDrawColor(...LGRAY);
+    doc.setLineWidth(0.3);
+    doc.line(ml, 23, pw - mr, 23);
 
+    /* Left: account info */
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(...DARK);
-    doc.text('Customer:', ml, 28);
+    doc.text(`Account No :${retailer.accountNo || ''}`, ml, 29);
+    doc.text(retailer.name || '', ml, 34);
     doc.setFont('helvetica', 'normal');
-    doc.text(retailer.name || '—', ml + 22, 28);
+    doc.text(`Mobile: ${retailer.phoneNumber || retailer.phone || ''}`, ml, 39);
+    doc.text(retailer.city || '', ml, 44);
+    doc.text(retailer.region || '', ml, 49);
 
+    /* Center: salesperson */
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...DARK);
+    doc.text(`Salesperson: ${retailer.salesperson || ''}`, pw / 2, 32, { align: 'center' });
+
+    /* Right: date range + total due */
+    const dateFrom = retailer.dateFrom || '';
+    const dateTo   = retailer.dateTo   || new Date().toLocaleDateString('en-GB');
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Date From: ${dateFrom}  to:${dateTo}`, pw - mr, 29, { align: 'right' });
     doc.setFont('helvetica', 'bold');
-    doc.text('Phone:', ml + 80, 28);
-    doc.setFont('helvetica', 'normal');
-    doc.text(retailer.phoneNumber || retailer.phone || 'N/A', ml + 96, 28);
+    doc.text(`Total Due :Rs. ${formatNumber(totals.finalBal)}`, pw - mr, 34, { align: 'right' });
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('Shop:', ml, 34);
-    doc.setFont('helvetica', 'normal');
-    doc.text(retailer.shopName || retailer.name || 'N/A', ml + 22, 34);
+    if (pageNum > 1) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7);
+      doc.setTextColor(...GRAY);
+      doc.text(`Page ${pageNum} of ${totalPages}`, pw - mr, 52, { align: 'right' });
+    }
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('Generated:', ml + 80, 34);
-    doc.setFont('helvetica', 'normal');
-    doc.text(new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }), ml + 103, 34);
+    doc.setDrawColor(...BLACK);
+    doc.setLineWidth(0.4);
+    doc.line(ml, 53, pw - mr, 53);
 
-    return 42; // y after header
+    return 53;
   };
 
   const drawTableHeader = (y) => {
-    doc.setFillColor(255, 240, 236);
+    doc.setFillColor(240, 240, 240);
     doc.rect(ml, y, cw, 7, 'F');
-    doc.setDrawColor(...ORANGE);
-    doc.line(ml, y, ml + cw, y);
-    doc.line(ml, y + 7, ml + cw, y + 7);
-
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    doc.setTextColor(...DARK);
+    doc.setTextColor(...BLACK);
 
     cols.forEach(col => {
       const xPos = ml + col.x;
-      if (col.align === 'right')  doc.text(col.label, xPos + col.w - 1, y + 5, { align: 'right' });
+      if (col.align === 'right')       doc.text(col.label, xPos + col.w - 1, y + 5, { align: 'right' });
       else if (col.align === 'center') doc.text(col.label, xPos + col.w / 2, y + 5, { align: 'center' });
-      else doc.text(col.label, xPos + 1, y + 5);
+      else                             doc.text(col.label, xPos + 1, y + 5);
     });
 
-    /* vertical dividers */
-    doc.setDrawColor(255, 160, 122);
-    let cx = ml;
-    cols.forEach(col => {
-      doc.line(cx, y, cx, y + 7);
-      cx += col.w;
-    });
-    doc.line(cx, y, cx, y + 7);
+    doc.setDrawColor(...BLACK);
+    doc.setLineWidth(0.3);
+    doc.line(ml, y, ml + cw, y);
+    doc.line(ml, y + 7, ml + cw, y + 7);
 
     return y + 7;
   };
 
-  /* ── paginate ── */
-  const ROW_H    = 6;
-  const FOOTER_H = 22;
+  const ROW_H    = 7;
+  const FOOTER_H = 16;
   const USABLE   = ph - FOOTER_H;
 
-  // estimate pages
+  /* estimate pages */
   let tempY = drawPageHeader(1, 1);
   tempY = drawTableHeader(tempY);
-  const rowsPerFirstPage = Math.floor((USABLE - tempY) / ROW_H);
-  const rowsPerOtherPage = Math.floor((USABLE - 42 - 7) / ROW_H); // 42 header + 7 col header
-  const remainingRows = Math.max(0, ledgerData.length - rowsPerFirstPage);
+  const rowsPerFirstPage = Math.floor((USABLE - tempY - 10) / ROW_H);
+  const rowsPerOtherPage = Math.floor((USABLE - 53 - 7 - 10) / ROW_H);
+  const totalRows = ledgerData.length + 1;
+  const remainingRows = Math.max(0, totalRows - rowsPerFirstPage);
   const extraPages = remainingRows > 0 ? Math.ceil(remainingRows / rowsPerOtherPage) : 0;
   const totalPages = 1 + extraPages;
 
@@ -152,17 +146,24 @@ const exportToPdf = (ledgerData, retailer, totals) => {
 
   doc.setFontSize(7.5);
 
-  ledgerData.forEach((row, idx) => {
-    /* new page check */
-    if (y + ROW_H > USABLE) {
-      /* totals continuation line at page bottom */
-      doc.setFillColor(...LGRAY);
-      doc.rect(ml, y, cw, 5, 'F');
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(7);
-      doc.setTextColor(...GRAY);
-      doc.text('Continued on next page…', ml + 2, y + 3.5);
+  /* Brought Forward row */
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...DARK);
+  doc.text('Brought', ml + cols[1].x + 1, y + 3.5);
+  doc.text('Forward', ml + cols[1].x + 1, y + 7.5);
+  doc.text('0', ml + cols[5].x + cols[5].w - 1, y + 5, { align: 'right' });
+  doc.text(
+    retailer.openingBalance != null ? formatNumber(retailer.openingBalance) : '',
+    ml + cols[8].x + cols[8].w - 1, y + 5, { align: 'right' }
+  );
+  doc.setDrawColor(...LGRAY);
+  doc.setLineWidth(0.2);
+  doc.line(ml, y + ROW_H, ml + cw, y + ROW_H);
+  y += ROW_H;
 
+  /* Data rows */
+  ledgerData.forEach((row) => {
+    if (y + ROW_H > USABLE) {
       doc.addPage();
       currentPage++;
       y = drawPageHeader(currentPage, totalPages);
@@ -170,149 +171,111 @@ const exportToPdf = (ledgerData, retailer, totals) => {
       doc.setFontSize(7.5);
     }
 
-    /* alternating row bg */
-    if (idx % 2 === 0) {
-      doc.setFillColor(249, 250, 251);
-      doc.rect(ml, y, cw, ROW_H, 'F');
-    }
-
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...DARK);
 
     const vals = [
-      { v: String(row.sr),    align: 'center' },
-      { v: row.date,           align: 'left'   },
-      { v: row.details.length > 45 ? row.details.slice(0, 44) + '…' : row.details, align: 'left' },
-      { v: row.type,           align: 'center' },
-      { v: row.dr !== '0' ? row.dr : '—', align: 'right', color: row.dr !== '0' ? GREEN : GRAY },
-      { v: row.cr !== '0' ? row.cr : '—', align: 'right', color: row.cr !== '0' ? RED   : GRAY },
-      { v: row.balance,        align: 'right', bold: true  },
+      { col: 0, v: row.date },
+      { col: 1, v: row.details.length > 18 ? row.details.slice(0, 17) + '…' : row.details },
+      { col: 2, v: row.bankName || '' },
+      { col: 3, v: row.refNo    || '' },
+      { col: 4, v: String(row.vNo || '') },
+      { col: 5, v: row.quantity != null ? String(row.quantity) : '0' },
+      { col: 6, v: row.rawDr > 0 ? formatNumber(row.rawDr) : '' },
+      { col: 7, v: row.rawCr > 0 ? formatNumber(row.rawCr) : '' },
+      { col: 8, v: formatNumber(row.rawBalance) },
     ];
 
-    cols.forEach((col, i) => {
-      const xPos = ml + col.x;
-      const val  = vals[i];
-      doc.setTextColor(...(val.color || DARK));
-      if (val.bold) doc.setFont('helvetica', 'bold');
-      else          doc.setFont('helvetica', 'normal');
-
-      if (val.align === 'right')       doc.text(String(val.v), xPos + col.w - 1, y + 4, { align: 'right' });
-      else if (val.align === 'center') doc.text(String(val.v), xPos + col.w / 2, y + 4, { align: 'center' });
-      else                             doc.text(String(val.v), xPos + 1, y + 4);
+    vals.forEach(({ col, v }) => {
+      if (!v) return;
+      const c    = cols[col];
+      const xPos = ml + c.x;
+      if (c.align === 'right')       doc.text(v, xPos + c.w - 1, y + 5, { align: 'right' });
+      else if (c.align === 'center') doc.text(v, xPos + c.w / 2, y + 5, { align: 'center' });
+      else                           doc.text(v, xPos + 1, y + 5);
     });
 
-    /* row bottom border */
-    doc.setDrawColor(243, 244, 246);
+    doc.setDrawColor(...LGRAY);
+    doc.setLineWidth(0.2);
     doc.line(ml, y + ROW_H, ml + cw, y + ROW_H);
-
-    /* vertical col dividers */
-    doc.setDrawColor(229, 231, 235);
-    let cx = ml;
-    cols.forEach(col => {
-      doc.line(cx, y, cx, y + ROW_H);
-      cx += col.w;
-    });
-    doc.line(cx, y, cx, y + ROW_H);
-
     y += ROW_H;
   });
 
-  /* ── Totals row ── */
-  doc.setFillColor(255, 240, 236);
-  doc.rect(ml, y, cw, 8, 'F');
-  doc.setDrawColor(...ORANGE);
+  /* Totals row */
+  doc.setDrawColor(...BLACK);
+  doc.setLineWidth(0.4);
   doc.line(ml, y, ml + cw, y);
-  doc.line(ml, y + 8, ml + cw, y + 8);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(...DARK);
-  doc.text('TOTALS', ml + 2, y + 5.5);
+  doc.setFontSize(7.5);
+  doc.setTextColor(...BLACK);
 
-  /* Total Dr */
-  const drCol = cols[4];
-  doc.setTextColor(...GREEN);
-  doc.text(formatNumber(totals.totalDr), ml + drCol.x + drCol.w - 1, y + 5.5, { align: 'right' });
+  const totalQty = ledgerData.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
+  doc.text(String(totalQty), ml + cols[5].x + cols[5].w - 1, y + 5, { align: 'right' });
+  doc.text(formatNumber(totals.totalDr), ml + cols[6].x + cols[6].w - 1, y + 5, { align: 'right' });
+  doc.text(formatNumber(totals.totalCr), ml + cols[7].x + cols[7].w - 1, y + 5, { align: 'right' });
 
-  /* Total Cr */
-  const crCol = cols[5];
-  doc.setTextColor(...RED);
-  doc.text(formatNumber(totals.totalCr), ml + crCol.x + crCol.w - 1, y + 5.5, { align: 'right' });
+  doc.line(ml, y + 7, ml + cw, y + 7);
 
-  /* Final Balance */
-  const balCol = cols[6];
-  const finalBal = ledgerData[ledgerData.length - 1]?.rawBalance || 0;
-  doc.setTextColor(...DARK);
-  doc.text(formatNumber(finalBal), ml + balCol.x + balCol.w - 1, y + 5.5, { align: 'right' });
-
-  y += 8;
-
-  /* ── Footer note ── */
-  y += 4;
+  /* Footer */
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
+  doc.setFontSize(6.5);
   doc.setTextColor(...GRAY);
-  doc.text(`This report was generated on ${new Date().toLocaleString('en-GB')} — Prime Link Distribution`, ml, y);
-  doc.text('All amounts in PKR (Pakistani Rupees)', pw - mr, y, { align: 'right' });
+  doc.text(
+    `Generated on ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} — Karyana`,
+    ml, ph - 8
+  );
+  doc.text('All amounts in PKR', pw - mr, ph - 8, { align: 'right' });
 
   doc.save(`Ledger_${(retailer.name || 'customer').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`);
   toast.success('PDF exported successfully');
 };
 
 /* ─────────────────────────────────────────
-   EXCEL EXPORT — Styled workbook
+   EXCEL EXPORT
 ───────────────────────────────────────── */
 const exportToExcel = (ledgerData, retailer, totals) => {
   const wb = XLSX.utils.book_new();
-
-  /* ── build data array ── */
   const rows = [];
 
-  /* title rows */
-  rows.push(['PRIME LINK DISTRIBUTION', '', '', '', '', '', '']);
-  rows.push(['Customer Ledger Report', '', '', '', '', '', '']);
+  rows.push(['Karyana', '', '', '', '', '', '', '', '']);
+  rows.push(['Customer Ledger Report', '', '', '', '', '', '', '', '']);
   rows.push([]);
-  rows.push(['Customer:', retailer.name || '—',       '', 'Phone:', retailer.phoneNumber || retailer.phone || 'N/A', '', '']);
-  rows.push(['Shop:',     retailer.shopName || '—',   '', 'Generated:', new Date().toLocaleString('en-GB'), '', '']);
+  rows.push(['Account No:', retailer.accountNo || '', '', 'Salesperson:', retailer.salesperson || '', '', '', '', '']);
+  rows.push(['Customer:', retailer.name || '', '', 'Phone:', retailer.phoneNumber || retailer.phone || '', '', '', '', '']);
+  rows.push(['Date From:', retailer.dateFrom || '', 'to:', retailer.dateTo || '', '', 'Total Due:', totals.finalBal, '', '']);
   rows.push([]);
+  rows.push(['Date', 'Details', 'Bank Name', 'Ref No.', 'V. No.', 'Quantity', 'Debit (Dr.)', 'Credit (Cr.)', 'Balance']);
 
-  /* column headers */
-  rows.push(['Sr.', 'Date', 'Description', 'Type', 'Debit (Dr.)', 'Credit (Cr.)', 'Balance']);
+  /* Brought Forward */
+  rows.push(['', 'Brought Forward', '', '', '', 0, '', '', retailer.openingBalance || '']);
 
-  /* data rows */
   ledgerData.forEach(row => {
     rows.push([
-      row.sr,
       row.date,
       row.details,
-      row.type,
-      row.dr !== '0' ? parseFloat(row.rawDr) : '',
-      row.cr !== '0' ? parseFloat(row.rawCr) : '',
-      parseFloat(row.rawBalance),
+      row.bankName || '',
+      row.refNo    || '',
+      row.vNo      || '',
+      row.quantity != null ? row.quantity : 0,
+      row.rawDr > 0 ? row.rawDr : '',
+      row.rawCr > 0 ? row.rawCr : '',
+      row.rawBalance,
     ]);
   });
 
-  /* blank row + totals */
   rows.push([]);
-  rows.push(['', '', '', 'TOTAL', totals.totalDr, totals.totalCr, ledgerData[ledgerData.length - 1]?.rawBalance || 0]);
+  const totalQty = ledgerData.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
+  rows.push(['', '', '', '', 'TOTAL', totalQty, totals.totalDr, totals.totalCr, ledgerData[ledgerData.length - 1]?.rawBalance || 0]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  /* column widths */
   ws['!cols'] = [
-    { wch: 6 },   // Sr
-    { wch: 14 },  // Date
-    { wch: 45 },  // Description
-    { wch: 14 },  // Type
-    { wch: 18 },  // Dr
-    { wch: 18 },  // Cr
-    { wch: 18 },  // Balance
+    { wch: 14 }, { wch: 28 }, { wch: 20 }, { wch: 28 },
+    { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
   ];
-
-  /* merge title cells */
   ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }, // company name
-    { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } }, // report title
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } },
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Customer Ledger');
@@ -324,16 +287,15 @@ const exportToExcel = (ledgerData, retailer, totals) => {
    MAIN COMPONENT
 ════════════════════════════════════════ */
 const ReportsCustomerLedger = () => {
-  const [view, setView]                     = useState('filter');
-  const [loading, setLoading]               = useState(false);
-  const [retailers, setRetailers]           = useState([]);
+  const [view, setView]                         = useState('filter');
+  const [loading, setLoading]                   = useState(false);
+  const [retailers, setRetailers]               = useState([]);
   const [selectedRetailer, setSelectedRetailer] = useState(null);
-  const [ledgerData, setLedgerData]         = useState([]);
-  const [dropdownOpen, setDropdownOpen]     = useState(false);
-  const [searchTerm, setSearchTerm]         = useState('');
-  const [error, setError]                   = useState('');
+  const [ledgerData, setLedgerData]             = useState([]);
+  const [dropdownOpen, setDropdownOpen]         = useState(false);
+  const [searchTerm, setSearchTerm]             = useState('');
+  const [error, setError]                       = useState('');
 
-  /* load retailers */
   useEffect(() => {
     setLoading(true);
     getAllRetailers()
@@ -342,7 +304,6 @@ const ReportsCustomerLedger = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  /* generate report */
   const handleGenerateReport = async () => {
     setError('');
     if (!selectedRetailer?._id) { setError('Please select a customer'); return; }
@@ -358,9 +319,14 @@ const ReportsCustomerLedger = () => {
           setLedgerData(data.map((item, idx) => ({
             sr:         idx + 1,
             id:         item._id,
-            details:    item.description || item.details || 'Transaction',
-            type:       item.type || 'ORDER',
+            details:    item.details     || item.description || 'Transaction',
+            type:       item.type        || 'PURCHASE',
             date:       formatDate(item.date),
+            bankName:   item.bankId      || '',           // API field: bankId
+            refNo:      item.refNo       || '',           // API field: refNo
+            vNo:        item.voucherNo   || item.v        || '', // API field: voucherNo / v
+            bilty:      item.biltyNumber || '',           // API field: biltyNumber
+            quantity:   item.quantity    != null ? item.quantity : 0, // API field: quantity
             dr:         item.type !== 'PAYMENT' ? formatNumber(item.amount || 0) : '0',
             cr:         item.type === 'PAYMENT' ? formatNumber(item.amount || 0) : '0',
             balance:    formatNumber(item.balance || 0),
@@ -391,6 +357,7 @@ const ReportsCustomerLedger = () => {
   const totals = {
     totalDr:  ledgerData.reduce((s, r) => s + r.rawDr, 0),
     totalCr:  ledgerData.reduce((s, r) => s + r.rawCr, 0),
+    totalQty: ledgerData.reduce((s, r) => s + (Number(r.quantity) || 0), 0),
     finalBal: ledgerData[ledgerData.length - 1]?.rawBalance || 0,
   };
 
@@ -420,8 +387,6 @@ const ReportsCustomerLedger = () => {
         {/* ═══════════════════ FILTER VIEW ═══════════════════ */}
         {view === 'filter' && (
           <div className="fade-up" style={{ maxWidth: 600, margin: '0 auto' }}>
-
-            {/* Header */}
             <div className="mt-6 mb-5">
               <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Customer Ledger Report</h1>
               <p className="text-sm text-[#9CA3AF] mt-0.5">View complete transaction history for any customer</p>
@@ -438,7 +403,6 @@ const ReportsCustomerLedger = () => {
                 <MdFilterList size={13} className="text-[#FF5934]" /> Select Customer
               </p>
 
-              {/* Customer dropdown */}
               <div className="mb-5">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                   <MdPerson size={12} className="text-[#FF5934]" /> Customer
@@ -502,7 +466,6 @@ const ReportsCustomerLedger = () => {
                 </div>
               </div>
 
-              {/* Selected customer preview */}
               {selectedRetailer && (
                 <div className="mb-5 p-3 bg-[#F9FAFB] rounded-xl border border-gray-100 flex flex-wrap gap-4 text-[12px] text-[#6B7280]">
                   {selectedRetailer.shopName && (
@@ -517,7 +480,6 @@ const ReportsCustomerLedger = () => {
                 </div>
               )}
 
-              {/* Buttons */}
               <div className="flex gap-2">
                 <button onClick={handleReset}
                   className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
@@ -580,10 +542,10 @@ const ReportsCustomerLedger = () => {
                 {/* Summary cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
                   {[
-                    { icon: MdReceipt,      label: 'Transactions', value: ledgerData.length,              color: 'text-[#FF5934]', bg: 'bg-[#FF5934]/10' },
-                    { icon: MdTrendingUp,   label: 'Total Debit',  value: `Rs. ${formatNumber(totals.totalDr)}`, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                    { icon: MdTrendingDown, label: 'Total Credit', value: `Rs. ${formatNumber(totals.totalCr)}`, color: 'text-red-500',    bg: 'bg-red-50'     },
-                    { icon: MdAccountBalance, label: 'Balance',    value: `Rs. ${formatNumber(totals.finalBal)}`, color: totals.finalBal >= 0 ? 'text-[#FF5934]' : 'text-red-600', bg: 'bg-[#FF5934]/10' },
+                    { icon: MdReceipt,        label: 'Transactions',  value: ledgerData.length,                    color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
+                    { icon: MdTrendingUp,     label: 'Total Debit',   value: `Rs. ${formatNumber(totals.totalDr)}`, color: 'text-emerald-600', bg: 'bg-emerald-50'   },
+                    { icon: MdTrendingDown,   label: 'Total Credit',  value: `Rs. ${formatNumber(totals.totalCr)}`, color: 'text-red-500',     bg: 'bg-red-50'       },
+                    { icon: MdAccountBalance, label: 'Balance',       value: `Rs. ${formatNumber(totals.finalBal)}`, color: totals.finalBal >= 0 ? 'text-[#FF5934]' : 'text-red-600', bg: 'bg-[#FF5934]/10' },
                   ].map(({ icon: Icon, label, value, color, bg }) => (
                     <div key={label} className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4 hover:-translate-y-0.5 transition-transform">
                       <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center flex-shrink-0`}>
@@ -597,63 +559,111 @@ const ReportsCustomerLedger = () => {
                   ))}
                 </div>
 
-                {/* Ledger table */}
+                {/* ── Ledger table — all 9 columns matching the PDF ── */}
                 <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="w-full min-w-[900px]">
                       <thead>
                         <tr className="bg-[#FFF4F1] border-b border-orange-100">
-                          {['Sr.', 'Date', 'Description', 'Type', 'Debit (Dr.)', 'Credit (Cr.)', 'Balance'].map((h, i) => (
-                            <th key={h}
-                              className={`text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest py-3 ${i === 0 ? 'px-4 text-left w-14' : i <= 2 ? 'px-4 text-left' : i === 3 ? 'px-4 text-center' : 'px-4 text-right'}`}>
-                              {h}
+                          {[
+                            { label: 'Date',        cls: 'text-left  px-3 w-24'  },
+                            { label: 'Details',     cls: 'text-left  px-3'       },
+                            { label: 'Bank Name',   cls: 'text-left  px-3 w-32'  },
+                            { label: 'Ref No.',     cls: 'text-left  px-3 w-36'  },
+                            { label: 'V. No.',      cls: 'text-center px-3 w-20' },
+                            { label: 'Quantity',    cls: 'text-right px-3 w-20'  },
+                            { label: 'Debit (Dr.)', cls: 'text-right px-3 w-28'  },
+                            { label: 'Credit (Cr.)',cls: 'text-right px-3 w-28'  },
+                            { label: 'Balance',     cls: 'text-right px-3 w-28'  },
+                          ].map(h => (
+                            <th key={h.label} className={`text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest py-3 ${h.cls}`}>
+                              {h.label}
                             </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
+
+                        {/* Brought Forward row */}
+                        <tr className="trow bg-gray-50/50">
+                          <td className="px-3 py-2.5" />
+                          <td className="px-3 py-2.5">
+                            <span className="text-[12px] italic text-[#6B7280]">Brought Forward</span>
+                          </td>
+                          <td className="px-3 py-2.5" />
+                          <td className="px-3 py-2.5" />
+                          <td className="px-3 py-2.5 text-center">
+                            <span className="text-[12px] text-[#6B7280]">—</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <span className="text-[12px] text-[#6B7280]">0</span>
+                          </td>
+                          <td className="px-3 py-2.5" />
+                          <td className="px-3 py-2.5" />
+                          <td className="px-3 py-2.5 text-right">
+                            <span className="text-[13px] font-bold text-[#111827]">
+                              {selectedRetailer?.openingBalance != null
+                                ? `Rs. ${formatNumber(selectedRetailer.openingBalance)}`
+                                : '—'}
+                            </span>
+                          </td>
+                        </tr>
+
                         {ledgerData.map((row) => (
                           <tr key={row.id || row.sr} className="trow">
-                            {/* Sr */}
-                            <td className="px-4 py-3">
-                              <span className="text-[12px] font-bold text-[#9CA3AF]">{row.sr}</span>
-                            </td>
                             {/* Date */}
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-2.5">
                               <span className="text-[12px] text-[#6B7280] whitespace-nowrap">{row.date}</span>
                             </td>
-                            {/* Description */}
-                            <td className="px-4 py-3 max-w-[240px]">
+                            {/* Details + type badge */}
+                            <td className="px-3 py-2.5 max-w-[160px]">
                               <p className="text-[13px] text-[#111827] font-medium truncate">{row.details}</p>
-                            </td>
-                            {/* Type badge */}
-                            <td className="px-4 py-3 text-center">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold mt-0.5 ${
                                 row.type === 'PAYMENT'
                                   ? 'bg-blue-50 text-blue-600'
                                   : row.type === 'RETURN'
                                   ? 'bg-amber-50 text-amber-600'
-                                  : 'bg-orange-50 text-[#FF5934]'
+                                  : row.type === 'PURCHASE'
+                                  ? 'bg-orange-50 text-[#FF5934]'
+                                  : 'bg-gray-100 text-gray-500'
                               }`}>
                                 {row.type}
                               </span>
                             </td>
+                            {/* Bank Name — API: bankId */}
+                            <td className="px-3 py-2.5">
+                              <span className="text-[12px] text-[#6B7280]">{row.bankName || '—'}</span>
+                            </td>
+                            {/* Ref No. — API: refNo */}
+                            <td className="px-3 py-2.5 max-w-[140px]">
+                              <span className="text-[12px] text-[#6B7280] break-words">{row.refNo || '—'}</span>
+                            </td>
+                            {/* V. No. — API: voucherNo */}
+                            <td className="px-3 py-2.5 text-center">
+                              <span className="text-[12px] text-[#6B7280]">{row.vNo || '—'}</span>
+                            </td>
+                            {/* Quantity — API: quantity */}
+                            <td className="px-3 py-2.5 text-right">
+                              <span className="text-[12px] text-[#6B7280]">
+                                {row.quantity != null ? row.quantity : 0}
+                              </span>
+                            </td>
                             {/* Debit */}
-                            <td className="px-4 py-3 text-right">
-                              {row.dr !== '0'
+                            <td className="px-3 py-2.5 text-right">
+                              {row.rawDr > 0
                                 ? <span className="text-[13px] font-semibold text-emerald-600">Rs. {row.dr}</span>
                                 : <span className="text-[12px] text-[#D1D5DB]">—</span>
                               }
                             </td>
                             {/* Credit */}
-                            <td className="px-4 py-3 text-right">
-                              {row.cr !== '0'
+                            <td className="px-3 py-2.5 text-right">
+                              {row.rawCr > 0
                                 ? <span className="text-[13px] font-semibold text-red-500">Rs. {row.cr}</span>
                                 : <span className="text-[12px] text-[#D1D5DB]">—</span>
                               }
                             </td>
                             {/* Balance */}
-                            <td className="px-4 py-3 text-right">
+                            <td className="px-3 py-2.5 text-right">
                               <span className="text-[13px] font-bold text-[#111827]">Rs. {row.balance}</span>
                             </td>
                           </tr>
@@ -668,6 +678,11 @@ const ReportsCustomerLedger = () => {
                       {ledgerData.length} transaction{ledgerData.length !== 1 ? 's' : ''}
                     </p>
                     <div className="flex items-center gap-6 flex-wrap">
+                      <div className="text-right">
+                        <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total Qty</p>
+                        <p className="text-[14px] font-bold text-[#374151]">{totals.totalQty}</p>
+                      </div>
+                      <div className="w-px h-8 bg-gray-200" />
                       <div className="text-right">
                         <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total Debit</p>
                         <p className="text-[14px] font-bold text-emerald-600">Rs. {formatNumber(totals.totalDr)}</p>
