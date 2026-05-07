@@ -747,41 +747,7 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <span style={{display:'flex',alignItems:'center',fontSize:12,fontWeight:600,color:G.green,background:`${G.green}18`,padding:'5px 12px',borderRadius:20,backdropFilter:'blur(8px)'}}>
-              <LiveDot/>{onlineCount}/{totalSPs} online
-            </span>
-            <button
-              onClick={()=>fetchAll(true)}
-              style={{
-                display:'flex',alignItems:'center',gap:6,
-                background:G.glass,border:`1px solid ${G.glassBd}`,
-                color:G.sub,fontSize:13,fontWeight:500,padding:'7px 14px',borderRadius:10,
-                backdropFilter:'blur(8px)',cursor:'pointer',transition:'all 0.18s',
-              }}
-            >
-              <span style={{display:'inline-block',animation:refreshing?'spin 0.8s linear infinite':'none'}}>
-                <Ic.refresh/>
-              </span>
-              Refresh
-            </button>
-            <button style={{
-              display:'flex',alignItems:'center',gap:6,
-              background:G.glass,border:`1px solid ${G.glassBd}`,
-              color:G.sub,fontSize:13,fontWeight:500,padding:'7px 14px',borderRadius:10,
-              backdropFilter:'blur(8px)',cursor:'pointer',
-            }}>
-              <Ic.bell/> Alerts
-            </button>
-            <button style={{
-              display:'flex',alignItems:'center',gap:6,
-              background:'rgba(91,141,238,0.3)',border:`1px solid rgba(91,141,238,0.45)`,
-              color:G.text,fontSize:13,fontWeight:600,padding:'7px 16px',borderRadius:10,
-              backdropFilter:'blur(8px)',cursor:'pointer',
-            }}>
-              <Ic.plus/> New Order
-            </button>
-          </div>
+          
         </div>
 
         {/* ── Stat Cards ── */}

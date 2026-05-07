@@ -337,10 +337,10 @@ const Sidebar = () => {
                 <SubNavItem to="/Tracking/Reports"  icon={MdBarChart}   label="Tracking Reports"  />
               </NavGroup>
 
-              <NavGroup icon={FaBook} label="Ledger" collapsed={collapsed}>
+              {/* <NavGroup icon={FaBook} label="Ledger" collapsed={collapsed}>
                 <SubNavItem to="/Leders/LedgerSales" icon={MdPeople}     label="Customer Ledger" />
                 <SubNavItem to="/Ledger/Reports"     icon={MdAssessment} label="Ledger Reports"  />
-              </NavGroup>
+              </NavGroup> */}
 
               <NavGroup icon={MdPeople} label="Users" collapsed={collapsed}>
                 <SubNavItem to="/Users/Coordinators"      icon={MdSupervisorAccount} label="Coordinators"       />
