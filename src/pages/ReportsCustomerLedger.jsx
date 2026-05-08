@@ -7,6 +7,7 @@ import {
   MdPictureAsPdf, MdGridOn, MdArrowBack, MdWarning,
   MdPerson, MdPhone, MdStorefront, MdCheckCircle,
   MdReceipt, MdTrendingUp, MdTrendingDown, MdAccountBalance,
+  MdCalendarToday,
 } from 'react-icons/md';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
@@ -23,22 +24,31 @@ const formatDate = (dateString) => {
   try { return new Date(dateString).toLocaleDateString('en-GB'); } catch { return '—'; }
 };
 
+/* Parse yyyy-mm-dd (from <input type="date">) or ISO string to a Date at midnight */
+const parseToDate = (str) => {
+  if (!str) return null;
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  return new Date(str);
+};
+
+/* Convert yyyy-mm-dd → dd/mm/yyyy for display & PDF */
+const isoToDisplay = (iso) => {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+};
+
 /* ─────────────────────────────────────────
-   PDF EXPORT — Matches Karyana ledger layout exactly
-   Columns: Date | Details | Bank Name | Ref No. | V. No. | Quantity | Debit | Credit | Balance
+   PDF EXPORT
 ───────────────────────────────────────── */
-const exportToPdf = (ledgerData, retailer, totals) => {
+const exportToPdf = (ledgerData, retailer, totals, dateFrom, dateTo) => {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pw = doc.internal.pageSize.getWidth();
   const ph = doc.internal.pageSize.getHeight();
-  const ml = 10;
-  const mr = 10;
-  const cw = pw - ml - mr;
+  const ml = 10, mr = 10, cw = pw - ml - mr;
 
-  const BLACK = [0, 0, 0];
-  const DARK  = [17, 24, 39];
-  const GRAY  = [100, 100, 100];
-  const LGRAY = [220, 220, 220];
+  const BLACK = [0, 0, 0], DARK = [17, 24, 39], GRAY = [100, 100, 100], LGRAY = [220, 220, 220];
 
   const cols = [
     { x: 0,   w: 22, label: 'Date',      align: 'left'   },
@@ -53,22 +63,14 @@ const exportToPdf = (ledgerData, retailer, totals) => {
   ];
 
   const drawPageHeader = (pageNum, totalPages) => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(18);
-    doc.setTextColor(...BLACK);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(...BLACK);
     doc.text('Karyana', pw / 2, 12, { align: 'center' });
-
     doc.setFontSize(13);
     doc.text('Customer Ledger', pw / 2, 20, { align: 'center' });
-
-    doc.setDrawColor(...LGRAY);
-    doc.setLineWidth(0.3);
+    doc.setDrawColor(...LGRAY); doc.setLineWidth(0.3);
     doc.line(ml, 23, pw - mr, 23);
 
-    /* Left: account info */
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(...DARK);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...DARK);
     doc.text(`Account No :${retailer.accountNo || ''}`, ml, 29);
     doc.text(retailer.name || '', ml, 34);
     doc.setFont('helvetica', 'normal');
@@ -76,155 +78,102 @@ const exportToPdf = (ledgerData, retailer, totals) => {
     doc.text(retailer.city || '', ml, 44);
     doc.text(retailer.region || '', ml, 49);
 
-    /* Center: salesperson */
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    doc.setTextColor(...DARK);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...DARK);
     doc.text(`Salesperson: ${retailer.salesperson || ''}`, pw / 2, 32, { align: 'center' });
 
-    /* Right: date range + total due */
-    const dateFrom = retailer.dateFrom || '';
-    const dateTo   = retailer.dateTo   || new Date().toLocaleDateString('en-GB');
+    const fromLabel = dateFrom ? isoToDisplay(dateFrom) : 'All';
+    const toLabel   = dateTo   ? isoToDisplay(dateTo)   : new Date().toLocaleDateString('en-GB');
     doc.setFont('helvetica', 'normal');
-    doc.text(`Date From: ${dateFrom}  to:${dateTo}`, pw - mr, 29, { align: 'right' });
+    doc.text(`Date From: ${fromLabel}  to: ${toLabel}`, pw - mr, 29, { align: 'right' });
     doc.setFont('helvetica', 'bold');
     doc.text(`Total Due :Rs. ${formatNumber(totals.finalBal)}`, pw - mr, 34, { align: 'right' });
 
     if (pageNum > 1) {
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(7);
-      doc.setTextColor(...GRAY);
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(...GRAY);
       doc.text(`Page ${pageNum} of ${totalPages}`, pw - mr, 52, { align: 'right' });
     }
-
-    doc.setDrawColor(...BLACK);
-    doc.setLineWidth(0.4);
+    doc.setDrawColor(...BLACK); doc.setLineWidth(0.4);
     doc.line(ml, 53, pw - mr, 53);
-
     return 53;
   };
 
   const drawTableHeader = (y) => {
-    doc.setFillColor(240, 240, 240);
-    doc.rect(ml, y, cw, 7, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...BLACK);
-
+    doc.setFillColor(240, 240, 240); doc.rect(ml, y, cw, 7, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLACK);
     cols.forEach(col => {
       const xPos = ml + col.x;
       if (col.align === 'right')       doc.text(col.label, xPos + col.w - 1, y + 5, { align: 'right' });
       else if (col.align === 'center') doc.text(col.label, xPos + col.w / 2, y + 5, { align: 'center' });
       else                             doc.text(col.label, xPos + 1, y + 5);
     });
-
-    doc.setDrawColor(...BLACK);
-    doc.setLineWidth(0.3);
-    doc.line(ml, y, ml + cw, y);
-    doc.line(ml, y + 7, ml + cw, y + 7);
-
+    doc.setDrawColor(...BLACK); doc.setLineWidth(0.3);
+    doc.line(ml, y, ml + cw, y); doc.line(ml, y + 7, ml + cw, y + 7);
     return y + 7;
   };
 
-  const ROW_H    = 7;
-  const FOOTER_H = 16;
-  const USABLE   = ph - FOOTER_H;
-
-  /* estimate pages */
-  let tempY = drawPageHeader(1, 1);
-  tempY = drawTableHeader(tempY);
+  const ROW_H = 7, FOOTER_H = 16, USABLE = ph - FOOTER_H;
+  let tempY = drawPageHeader(1, 1); tempY = drawTableHeader(tempY);
   const rowsPerFirstPage = Math.floor((USABLE - tempY - 10) / ROW_H);
   const rowsPerOtherPage = Math.floor((USABLE - 53 - 7 - 10) / ROW_H);
-  const totalRows = ledgerData.length + 1;
-  const remainingRows = Math.max(0, totalRows - rowsPerFirstPage);
-  const extraPages = remainingRows > 0 ? Math.ceil(remainingRows / rowsPerOtherPage) : 0;
-  const totalPages = 1 + extraPages;
+  const remainingRows    = Math.max(0, ledgerData.length + 1 - rowsPerFirstPage);
+  const totalPages       = 1 + (remainingRows > 0 ? Math.ceil(remainingRows / rowsPerOtherPage) : 0);
 
   let currentPage = 1;
   let y = drawPageHeader(currentPage, totalPages);
   y = drawTableHeader(y);
-
   doc.setFontSize(7.5);
 
-  /* Brought Forward row */
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...DARK);
+  /* Brought Forward */
+  doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK);
   doc.text('Brought', ml + cols[1].x + 1, y + 3.5);
   doc.text('Forward', ml + cols[1].x + 1, y + 7.5);
   doc.text('0', ml + cols[5].x + cols[5].w - 1, y + 5, { align: 'right' });
-  doc.text(
-    retailer.openingBalance != null ? formatNumber(retailer.openingBalance) : '',
-    ml + cols[8].x + cols[8].w - 1, y + 5, { align: 'right' }
-  );
-  doc.setDrawColor(...LGRAY);
-  doc.setLineWidth(0.2);
+  if (retailer.openingBalance != null)
+    doc.text(formatNumber(retailer.openingBalance), ml + cols[8].x + cols[8].w - 1, y + 5, { align: 'right' });
+  doc.setDrawColor(...LGRAY); doc.setLineWidth(0.2);
   doc.line(ml, y + ROW_H, ml + cw, y + ROW_H);
   y += ROW_H;
 
-  /* Data rows */
   ledgerData.forEach((row) => {
     if (y + ROW_H > USABLE) {
-      doc.addPage();
-      currentPage++;
+      doc.addPage(); currentPage++;
       y = drawPageHeader(currentPage, totalPages);
       y = drawTableHeader(y);
       doc.setFontSize(7.5);
     }
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...DARK);
-
-    const vals = [
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK);
+    [
       { col: 0, v: row.date },
       { col: 1, v: row.details.length > 18 ? row.details.slice(0, 17) + '…' : row.details },
       { col: 2, v: row.bankName || '' },
       { col: 3, v: row.refNo    || '' },
       { col: 4, v: String(row.vNo || '') },
-      { col: 5, v: row.quantity != null ? String(row.quantity) : '0' },
+      { col: 5, v: String(row.quantity ?? 0) },
       { col: 6, v: row.rawDr > 0 ? formatNumber(row.rawDr) : '' },
       { col: 7, v: row.rawCr > 0 ? formatNumber(row.rawCr) : '' },
       { col: 8, v: formatNumber(row.rawBalance) },
-    ];
-
-    vals.forEach(({ col, v }) => {
+    ].forEach(({ col, v }) => {
       if (!v) return;
-      const c    = cols[col];
-      const xPos = ml + c.x;
+      const c = cols[col], xPos = ml + c.x;
       if (c.align === 'right')       doc.text(v, xPos + c.w - 1, y + 5, { align: 'right' });
       else if (c.align === 'center') doc.text(v, xPos + c.w / 2, y + 5, { align: 'center' });
       else                           doc.text(v, xPos + 1, y + 5);
     });
-
-    doc.setDrawColor(...LGRAY);
-    doc.setLineWidth(0.2);
+    doc.setDrawColor(...LGRAY); doc.setLineWidth(0.2);
     doc.line(ml, y + ROW_H, ml + cw, y + ROW_H);
     y += ROW_H;
   });
 
-  /* Totals row */
-  doc.setDrawColor(...BLACK);
-  doc.setLineWidth(0.4);
-  doc.line(ml, y, ml + cw, y);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(...BLACK);
-
+  doc.setDrawColor(...BLACK); doc.setLineWidth(0.4); doc.line(ml, y, ml + cw, y);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLACK);
   const totalQty = ledgerData.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
-  doc.text(String(totalQty), ml + cols[5].x + cols[5].w - 1, y + 5, { align: 'right' });
-  doc.text(formatNumber(totals.totalDr), ml + cols[6].x + cols[6].w - 1, y + 5, { align: 'right' });
-  doc.text(formatNumber(totals.totalCr), ml + cols[7].x + cols[7].w - 1, y + 5, { align: 'right' });
-
+  doc.text(String(totalQty),              ml + cols[5].x + cols[5].w - 1, y + 5, { align: 'right' });
+  doc.text(formatNumber(totals.totalDr),  ml + cols[6].x + cols[6].w - 1, y + 5, { align: 'right' });
+  doc.text(formatNumber(totals.totalCr),  ml + cols[7].x + cols[7].w - 1, y + 5, { align: 'right' });
   doc.line(ml, y + 7, ml + cw, y + 7);
 
-  /* Footer */
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
-  doc.setTextColor(...GRAY);
-  doc.text(
-    `Generated on ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} — Karyana`,
-    ml, ph - 8
-  );
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...GRAY);
+  doc.text(`Generated on ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} — Karyana`, ml, ph - 8);
   doc.text('All amounts in PKR', pw - mr, ph - 8, { align: 'right' });
 
   doc.save(`Ledger_${(retailer.name || 'customer').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`);
@@ -234,50 +183,29 @@ const exportToPdf = (ledgerData, retailer, totals) => {
 /* ─────────────────────────────────────────
    EXCEL EXPORT
 ───────────────────────────────────────── */
-const exportToExcel = (ledgerData, retailer, totals) => {
+const exportToExcel = (ledgerData, retailer, totals, dateFrom, dateTo) => {
   const wb = XLSX.utils.book_new();
   const rows = [];
-
   rows.push(['Karyana', '', '', '', '', '', '', '', '']);
   rows.push(['Customer Ledger Report', '', '', '', '', '', '', '', '']);
   rows.push([]);
   rows.push(['Account No:', retailer.accountNo || '', '', 'Salesperson:', retailer.salesperson || '', '', '', '', '']);
   rows.push(['Customer:', retailer.name || '', '', 'Phone:', retailer.phoneNumber || retailer.phone || '', '', '', '', '']);
-  rows.push(['Date From:', retailer.dateFrom || '', 'to:', retailer.dateTo || '', '', 'Total Due:', totals.finalBal, '', '']);
+  rows.push(['Date From:', dateFrom ? isoToDisplay(dateFrom) : 'All', 'to:', dateTo ? isoToDisplay(dateTo) : new Date().toLocaleDateString('en-GB'), '', 'Total Due:', totals.finalBal, '', '']);
   rows.push([]);
   rows.push(['Date', 'Details', 'Bank Name', 'Ref No.', 'V. No.', 'Quantity', 'Debit (Dr.)', 'Credit (Cr.)', 'Balance']);
-
-  /* Brought Forward */
   rows.push(['', 'Brought Forward', '', '', '', 0, '', '', retailer.openingBalance || '']);
-
   ledgerData.forEach(row => {
-    rows.push([
-      row.date,
-      row.details,
-      row.bankName || '',
-      row.refNo    || '',
-      row.vNo      || '',
-      row.quantity != null ? row.quantity : 0,
-      row.rawDr > 0 ? row.rawDr : '',
-      row.rawCr > 0 ? row.rawCr : '',
-      row.rawBalance,
-    ]);
+    rows.push([row.date, row.details, row.bankName || '', row.refNo || '', row.vNo || '',
+      row.quantity ?? 0, row.rawDr > 0 ? row.rawDr : '', row.rawCr > 0 ? row.rawCr : '', row.rawBalance]);
   });
-
   rows.push([]);
   const totalQty = ledgerData.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
   rows.push(['', '', '', '', 'TOTAL', totalQty, totals.totalDr, totals.totalCr, ledgerData[ledgerData.length - 1]?.rawBalance || 0]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [
-    { wch: 14 }, { wch: 28 }, { wch: 20 }, { wch: 28 },
-    { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
-  ];
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
-    { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } },
-  ];
-
+  ws['!cols'] = [{ wch:14 },{ wch:28 },{ wch:20 },{ wch:28 },{ wch:10 },{ wch:10 },{ wch:16 },{ wch:16 },{ wch:16 }];
+  ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:8} }, { s:{r:1,c:0}, e:{r:1,c:8} }];
   XLSX.utils.book_append_sheet(wb, ws, 'Customer Ledger');
   XLSX.writeFile(wb, `Ledger_${(retailer.name || 'customer').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   toast.success('Excel exported successfully');
@@ -291,11 +219,17 @@ const ReportsCustomerLedger = () => {
   const [loading, setLoading]                   = useState(false);
   const [retailers, setRetailers]               = useState([]);
   const [selectedRetailer, setSelectedRetailer] = useState(null);
-  const [ledgerData, setLedgerData]             = useState([]);
+  const [allLedgerData, setAllLedgerData]       = useState([]); // full unfiltered dataset
+  const [ledgerData, setLedgerData]             = useState([]); // date-filtered view
   const [dropdownOpen, setDropdownOpen]         = useState(false);
   const [searchTerm, setSearchTerm]             = useState('');
   const [error, setError]                       = useState('');
 
+  /* Date range — yyyy-mm-dd strings (native <input type="date"> format) */
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo,   setDateTo]   = useState('');
+
+  /* Load retailers on mount */
   useEffect(() => {
     setLoading(true);
     getAllRetailers()
@@ -303,6 +237,26 @@ const ReportsCustomerLedger = () => {
       .catch(() => toast.error('Failed to load customers'))
       .finally(() => setLoading(false));
   }, []);
+
+  /* Re-filter whenever date range or raw data changes — no extra API call needed */
+  useEffect(() => {
+    if (!allLedgerData.length) { setLedgerData([]); return; }
+
+    const from = parseToDate(dateFrom);
+    const to   = parseToDate(dateTo);
+    if (to) to.setHours(23, 59, 59, 999); // inclusive end-of-day
+
+    const filtered = allLedgerData.filter(row => {
+      if (!from && !to) return true;
+      const rowDate = parseToDate(row.rawDate);
+      if (!rowDate) return true;
+      if (from && rowDate < from) return false;
+      if (to   && rowDate > to)   return false;
+      return true;
+    });
+
+    setLedgerData(filtered.map((r, i) => ({ ...r, sr: i + 1 })));
+  }, [allLedgerData, dateFrom, dateTo]);
 
   const handleGenerateReport = async () => {
     setError('');
@@ -314,19 +268,20 @@ const ReportsCustomerLedger = () => {
         const data = res.ledgers;
         if (data.length === 0) {
           setError('No transactions found for this customer');
-          setLedgerData([]);
+          setAllLedgerData([]);
         } else {
-          setLedgerData(data.map((item, idx) => ({
+          setAllLedgerData(data.map((item, idx) => ({
             sr:         idx + 1,
             id:         item._id,
             details:    item.details     || item.description || 'Transaction',
             type:       item.type        || 'PURCHASE',
             date:       formatDate(item.date),
-            bankName:   item.bankId      || '',           // API field: bankId
-            refNo:      item.refNo       || '',           // API field: refNo
-            vNo:        item.voucherNo   || item.v        || '', // API field: voucherNo / v
-            bilty:      item.biltyNumber || '',           // API field: biltyNumber
-            quantity:   item.quantity    != null ? item.quantity : 0, // API field: quantity
+            rawDate:    item.date        || '',   // kept for date filtering
+            bankName:   item.bankId      || '',
+            refNo:      item.refNo       || '',
+            vNo:        item.voucherNo   || item.v || '',
+            bilty:      item.biltyNumber || '',
+            quantity:   item.quantity    ?? 0,
             dr:         item.type !== 'PAYMENT' ? formatNumber(item.amount || 0) : '0',
             cr:         item.type === 'PAYMENT' ? formatNumber(item.amount || 0) : '0',
             balance:    formatNumber(item.balance || 0),
@@ -338,33 +293,37 @@ const ReportsCustomerLedger = () => {
         setView('report');
       } else {
         setError('No ledger data found');
-        setLedgerData([]);
+        setAllLedgerData([]);
         setView('report');
       }
     } catch {
       setError('Failed to fetch ledger data');
-      setLedgerData([]);
+      setAllLedgerData([]);
     } finally {
       setLoading(false);
     }
   };
 
   const handleReset = () => {
-    setSelectedRetailer(null); setLedgerData([]);
-    setError(''); setSearchTerm(''); setView('filter');
+    setSelectedRetailer(null); setAllLedgerData([]); setLedgerData([]);
+    setError(''); setSearchTerm(''); setDateFrom(''); setDateTo(''); setView('filter');
   };
+
+  const handleClearDates = () => { setDateFrom(''); setDateTo(''); };
 
   const totals = {
     totalDr:  ledgerData.reduce((s, r) => s + r.rawDr, 0),
     totalCr:  ledgerData.reduce((s, r) => s + r.rawCr, 0),
     totalQty: ledgerData.reduce((s, r) => s + (Number(r.quantity) || 0), 0),
-    finalBal: ledgerData[ledgerData.length - 1]?.rawBalance || 0,
+    finalBal: ledgerData.length ? ledgerData[ledgerData.length - 1].rawBalance : 0,
   };
 
   const filteredRetailers = retailers.filter(r =>
     (r.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (r.shopName || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const isDateFiltered = !!(dateFrom || dateTo);
 
   if (loading && view === 'filter' && retailers.length === 0) return <Loader />;
 
@@ -380,6 +339,10 @@ const ReportsCustomerLedger = () => {
         .rcl-no-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
         @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
         .fade-up { animation: fadeUp .25s ease both; }
+        .date-inp { border:1px solid #e5e7eb; border-radius:12px; padding:0 12px; height:36px; font-size:13px; color:#111827; outline:none; background:#F9FAFB; transition:border-color .15s, background .15s; font-family:inherit; }
+        .date-inp:focus { border-color:#FF5934; background:#fff; }
+        .date-inp::-webkit-calendar-picker-indicator { opacity:.5; cursor:pointer; }
+        .date-inp::-webkit-calendar-picker-indicator:hover { opacity:1; }
       `}</style>
 
       <div className="rcl">
@@ -400,13 +363,13 @@ const ReportsCustomerLedger = () => {
 
             <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-6">
               <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-5 flex items-center gap-2">
-                <MdFilterList size={13} className="text-[#FF5934]" /> Select Customer
+                <MdFilterList size={13} className="text-[#FF5934]" /> Filters
               </p>
 
+              {/* Customer dropdown */}
               <div className="mb-5">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdPerson size={12} className="text-[#FF5934]" /> Customer
-                  <span className="text-[#FF5934]">*</span>
+                  <MdPerson size={12} className="text-[#FF5934]" /> Customer <span className="text-[#FF5934]">*</span>
                 </label>
                 <div className="relative">
                   <div
@@ -435,20 +398,16 @@ const ReportsCustomerLedger = () => {
                       <div className="p-2 border-b border-gray-100 sticky top-0 bg-white z-10">
                         <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
                           <MdSearch size={14} className="text-[#9CA3AF]" />
-                          <input
-                            autoFocus value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
+                          <input autoFocus value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
                             placeholder="Search by name or shop…"
-                            className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
-                          />
+                            className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
                           {searchTerm && <button onClick={() => setSearchTerm('')}><MdClose size={13} className="text-[#9CA3AF] hover:text-[#FF5934]" /></button>}
                         </div>
                       </div>
                       {filteredRetailers.length > 0 ? filteredRetailers.map(r => (
                         <div key={r._id}
                           onClick={() => { setSelectedRetailer(r); setDropdownOpen(false); setSearchTerm(''); }}
-                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 ${selectedRetailer?._id === r._id ? 'bg-orange-50' : ''}`}
-                        >
+                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 ${selectedRetailer?._id === r._id ? 'bg-orange-50' : ''}`}>
                           <div className="w-8 h-8 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
                             <span className="text-[#FF5934] text-[11px] font-bold">{(r.name||'?')[0].toUpperCase()}</span>
                           </div>
@@ -466,34 +425,61 @@ const ReportsCustomerLedger = () => {
                 </div>
               </div>
 
+              {/* Customer preview chip */}
               {selectedRetailer && (
                 <div className="mb-5 p-3 bg-[#F9FAFB] rounded-xl border border-gray-100 flex flex-wrap gap-4 text-[12px] text-[#6B7280]">
-                  {selectedRetailer.shopName && (
-                    <span className="flex items-center gap-1.5"><MdStorefront size={13} className="text-[#FF5934]" />{selectedRetailer.shopName}</span>
-                  )}
-                  {(selectedRetailer.phoneNumber || selectedRetailer.phone) && (
-                    <span className="flex items-center gap-1.5"><MdPhone size={13} className="text-[#FF5934]" />{selectedRetailer.phoneNumber || selectedRetailer.phone}</span>
-                  )}
-                  {selectedRetailer.shopCategory && (
-                    <span className="flex items-center gap-1.5"><MdReceipt size={13} className="text-[#FF5934]" />{selectedRetailer.shopCategory}</span>
-                  )}
+                  {selectedRetailer.shopName && <span className="flex items-center gap-1.5"><MdStorefront size={13} className="text-[#FF5934]" />{selectedRetailer.shopName}</span>}
+                  {(selectedRetailer.phoneNumber || selectedRetailer.phone) && <span className="flex items-center gap-1.5"><MdPhone size={13} className="text-[#FF5934]" />{selectedRetailer.phoneNumber || selectedRetailer.phone}</span>}
+                  {selectedRetailer.shopCategory && <span className="flex items-center gap-1.5"><MdReceipt size={13} className="text-[#FF5934]" />{selectedRetailer.shopCategory}</span>}
                 </div>
               )}
 
+              {/* ── Date Range ── */}
+              <div className="mb-6">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-2">
+                  <MdCalendarToday size={12} className="text-[#FF5934]" /> Date Range
+                  <span className="text-[#9CA3AF] font-normal normal-case tracking-normal ml-1">(optional — filters results after loading)</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <p className="text-[10px] text-[#9CA3AF] mb-1.5 font-semibold uppercase tracking-wide">From</p>
+                    <input type="date" value={dateFrom} max={dateTo || undefined}
+                      onChange={e => setDateFrom(e.target.value)}
+                      className="date-inp w-full" />
+                  </div>
+                  <span className="mt-5 text-[#9CA3AF] text-sm font-medium flex-shrink-0">→</span>
+                  <div className="flex-1">
+                    <p className="text-[10px] text-[#9CA3AF] mb-1.5 font-semibold uppercase tracking-wide">To</p>
+                    <input type="date" value={dateTo} min={dateFrom || undefined}
+                      onChange={e => setDateTo(e.target.value)}
+                      className="date-inp w-full" />
+                  </div>
+                  {(dateFrom || dateTo) && (
+                    <button onClick={handleClearDates}
+                      className="mt-5 w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-[#9CA3AF] hover:text-[#FF5934] hover:border-orange-200 hover:bg-orange-50 transition-colors flex-shrink-0"
+                      title="Clear dates">
+                      <MdClose size={15} />
+                    </button>
+                  )}
+                </div>
+                {dateFrom && dateTo && (
+                  <p className="text-[11px] text-[#FF5934] mt-2 font-semibold">
+                    📅 {isoToDisplay(dateFrom)} → {isoToDisplay(dateTo)}
+                  </p>
+                )}
+              </div>
+
+              {/* Action buttons */}
               <div className="flex gap-2">
                 <button onClick={handleReset}
                   className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
                   <MdRefresh size={15} /> Reset
                 </button>
-                <button
-                  onClick={handleGenerateReport}
-                  disabled={!selectedRetailer || loading}
-                  className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2"
-                >
+                <button onClick={handleGenerateReport} disabled={!selectedRetailer || loading}
+                  className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2">
                   {loading
                     ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Loading…</>
-                    : 'Generate Report'
-                  }
+                    : 'Generate Report'}
                 </button>
               </div>
             </div>
@@ -504,8 +490,8 @@ const ReportsCustomerLedger = () => {
         {view === 'report' && (
           <div className="fade-up">
 
-            {/* Header */}
-            <div className="flex flex-wrap items-start justify-between mt-6 mb-5 gap-3">
+            {/* Page header */}
+            <div className="flex flex-wrap items-start justify-between mt-6 mb-4 gap-3">
               <div>
                 <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">{selectedRetailer?.name}</h1>
                 <p className="text-sm text-[#9CA3AF] mt-0.5">
@@ -514,11 +500,11 @@ const ReportsCustomerLedger = () => {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button onClick={() => exportToPdf(ledgerData, selectedRetailer, totals)} disabled={!ledgerData.length}
+                <button onClick={() => exportToPdf(ledgerData, selectedRetailer, totals, dateFrom, dateTo)} disabled={!ledgerData.length}
                   className="h-10 px-4 rounded-xl border border-red-100 bg-white text-red-600 text-sm font-semibold hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
                   <MdPictureAsPdf size={16} /> PDF
                 </button>
-                <button onClick={() => exportToExcel(ledgerData, selectedRetailer, totals)} disabled={!ledgerData.length}
+                <button onClick={() => exportToExcel(ledgerData, selectedRetailer, totals, dateFrom, dateTo)} disabled={!ledgerData.length}
                   className="h-10 px-4 rounded-xl border border-emerald-100 bg-white text-emerald-600 text-sm font-semibold hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">
                   <MdGridOn size={16} /> Excel
                 </button>
@@ -527,6 +513,30 @@ const ReportsCustomerLedger = () => {
                   <MdArrowBack size={16} /> Back
                 </button>
               </div>
+            </div>
+
+            {/* ── Inline date range controls (always visible in report view) ── */}
+            <div className="flex flex-wrap items-center gap-2 mb-5 bg-white border border-gray-100 rounded-2xl shadow-sm px-4 py-3">
+              <MdCalendarToday size={14} className="text-[#FF5934] flex-shrink-0" />
+              <span className="text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mr-1">Date Range:</span>
+              <input type="date" value={dateFrom} max={dateTo || undefined}
+                onChange={e => setDateFrom(e.target.value)}
+                className="date-inp" />
+              <span className="text-[#9CA3AF] text-sm">→</span>
+              <input type="date" value={dateTo} min={dateFrom || undefined}
+                onChange={e => setDateTo(e.target.value)}
+                className="date-inp" />
+              {isDateFiltered && (
+                <>
+                  <span className="text-[11px] font-semibold text-[#FF5934] bg-orange-50 border border-orange-100 px-2.5 py-1 rounded-lg ml-1">
+                    {ledgerData.length} / {allLedgerData.length} rows
+                  </span>
+                  <button onClick={handleClearDates}
+                    className="h-8 px-3 rounded-xl border border-gray-200 text-[#9CA3AF] text-[12px] font-semibold hover:text-[#FF5934] hover:border-orange-200 flex items-center gap-1.5 transition-colors">
+                    <MdClose size={12} /> Clear
+                  </button>
+                </>
+              )}
             </div>
 
             {error && (
@@ -542,9 +552,9 @@ const ReportsCustomerLedger = () => {
                 {/* Summary cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
                   {[
-                    { icon: MdReceipt,        label: 'Transactions',  value: ledgerData.length,                    color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
-                    { icon: MdTrendingUp,     label: 'Total Debit',   value: `Rs. ${formatNumber(totals.totalDr)}`, color: 'text-emerald-600', bg: 'bg-emerald-50'   },
-                    { icon: MdTrendingDown,   label: 'Total Credit',  value: `Rs. ${formatNumber(totals.totalCr)}`, color: 'text-red-500',     bg: 'bg-red-50'       },
+                    { icon: MdReceipt,        label: 'Transactions',  value: ledgerData.length,                     color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
+                    { icon: MdTrendingUp,     label: 'Total Debit',   value: `Rs. ${formatNumber(totals.totalDr)}`,  color: 'text-emerald-600', bg: 'bg-emerald-50'   },
+                    { icon: MdTrendingDown,   label: 'Total Credit',  value: `Rs. ${formatNumber(totals.totalCr)}`,  color: 'text-red-500',     bg: 'bg-red-50'       },
                     { icon: MdAccountBalance, label: 'Balance',       value: `Rs. ${formatNumber(totals.finalBal)}`, color: totals.finalBal >= 0 ? 'text-[#FF5934]' : 'text-red-600', bg: 'bg-[#FF5934]/10' },
                   ].map(({ icon: Icon, label, value, color, bg }) => (
                     <div key={label} className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4 hover:-translate-y-0.5 transition-transform">
@@ -559,22 +569,22 @@ const ReportsCustomerLedger = () => {
                   ))}
                 </div>
 
-                {/* ── Ledger table — all 9 columns matching the PDF ── */}
+                {/* Ledger table */}
                 <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[900px]">
                       <thead>
                         <tr className="bg-[#FFF4F1] border-b border-orange-100">
                           {[
-                            { label: 'Date',        cls: 'text-left  px-3 w-24'  },
-                            { label: 'Details',     cls: 'text-left  px-3'       },
-                            { label: 'Bank Name',   cls: 'text-left  px-3 w-32'  },
-                            { label: 'Ref No.',     cls: 'text-left  px-3 w-36'  },
-                            { label: 'V. No.',      cls: 'text-center px-3 w-20' },
-                            { label: 'Quantity',    cls: 'text-right px-3 w-20'  },
-                            { label: 'Debit (Dr.)', cls: 'text-right px-3 w-28'  },
-                            { label: 'Credit (Cr.)',cls: 'text-right px-3 w-28'  },
-                            { label: 'Balance',     cls: 'text-right px-3 w-28'  },
+                            { label: 'Date',         cls: 'text-left   px-3 w-24'  },
+                            { label: 'Details',      cls: 'text-left   px-3'       },
+                            { label: 'Bank Name',    cls: 'text-left   px-3 w-32'  },
+                            { label: 'Ref No.',      cls: 'text-left   px-3 w-36'  },
+                            { label: 'V. No.',       cls: 'text-center px-3 w-20'  },
+                            { label: 'Quantity',     cls: 'text-right  px-3 w-20'  },
+                            { label: 'Debit (Dr.)',  cls: 'text-right  px-3 w-28'  },
+                            { label: 'Credit (Cr.)', cls: 'text-right  px-3 w-28'  },
+                            { label: 'Balance',      cls: 'text-right  px-3 w-28'  },
                           ].map(h => (
                             <th key={h.label} className={`text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest py-3 ${h.cls}`}>
                               {h.label}
@@ -583,86 +593,49 @@ const ReportsCustomerLedger = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-
                         {/* Brought Forward row */}
                         <tr className="trow bg-gray-50/50">
                           <td className="px-3 py-2.5" />
-                          <td className="px-3 py-2.5">
-                            <span className="text-[12px] italic text-[#6B7280]">Brought Forward</span>
-                          </td>
-                          <td className="px-3 py-2.5" />
-                          <td className="px-3 py-2.5" />
-                          <td className="px-3 py-2.5 text-center">
-                            <span className="text-[12px] text-[#6B7280]">—</span>
-                          </td>
-                          <td className="px-3 py-2.5 text-right">
-                            <span className="text-[12px] text-[#6B7280]">0</span>
-                          </td>
-                          <td className="px-3 py-2.5" />
-                          <td className="px-3 py-2.5" />
+                          <td className="px-3 py-2.5"><span className="text-[12px] italic text-[#6B7280]">Brought Forward</span></td>
+                          <td className="px-3 py-2.5" /><td className="px-3 py-2.5" />
+                          <td className="px-3 py-2.5 text-center"><span className="text-[12px] text-[#6B7280]">—</span></td>
+                          <td className="px-3 py-2.5 text-right"><span className="text-[12px] text-[#6B7280]">0</span></td>
+                          <td className="px-3 py-2.5" /><td className="px-3 py-2.5" />
                           <td className="px-3 py-2.5 text-right">
                             <span className="text-[13px] font-bold text-[#111827]">
-                              {selectedRetailer?.openingBalance != null
-                                ? `Rs. ${formatNumber(selectedRetailer.openingBalance)}`
-                                : '—'}
+                              {selectedRetailer?.openingBalance != null ? `Rs. ${formatNumber(selectedRetailer.openingBalance)}` : '—'}
                             </span>
                           </td>
                         </tr>
 
                         {ledgerData.map((row) => (
                           <tr key={row.id || row.sr} className="trow">
-                            {/* Date */}
                             <td className="px-3 py-2.5">
                               <span className="text-[12px] text-[#6B7280] whitespace-nowrap">{row.date}</span>
                             </td>
-                            {/* Details + type badge */}
                             <td className="px-3 py-2.5 max-w-[160px]">
                               <p className="text-[13px] text-[#111827] font-medium truncate">{row.details}</p>
                               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold mt-0.5 ${
-                                row.type === 'PAYMENT'
-                                  ? 'bg-blue-50 text-blue-600'
-                                  : row.type === 'RETURN'
-                                  ? 'bg-amber-50 text-amber-600'
-                                  : row.type === 'PURCHASE'
-                                  ? 'bg-orange-50 text-[#FF5934]'
-                                  : 'bg-gray-100 text-gray-500'
-                              }`}>
-                                {row.type}
-                              </span>
+                                row.type === 'PAYMENT'  ? 'bg-blue-50 text-blue-600'    :
+                                row.type === 'RETURN'   ? 'bg-amber-50 text-amber-600'  :
+                                row.type === 'PURCHASE' ? 'bg-orange-50 text-[#FF5934]' :
+                                                          'bg-gray-100 text-gray-500'
+                              }`}>{row.type}</span>
                             </td>
-                            {/* Bank Name — API: bankId */}
-                            <td className="px-3 py-2.5">
-                              <span className="text-[12px] text-[#6B7280]">{row.bankName || '—'}</span>
-                            </td>
-                            {/* Ref No. — API: refNo */}
-                            <td className="px-3 py-2.5 max-w-[140px]">
-                              <span className="text-[12px] text-[#6B7280] break-words">{row.refNo || '—'}</span>
-                            </td>
-                            {/* V. No. — API: voucherNo */}
-                            <td className="px-3 py-2.5 text-center">
-                              <span className="text-[12px] text-[#6B7280]">{row.vNo || '—'}</span>
-                            </td>
-                            {/* Quantity — API: quantity */}
-                            <td className="px-3 py-2.5 text-right">
-                              <span className="text-[12px] text-[#6B7280]">
-                                {row.quantity != null ? row.quantity : 0}
-                              </span>
-                            </td>
-                            {/* Debit */}
+                            <td className="px-3 py-2.5"><span className="text-[12px] text-[#6B7280]">{row.bankName || '—'}</span></td>
+                            <td className="px-3 py-2.5 max-w-[140px]"><span className="text-[12px] text-[#6B7280] break-words">{row.refNo || '—'}</span></td>
+                            <td className="px-3 py-2.5 text-center"><span className="text-[12px] text-[#6B7280]">{row.vNo || '—'}</span></td>
+                            <td className="px-3 py-2.5 text-right"><span className="text-[12px] text-[#6B7280]">{row.quantity ?? 0}</span></td>
                             <td className="px-3 py-2.5 text-right">
                               {row.rawDr > 0
                                 ? <span className="text-[13px] font-semibold text-emerald-600">Rs. {row.dr}</span>
-                                : <span className="text-[12px] text-[#D1D5DB]">—</span>
-                              }
+                                : <span className="text-[12px] text-[#D1D5DB]">—</span>}
                             </td>
-                            {/* Credit */}
                             <td className="px-3 py-2.5 text-right">
                               {row.rawCr > 0
                                 ? <span className="text-[13px] font-semibold text-red-500">Rs. {row.cr}</span>
-                                : <span className="text-[12px] text-[#D1D5DB]">—</span>
-                              }
+                                : <span className="text-[12px] text-[#D1D5DB]">—</span>}
                             </td>
-                            {/* Balance */}
                             <td className="px-3 py-2.5 text-right">
                               <span className="text-[13px] font-bold text-[#111827]">Rs. {row.balance}</span>
                             </td>
@@ -676,6 +649,7 @@ const ReportsCustomerLedger = () => {
                   <div className="border-t-2 border-orange-100 bg-[#FFF4F1] px-4 py-3 flex flex-wrap items-center justify-between gap-4">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
                       {ledgerData.length} transaction{ledgerData.length !== 1 ? 's' : ''}
+                      {isDateFiltered && <span className="ml-1.5 text-[#FF5934]">(filtered)</span>}
                     </p>
                     <div className="flex items-center gap-6 flex-wrap">
                       <div className="text-right">
@@ -710,8 +684,13 @@ const ReportsCustomerLedger = () => {
                 <div className="w-16 h-16 rounded-2xl bg-gray-50 flex items-center justify-center">
                   <MdReceipt size={26} className="text-gray-300" />
                 </div>
-                <p className="text-[#9CA3AF] text-sm font-medium">No transactions found for this customer</p>
-                <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline">Go back</button>
+                <p className="text-[#9CA3AF] text-sm font-medium">
+                  {isDateFiltered ? 'No transactions in this date range' : 'No transactions found for this customer'}
+                </p>
+                {isDateFiltered
+                  ? <button onClick={handleClearDates} className="text-[#FF5934] text-xs hover:underline">Clear date filter</button>
+                  : <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline">Go back</button>
+                }
               </div>
             )}
           </div>

@@ -6,6 +6,7 @@ import {
   MdRefresh, MdFilterList, MdExpandMore,
   MdPictureAsPdf, MdGridOn, MdBarChart, MdCalendarToday,
   MdCheckCircle, MdSearch, MdClose,
+  MdTrackChanges, MdDone, MdShowChart, MdHourglassEmpty,
 } from 'react-icons/md';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
@@ -49,7 +50,7 @@ const ReportsTargetVsAchieve = () => {
 
   /* ── filters ── */
   const [selectedMonth, setSelectedMonth]       = useState(String(new Date().getMonth() + 1));
-  const [selectedSP,    setSelectedSP]          = useState('');     // '' = all
+  const [selectedSP,    setSelectedSP]          = useState('');
   const [spDropOpen,    setSpDropOpen]           = useState(false);
   const [spSearch,      setSpSearch]             = useState('');
   const [monthDropOpen, setMonthDropOpen]        = useState(false);
@@ -76,11 +77,7 @@ const ReportsTargetVsAchieve = () => {
       .catch(() => toast.error('Failed to load sales persons'));
   }, []);
 
-  /* ── FETCH REPORT ──────────────────────────────────────────
-     Uses getTargetsBySalesperson exactly like Target.jsx does.
-     Target.jsx reads:  t.target, t.achieved, t.month, t.salesperson
-     We do the same — just also filter by the selected month.
-  ─────────────────────────────────────────────────────────── */
+  /* ── FETCH REPORT ── */
   const fetchReport = useCallback(async ({ spId = '', month = selectedMonth } = {}) => {
     setLoading(true);
     setGenerated(false);
@@ -88,10 +85,8 @@ const ReportsTargetVsAchieve = () => {
     setCurrentPage(1);
 
     try {
-      const monthName = getMonthName(month); // e.g. "May"
-
-      /* persons to process */
-      const persons = spId
+      const monthName = getMonthName(month);
+      const persons   = spId
         ? salesPersons.filter(s => s._id === spId)
         : salesPersons;
 
@@ -102,26 +97,18 @@ const ReportsTargetVsAchieve = () => {
         return;
       }
 
-      /* fetch targets for each person in parallel */
       const results = await Promise.allSettled(
         persons.map(async sp => {
           try {
-            const res = await getTargetsBySalesperson(sp._id);
-
-            /* getTargetsBySalesperson returns { data: { data: [...] } }
-               same shape as getAllTargets → response.data.data           */
+            const res     = await getTargetsBySalesperson(sp._id);
             const targets = res?.data?.data || res?.data || [];
-            const arr = Array.isArray(targets) ? targets : [];
+            const arr     = Array.isArray(targets) ? targets : [];
 
-            /* filter to selected month (same logic as Target.jsx) */
             const monthTargets = arr.filter(t => {
-              const tMonth = typeof t.month === 'string'
-                ? t.month
-                : getMonthName(t.month);
+              const tMonth = typeof t.month === 'string' ? t.month : getMonthName(t.month);
               return tMonth === monthName;
             });
 
-            /* sum up (a salesperson may have multiple target entries) */
             const totalTarget   = monthTargets.reduce((s, t) => s + (Number(t.target)   || 0), 0);
             const totalAchieved = monthTargets.reduce((s, t) => s + (Number(t.achieved)  || 0), 0);
             const pending       = Math.max(totalTarget - totalAchieved, 0);
@@ -137,22 +124,22 @@ const ReportsTargetVsAchieve = () => {
               totalAchieved,
               pending,
               pct,
-              status:     getStatus(pct),
-              hasTarget:  monthTargets.length > 0,
+              status:    getStatus(pct),
+              hasTarget: monthTargets.length > 0,
             };
           } catch {
             return {
-              spId:       sp._id,
-              name:       sp.name || '—',
-              email:      sp.email || '',
-              image:      sp.image || null,
-              city:       '',
+              spId:          sp._id,
+              name:          sp.name  || '—',
+              email:         sp.email || '',
+              image:         sp.image || null,
+              city:          '',
               totalTarget:   0,
               totalAchieved: 0,
               pending:       0,
               pct:           0,
-              status:     getStatus(0),
-              hasTarget:  false,
+              status:        getStatus(0),
+              hasTarget:     false,
             };
           }
         })
@@ -161,12 +148,11 @@ const ReportsTargetVsAchieve = () => {
       const rows = results
         .filter(r => r.status === 'fulfilled')
         .map(r => r.value)
-        .filter(r => r.hasTarget) // only show rows that actually have a target for this month
+        .filter(r => r.hasTarget)
         .sort((a, b) => b.pct - a.pct);
 
       setReportData(rows);
       setGenerated(true);
-
       if (!rows.length) toast.info(`No targets found for ${monthName}`);
     } catch (err) {
       console.error(err);
@@ -177,7 +163,6 @@ const ReportsTargetVsAchieve = () => {
     }
   }, [salesPersons, selectedMonth]);
 
-  /* auto-generate when salesPersons first load */
   useEffect(() => {
     if (salesPersons.length && !generated) {
       fetchReport({ spId: selectedSP, month: selectedMonth });
@@ -191,6 +176,7 @@ const ReportsTargetVsAchieve = () => {
     achieved: reportData.reduce((s, r) => s + r.totalAchieved, 0),
     pending:  reportData.reduce((s, r) => s + r.pending,       0),
   }), [reportData]);
+
   const overallPct = totals.target > 0
     ? ((totals.achieved / totals.target) * 100).toFixed(1)
     : '0.0';
@@ -203,16 +189,14 @@ const ReportsTargetVsAchieve = () => {
   );
 
   /* ── dropdown helpers ── */
-  const filteredSPs = salesPersons.filter(s =>
-    (s.name || '').toLowerCase().includes(spSearch.toLowerCase()) ||
+  const filteredSPs    = salesPersons.filter(s =>
+    (s.name  || '').toLowerCase().includes(spSearch.toLowerCase()) ||
     (s.email || '').toLowerCase().includes(spSearch.toLowerCase())
   );
   const selectedSPObj = salesPersons.find(s => s._id === selectedSP);
 
   /* ── handlers ── */
-  const handleGenerate = () => {
-    fetchReport({ spId: selectedSP, month: selectedMonth });
-  };
+  const handleGenerate = () => fetchReport({ spId: selectedSP, month: selectedMonth });
 
   const handleReset = () => {
     setSelectedSP('');
@@ -230,15 +214,15 @@ const ReportsTargetVsAchieve = () => {
   const handleExportExcel = () => {
     if (!reportData.length) { toast.info('No data to export'); return; }
     const rows = reportData.map(r => ({
-      'Sales Person':     r.name,
-      'Email':            r.email,
-      'City':             r.city,
-      'Month':            getMonthName(selectedMonth),
-      'Target':           r.totalTarget,
-      'Achieved':         r.totalAchieved,
-      'Pending':          r.pending,
-      'Achievement %':    `${r.pct.toFixed(1)}%`,
-      'Status':           r.status.label,
+      'Sales Person':  r.name,
+      'Email':         r.email,
+      'City':          r.city,
+      'Month':         getMonthName(selectedMonth),
+      'Target':        r.totalTarget,
+      'Achieved':      r.totalAchieved,
+      'Pending':       r.pending,
+      'Achievement %': `${r.pct.toFixed(1)}%`,
+      'Status':        r.status.label,
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [{ wch:22 },{ wch:28 },{ wch:15 },{ wch:12 },{ wch:12 },{ wch:12 },{ wch:12 },{ wch:14 },{ wch:14 }];
@@ -251,13 +235,12 @@ const ReportsTargetVsAchieve = () => {
   /* ── export PDF ── */
   const handleExportPdf = () => {
     if (!reportData.length) { toast.info('No data to export'); return; }
-    const doc      = new jsPDF();
-    const pw       = doc.internal.pageSize.getWidth();
-    const ph       = doc.internal.pageSize.getHeight();
-    const margin   = 12;
-    let y          = 0;
+    const doc    = new jsPDF();
+    const pw     = doc.internal.pageSize.getWidth();
+    const ph     = doc.internal.pageSize.getHeight();
+    const margin = 12;
+    let y        = 0;
 
-    /* header band */
     doc.setFillColor(255, 89, 52);
     doc.rect(0, 0, pw, 22, 'F');
     doc.setTextColor(255, 255, 255);
@@ -274,31 +257,29 @@ const ReportsTargetVsAchieve = () => {
     doc.text(`Overall: ${overallPct}% achieved | Target: ${fmtNum(totals.target)} | Achieved: ${fmtNum(totals.achieved)} | Pending: ${fmtNum(totals.pending)}`, margin, y);
     y += 8;
 
-    const cols    = ['Sales Person', 'City', 'Target', 'Achieved', 'Pending', 'Achiev. %', 'Status'];
-    const widths  = [50, 28, 24, 24, 24, 22, 22];
+    const cols   = ['Sales Person','City','Target','Achieved','Pending','Achiev. %','Status'];
+    const widths = [50,28,24,24,24,22,22];
 
-    /* thead */
-    doc.setFillColor(250, 250, 250);
-    doc.setDrawColor(229, 231, 235);
+    doc.setFillColor(250,250,250);
+    doc.setDrawColor(229,231,235);
     doc.rect(margin, y, pw - margin * 2, 8, 'FD');
-    doc.setFont('helvetica', 'bold');
+    doc.setFont('helvetica','bold');
     doc.setFontSize(8);
-    doc.setTextColor(107, 114, 128);
+    doc.setTextColor(107,114,128);
     let x = margin + 2;
     cols.forEach((c, i) => { doc.text(c, x, y + 5); x += widths[i]; });
     y += 8;
 
-    /* rows */
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(55, 65, 81);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(55,65,81);
     reportData.forEach(row => {
       if (y > ph - 16) { doc.addPage(); y = 16; }
-      doc.setDrawColor(243, 244, 246);
+      doc.setDrawColor(243,244,246);
       doc.rect(margin, y, pw - margin * 2, 7, 'D');
       x = margin + 2;
       const cells = [
-        String(row.name).substring(0, 26),
-        String(row.city).substring(0, 14),
+        String(row.name).substring(0,26),
+        String(row.city).substring(0,14),
         fmtNum(row.totalTarget),
         fmtNum(row.totalAchieved),
         fmtNum(row.pending),
@@ -315,6 +296,43 @@ const ReportsTargetVsAchieve = () => {
 
   /* ── active filter count ── */
   const activeFilters = [selectedSP, selectedMonth !== String(new Date().getMonth() + 1)].filter(Boolean).length;
+
+  /* ── stat card config — Material icons instead of emojis ── */
+  const overallPctNum = Number(overallPct);
+  const statCards = [
+    {
+      label:   'Total Target',
+      value:   fmtNum(totals.target),
+      color:   'text-[#111827]',
+      iconBg:  'bg-gray-100',
+      Icon:    MdTrackChanges,
+      iconClr: 'text-gray-500',
+    },
+    {
+      label:   'Total Achieved',
+      value:   fmtNum(totals.achieved),
+      color:   'text-[#FF5934]',
+      iconBg:  'bg-[#FF5934]/10',
+      Icon:    MdDone,
+      iconClr: 'text-[#FF5934]',
+    },
+    {
+      label:   'Overall %',
+      value:   `${overallPct}%`,
+      color:   overallPctNum >= 80 ? 'text-emerald-600' : 'text-amber-600',
+      iconBg:  overallPctNum >= 80 ? 'bg-emerald-50'    : 'bg-amber-50',
+      Icon:    MdShowChart,
+      iconClr: overallPctNum >= 80 ? 'text-emerald-500' : 'text-amber-500',
+    },
+    {
+      label:   'Pending',
+      value:   fmtNum(totals.pending),
+      color:   'text-red-500',
+      iconBg:  'bg-red-50',
+      Icon:    MdHourglassEmpty,
+      iconClr: 'text-red-400',
+    },
+  ];
 
   return (
     <>
@@ -341,6 +359,8 @@ const ReportsTargetVsAchieve = () => {
         .rta-animate { animation:rta-in 0.22s ease both; }
         @keyframes shimmer { 0%,100%{opacity:1} 50%{opacity:.4} }
         .rta-skeleton { animation:shimmer 1.4s infinite; background:#F3F4F6; border-radius:8px; }
+        .stat-card { transition:transform 0.15s,box-shadow 0.15s; }
+        .stat-card:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,0.08); }
       `}</style>
 
       <div className="rta-page">
@@ -418,7 +438,6 @@ const ReportsTargetVsAchieve = () => {
                     </div>
                   </div>
                   <div className="max-h-52 overflow-y-auto rta-no-scroll">
-                    {/* All option */}
                     <div onClick={() => { setSelectedSP(''); setSpDropOpen(false); setSpSearch(''); }}
                       className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${!selectedSP ? 'bg-orange-50' : ''}`}>
                       <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-[11px] font-bold text-gray-400">All</div>
@@ -466,7 +485,7 @@ const ReportsTargetVsAchieve = () => {
                 <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden" style={{ top:'100%' }}>
                   <div className="max-h-64 overflow-y-auto rta-no-scroll">
                     {MONTHS.map((m, i) => {
-                      const val = String(i + 1);
+                      const val        = String(i + 1);
                       const isSelected = val === selectedMonth;
                       return (
                         <div key={m} onClick={() => { setSelectedMonth(val); setMonthDropOpen(false); }}
@@ -481,7 +500,7 @@ const ReportsTargetVsAchieve = () => {
               )}
             </div>
 
-            {/* Buttons */}
+            {/* Action buttons */}
             <div className="flex gap-2 flex-shrink-0">
               <button onClick={handleReset}
                 className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
@@ -491,14 +510,13 @@ const ReportsTargetVsAchieve = () => {
                 className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2">
                 {loading
                   ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Loading…</>
-                  : <><MdBarChart size={16} /> Generate</>
-                }
+                  : <><MdBarChart size={16} /> Generate</>}
               </button>
             </div>
           </div>
         </div>
 
-        {/* ── Loading ── */}
+        {/* ── Loading skeleton ── */}
         {loading && (
           <div className="bg-white border border-gray-100 rounded-2xl shadow-sm py-20 flex flex-col items-center gap-3">
             <div className="w-10 h-10 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
@@ -509,16 +527,15 @@ const ReportsTargetVsAchieve = () => {
         {/* ── Results ── */}
         {!loading && generated && (
           <div className="rta-animate">
-            {/* Stat cards */}
+
+            {/* ── Stat cards — Material icons, no emojis ── */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
-              {[
-                { label:'Total Target',   value: fmtNum(totals.target),               color:'text-[#111827]',   bg:'bg-gray-50',        icon:'🎯' },
-                { label:'Total Achieved', value: fmtNum(totals.achieved),             color:'text-[#FF5934]',   bg:'bg-[#FF5934]/10',   icon:'✅' },
-                { label:'Overall %',      value: `${overallPct}%`,                    color: Number(overallPct) >= 80 ? 'text-emerald-600' : 'text-amber-600', bg: Number(overallPct) >= 80 ? 'bg-emerald-50' : 'bg-amber-50', icon:'📊' },
-                { label:'Pending',        value: fmtNum(totals.pending),              color:'text-red-500',     bg:'bg-red-50',         icon:'⏳' },
-              ].map(({ label, value, color, bg, icon }) => (
-                <div key={label} className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4">
-                  <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center flex-shrink-0 text-xl`}>{icon}</div>
+              {statCards.map(({ label, value, color, iconBg, Icon, iconClr }) => (
+                <div key={label} className="stat-card bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4">
+                  {/* Icon container */}
+                  <div className={`w-11 h-11 rounded-xl ${iconBg} flex items-center justify-center flex-shrink-0`}>
+                    <Icon size={22} className={iconClr} />
+                  </div>
                   <div className="min-w-0">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-0.5">{label}</p>
                     <p className={`text-[15px] font-bold truncate ${color}`}>{value}</p>
@@ -527,11 +544,13 @@ const ReportsTargetVsAchieve = () => {
               ))}
             </div>
 
-            {/* Table */}
+            {/* ── Table ── */}
             <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
               {reportData.length === 0 ? (
                 <div className="py-16 text-center flex flex-col items-center gap-3">
-                  <div className="text-4xl">📊</div>
+                  <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+                    <MdBarChart size={26} className="text-gray-300" />
+                  </div>
                   <p className="text-[#9CA3AF] text-sm font-medium">No targets found for {getMonthName(selectedMonth)}</p>
                   <p className="text-[11px] text-[#9CA3AF]">Try a different month or add targets in Target Management</p>
                 </div>
@@ -589,7 +608,7 @@ const ReportsTargetVsAchieve = () => {
                               <div className="text-[11px] text-[#9CA3AF]">remaining</div>
                             </td>
 
-                            {/* Progress bar + % */}
+                            {/* Progress */}
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <span style={{ color: pctColor(row.pct), background: pctBg(row.pct) }}
@@ -617,7 +636,7 @@ const ReportsTargetVsAchieve = () => {
                     </tbody>
                   </table>
 
-                  {/* Footer: total + pagination */}
+                  {/* Footer */}
                   <div className="border-t border-gray-100 bg-[#FAFAFA] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-6">
                       <div>

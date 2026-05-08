@@ -1,6 +1,7 @@
 /**
  * Dashboard.jsx — SalesPulse Glass Edition
  * Transparent background · Glassmorphism cards · Full API data
+ * Cache: 2-hour in-memory cache (persists across tab navigation, resets on page refresh)
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react';
@@ -18,30 +19,55 @@ import {
 } from '../APIS';
 
 /* ─────────────────────────────────────────────────────────────
+   CACHE — module-level so it survives component unmount/remount
+   but resets on full page refresh (F5)
+───────────────────────────────────────────────────────────── */
+const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+const dashCache = {
+  data:      null,   // { orders, salesPersons, attendanceMap, ledgerStats }
+  timestamp: null,   // Date.now() when last fetched
+
+  isValid() {
+    return this.data !== null && this.timestamp !== null
+      && (Date.now() - this.timestamp) < CACHE_TTL_MS;
+  },
+
+  save(data) {
+    this.data      = data;
+    this.timestamp = Date.now();
+  },
+
+  clear() {
+    this.data      = null;
+    this.timestamp = null;
+  },
+
+  /** Returns how many minutes remain until cache expires (for display) */
+  minutesLeft() {
+    if (!this.timestamp) return 0;
+    return Math.ceil((CACHE_TTL_MS - (Date.now() - this.timestamp)) / 60_000);
+  },
+};
+
+/* ─────────────────────────────────────────────────────────────
    DESIGN TOKENS
 ───────────────────────────────────────────────────────────── */
 const G = {
-  /* glass surfaces — dark-on-light */
   glass:       'rgba(255,255,255,0.55)',
   glassMd:     'rgba(255,255,255,0.68)',
   glassHover:  'rgba(255,255,255,0.75)',
   glassBd:     'rgba(0,0,0,0.08)',
   glassBdHover:'rgba(0,0,0,0.14)',
-
-  /* text — dark */
   text:  '#0f172a',
   sub:   'rgba(30,41,80,0.60)',
   muted: 'rgba(30,41,80,0.35)',
-
-  /* accents */
   blue:   '#5b8dee',
   green:  '#34d399',
   amber:  '#fbbf24',
   red:    '#f87171',
   purple: '#c084fc',
   teal:   '#2dd4bf',
-
-  /* chart grid */
   gridLine: 'rgba(0,0,0,0.06)',
 };
 
@@ -51,10 +77,10 @@ const ac = (i) => AVATAR_PALETTE[i % AVATAR_PALETTE.length];
 /* ─────────────────────────────────────────────────────────────
    HELPERS
 ───────────────────────────────────────────────────────────── */
-const fmt     = (n) => { if (n==null) return '—'; if (n>=1e6) return `${(n/1e6).toFixed(1)}M`; if (n>=1e3) return `${(n/1e3).toFixed(0)}k`; return String(Math.round(n)); };
-const fmtRs   = (n) => n==null ? '—' : `Rs ${Number(n).toLocaleString()}`;
-const initials= (s='') => s.trim().split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-const todayKey= () => new Date().toLocaleDateString('en-CA');
+const fmt      = (n) => { if (n==null) return '—'; if (n>=1e6) return `${(n/1e6).toFixed(1)}M`; if (n>=1e3) return `${(n/1e3).toFixed(0)}k`; return String(Math.round(n)); };
+const fmtRs    = (n) => n==null ? '—' : `Rs ${Number(n).toLocaleString()}`;
+const initials = (s='') => s.trim().split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+const todayKey = () => new Date().toLocaleDateString('en-CA');
 const todayLabel=() => new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 
 /* ─────────────────────────────────────────────────────────────
@@ -611,19 +637,20 @@ function LiveActivity({ orders, attendanceMap, salesPersons, loading }) {
    ROOT DASHBOARD
 ───────────────────────────────────────────────────────────── */
 export default function Dashboard() {
-  const [loading,    setLoading]    = useState(true);
-  const [orders,     setOrders]     = useState([]);
-  const [salesPersons,setSalesPersons] = useState([]);
-  const [attendanceMap,setAttendanceMap] = useState({});
-  const [ledgerStats, setLedgerStats] = useState({ approved:0,pending:0,rejected:0,totalRecovered:0,pendingAmt:0,total:0 });
-  const [lastRefresh, setLastRefresh] = useState(null);
-  const [refreshing,  setRefreshing]  = useState(false);
+  const [loading,      setLoading]      = useState(!dashCache.isValid()); // skip loading if cache hit
+  const [orders,       setOrders]       = useState(dashCache.data?.orders       ?? []);
+  const [salesPersons, setSalesPersons] = useState(dashCache.data?.salesPersons ?? []);
+  const [attendanceMap,setAttendanceMap]= useState(dashCache.data?.attendanceMap ?? {});
+  const [ledgerStats,  setLedgerStats]  = useState(dashCache.data?.ledgerStats  ?? { approved:0,pending:0,rejected:0,totalRecovered:0,pendingAmt:0,total:0 });
+  const [lastRefresh,  setLastRefresh]  = useState(dashCache.timestamp ? new Date(dashCache.timestamp) : null);
+  const [refreshing,   setRefreshing]   = useState(false);
 
+  /* ── fetch from API and populate cache ── */
   const fetchAll = useCallback(async (silent=false) => {
     if (!silent) setLoading(true);
-    else setRefreshing(true);
+    else         setRefreshing(true);
     try {
-      /* ── 1. Orders ── */
+      /* 1. Orders */
       let allOrders = [];
       try {
         const or = await getOrders(1, 200);
@@ -631,7 +658,7 @@ export default function Dashboard() {
         setOrders(allOrders);
       } catch(e) { console.warn('Orders fetch failed', e); }
 
-      /* ── 2. Sales persons ── */
+      /* 2. Sales persons */
       let sps = [];
       try {
         const sp = await getAllSalesPersons();
@@ -639,7 +666,8 @@ export default function Dashboard() {
         setSalesPersons(sps);
       } catch(e) { console.warn('SalesPersons fetch failed', e); }
 
-      /* ── 3. Attendance (parallel per SP) ── */
+      /* 3. Attendance (parallel per SP) */
+      let attMap = {};
       if (sps.length) {
         const results = await Promise.allSettled(
           sps.slice(0,15).map(async (sp) => {
@@ -664,48 +692,69 @@ export default function Dashboard() {
             } catch { return [sp._id, { isOnline:false, name:sp.name }]; }
           })
         );
-        const map = {};
-        results.forEach(r => { if (r.status==='fulfilled' && r.value) map[r.value[0]] = r.value[1]; });
-        setAttendanceMap(map);
+        results.forEach(r => { if (r.status==='fulfilled' && r.value) attMap[r.value[0]] = r.value[1]; });
+        setAttendanceMap(attMap);
       }
 
-      /* ── 4. Retailer ledgers ── */
+      /* 4. Retailer ledgers */
+      let stats = { approved:0, pending:0, rejected:0, totalRecovered:0, pendingAmt:0, total:0 };
       try {
         const ret = await getAllRetailers();
         const retList = ret?.data?.data ?? [];
         const ledgerResults = await Promise.allSettled(
           retList.slice(0,15).map(r => getRetailerLedgerById(r._id))
         );
-        let approved=0, pending=0, rejected=0, totalRecovered=0, pendingAmt=0, total=0;
         ledgerResults.forEach(r => {
           if (r.status!=='fulfilled') return;
           const ledgers = r.value?.data?.data ?? r.value?.ledgers ?? [];
           ledgers.forEach(l => {
-            total++;
-            if (l.isRejected) { rejected++; }
-            else if (l.isApproved===false) { pending++; pendingAmt += Number(l.amount||0); }
-            else { approved++; totalRecovered += Number(l.amount||0); }
+            stats.total++;
+            if (l.isRejected)          { stats.rejected++; }
+            else if (l.isApproved===false) { stats.pending++; stats.pendingAmt += Number(l.amount||0); }
+            else                       { stats.approved++; stats.totalRecovered += Number(l.amount||0); }
           });
         });
-        setLedgerStats({ approved, pending, rejected, totalRecovered, pendingAmt, total });
+        setLedgerStats(stats);
       } catch(e) { console.warn('Ledger fetch failed', e); }
 
-      setLastRefresh(new Date());
+      /* ── Save everything to cache ── */
+      dashCache.save({ orders: allOrders, salesPersons: sps, attendanceMap: attMap, ledgerStats: stats });
+
+      const now = new Date();
+      setLastRefresh(now);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  /* ── On mount: use cache if valid, otherwise fetch ── */
+  useEffect(() => {
+    if (dashCache.isValid()) {
+      // Cache hit — data already loaded into state above, nothing to do
+      return;
+    }
+    fetchAll();
+  }, [fetchAll]);
 
   /* ── Derived stat card values ── */
-  const tKey = todayKey();
+  const tKey        = todayKey();
   const todayOrders = orders.filter(o => o.createdAt && new Date(o.createdAt).toLocaleDateString('en-CA')===tKey);
   const todaySales  = todayOrders.reduce((s,o)=>s+Number(o.total||0),0);
   const onlineCount = Object.values(attendanceMap).filter(a=>a.isOnline).length;
   const totalSPs    = salesPersons.length;
   const attPct      = totalSPs > 0 ? Math.round((onlineCount/totalSPs)*100) : 0;
+
+  /* ── Cache age label shown in the top bar ── */
+  const cacheLabel = (() => {
+    if (!lastRefresh) return null;
+    if (refreshing)   return 'Refreshing…';
+    const ageMs  = Date.now() - lastRefresh.getTime();
+    const ageMin = Math.floor(ageMs / 60_000);
+    const left   = dashCache.minutesLeft();
+    if (ageMin < 1) return `Cached · just now · refreshes in ${left}m`;
+    return `Cached · ${ageMin}m ago · refreshes in ${left}m`;
+  })();
 
   return (
     <>
@@ -713,14 +762,15 @@ export default function Dashboard() {
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         button { font-family: inherit; }
-        @keyframes shimmer { 0%,100%{opacity:1} 50%{opacity:.35} }
+        @keyframes shimmer   { 0%,100%{opacity:1} 50%{opacity:.35} }
         @keyframes livepulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.4)} }
-        @keyframes fadein { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes fadein    { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes spin      { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         .sp-dash { animation: fadein 0.3s ease both; }
         .sp-dash ::-webkit-scrollbar { width:3px; height:3px; }
         .sp-dash ::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.12); border-radius:4px; }
         .sp-row:hover { background: rgba(0,0,0,0.03) !important; }
+        .spin { animation: spin 0.8s linear infinite; }
       `}</style>
 
       <div className="sp-dash" style={{
@@ -732,30 +782,52 @@ export default function Dashboard() {
       }}>
 
         {/* ── Top bar ── */}
-        <div style={{
-          display:'flex',justifyContent:'space-between',alignItems:'center',
-          marginBottom:26,
-        }}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:26}}>
           <div>
             <div style={{fontSize:22,fontWeight:700,color:G.text,letterSpacing:'-0.3px'}}>Dashboard</div>
             <div style={{fontSize:12,color:G.sub,marginTop:4,display:'flex',alignItems:'center',gap:6}}>
               <span>{todayLabel()}</span>
-              {lastRefresh && (
-                <span style={{color:G.muted}}>
-                  · Updated {lastRefresh.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false})}
+              {cacheLabel && (
+                <span style={{
+                  color: G.muted,
+                  display:'flex',alignItems:'center',gap:4,
+                }}>
+                  · {cacheLabel}
                 </span>
               )}
             </div>
           </div>
-          
+
+          {/* Manual refresh button */}
+          <button
+            onClick={() => fetchAll(true)}
+            disabled={refreshing}
+            title="Force refresh (bypasses cache)"
+            style={{
+              display:'flex',alignItems:'center',gap:6,
+              fontSize:12,fontWeight:600,
+              padding:'7px 14px',borderRadius:10,cursor:'pointer',
+              background: G.glass,
+              border: `1px solid ${G.glassBd}`,
+              color: G.sub,
+              backdropFilter:'blur(12px)',
+              transition:'all 0.18s',
+              opacity: refreshing ? 0.6 : 1,
+            }}
+          >
+            <span className={refreshing ? 'spin' : ''} style={{display:'flex'}}>
+              <Ic.refresh />
+            </span>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
         </div>
 
         {/* ── Stat Cards ── */}
         <div style={{display:'flex',gap:14,marginBottom:20,flexWrap:'wrap'}}>
-          <StatCard loading={loading} icon={<Ic.dollar/>}  label="Today's Sales"       value={fmtRs(todaySales)}                  badge="+12%"        accentColor={G.blue}/>
-          <StatCard loading={loading} icon={<Ic.box/>}     label="Orders Today"         value={String(todayOrders.length)}          badge="+5%"         accentColor={G.purple}/>
-          <StatCard loading={loading} icon={<Ic.users/>}   label="Attendance Today"     value={`${onlineCount} / ${totalSPs}`}      sub={`${attPct}%`}  accentColor={G.green}/>
-          <StatCard loading={loading} icon={<Ic.clock/>}   label="Pending Recovery"     value={fmtRs(ledgerStats.pendingAmt)}       badge="+3%"         accentColor={G.amber}/>
+          <StatCard loading={loading} icon={<Ic.dollar/>}  label="Today's Sales"   value={fmtRs(todaySales)}             badge="+12%"       accentColor={G.blue}/>
+          <StatCard loading={loading} icon={<Ic.box/>}     label="Orders Today"    value={String(todayOrders.length)}    badge="+5%"        accentColor={G.purple}/>
+          <StatCard loading={loading} icon={<Ic.users/>}   label="Attendance Today" value={`${onlineCount} / ${totalSPs}`} sub={`${attPct}%`} accentColor={G.green}/>
+          <StatCard loading={loading} icon={<Ic.clock/>}   label="Pending Recovery" value={fmtRs(ledgerStats.pendingAmt)} badge="+3%"        accentColor={G.amber}/>
         </div>
 
         {/* ── Sales Trend + Attendance ── */}
