@@ -5,6 +5,7 @@ import {
   MdSearch, MdClose, MdRefresh, MdPerson, MdCalendarToday,
   MdFilterList, MdBarChart, MdCheckCircle, MdDownload,
   MdStorefront, MdAttachMoney, MdGroup, MdExpandMore, MdDateRange,
+  MdTrendingUp,
 } from 'react-icons/md';
 import { GrFormPrevious, GrFormNext } from 'react-icons/gr';
 import * as XLSX from 'xlsx';
@@ -28,12 +29,29 @@ const displayDate = (dateVal) => {
   catch { return '—'; }
 };
 
+/* ── Debit types: any ledger entry that is NOT a payment/credit.
+   Adjust this set if your backend uses different type strings. ── */
+const DEBIT_TYPES = new Set(['PURCHASE', 'INVOICE', 'DEBIT', 'SALE', 'ORDER', 'DR']);
+
+const isDebitEntry = (ledger) => {
+  if (!ledger.type) {
+    /* No type field: treat as debit if it has a positive amount
+       and no explicit credit/payment indicator */
+    return parseFloat(ledger.amount || 0) > 0;
+  }
+  const t = ledger.type.toUpperCase().trim();
+  /* Exclude payment / credit types explicitly */
+  if (t === 'PAYMENT' || t === 'CREDIT' || t === 'CR' || t === 'RETURN') return false;
+  /* Include if in known debit set, or as a catch-all for any unknown non-payment type */
+  return true;
+};
+
 const ROWS_PER_PAGE = 15;
 
 /* ════════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════════ */
-const ReportsRecovery = () => {
+const ReportsDebit = () => {
   /* data */
   const [reportData, setReportData] = useState([]);
   const [loading, setLoading]       = useState(false);
@@ -52,6 +70,7 @@ const ReportsRecovery = () => {
   const [selectedCity, setSelectedCity]         = useState('');
   const [searchTerm, setSearchTerm]             = useState('');
   const [statusFilter, setStatusFilter]         = useState('');
+  const [typeFilter, setTypeFilter]             = useState('');   // NEW: filter by debit sub-type
   const [datePreset, setDatePreset]             = useState('all');
 
   /* dropdown open state */
@@ -79,11 +98,8 @@ const ReportsRecovery = () => {
 
   /* ────────────────────────────────────────────────────────────
      CORE FETCH
-     API: getRetailerLedgerById(id)
-     Returns: { success: true, ledgers: [...] }
-     Each ledger: { _id, type, amount, date, createdAt,
-                    isApproved, isRejected, isImportedFromExcel,
-                    description, details, refNo, balance }
+     Changed from PAYMENT-only to DEBIT-only entries.
+     Debit = any ledger entry whose type is NOT PAYMENT/CREDIT/RETURN.
   ──────────────────────────────────────────────────────────── */
   const fetchReport = useCallback(async ({
     sd = '', ed = '', ret = '', sp = '', city = '',
@@ -96,17 +112,14 @@ const ReportsRecovery = () => {
       /* determine which retailers to query */
       let targetRetailers = retailers;
 
-      /* if a specific retailer is selected only fetch that one */
       if (ret) {
         targetRetailers = retailers.filter(r => r._id === ret);
       } else if (city) {
-        /* filter by city */
         targetRetailers = retailers.filter(r => {
           const cid = typeof r.city === 'object' ? r.city?._id : r.city;
           return cid === city;
         });
       } else if (sp) {
-        /* filter by salesperson */
         targetRetailers = retailers.filter(r => {
           const spid = typeof r.salesPersonID === 'object'
             ? r.salesPersonID?._id
@@ -127,10 +140,21 @@ const ReportsRecovery = () => {
       /* fetch ledger for each retailer in parallel (cap at 30) */
       const results = await Promise.allSettled(
         targetRetailers.slice(0, 30).map(retailer =>
-          getRetailerLedgerById(retailer._id).then(res => ({
-            retailer,
-            ledgers: Array.isArray(res?.ledgers) ? res.ledgers : [],
-          }))
+          getRetailerLedgerById(retailer._id).then(res => {
+            /* getRetailerLedgerById returns response.data directly.
+               Handle all possible shapes. */
+            let ledgers = [];
+            if (Array.isArray(res))                 ledgers = res;
+            else if (Array.isArray(res?.ledgers))   ledgers = res.ledgers;
+            else if (Array.isArray(res?.data))      ledgers = res.data;
+            else {
+              /* last resort: pick first array-valued key */
+              for (const k of Object.keys(res || {})) {
+                if (Array.isArray(res[k])) { ledgers = res[k]; break; }
+              }
+            }
+            return { retailer, ledgers };
+          })
         )
       );
 
@@ -145,14 +169,11 @@ const ReportsRecovery = () => {
         const spName = typeof retailer.salesPersonID === 'object'
           ? retailer.salesPersonID?.name || 'N/A'
           : salesPersons.find(s => s._id === retailer.salesPersonID)?.name || 'N/A';
-        const accountNo = retailer.userId || '—';
+        const accountNo = retailer.userId || retailer.accountNo || '—';
 
         ledgers.forEach(ledger => {
-          /* only include PAYMENT type entries (these are recovery entries) */
-          if (ledger.type && ledger.type !== 'PAYMENT') return;
-
-          /* skip imported-from-excel rows if you want (optional) */
-          // if (ledger.isImportedFromExcel) return;
+          /* ── FIX: include DEBIT entries only (exclude PAYMENT/CREDIT/RETURN) ── */
+          if (!isDebitEntry(ledger)) return;
 
           const dateKey = toDateKey(ledger.date || ledger.createdAt);
 
@@ -167,6 +188,8 @@ const ReportsRecovery = () => {
               ? 'Pending'
               : 'Approved';
 
+          const entryType = (ledger.type || 'PURCHASE').toUpperCase();
+
           rows.push({
             _id:          ledger._id || ledger.transactionId,
             accountNo,
@@ -177,6 +200,7 @@ const ReportsRecovery = () => {
             date:         dateKey,
             displayDate:  displayDate(ledger.date || ledger.createdAt),
             status,
+            type:         entryType,
             details:      ledger.description || ledger.details || '—',
             refNo:        ledger.refNo || '—',
             balance:      parseFloat(ledger.balance || 0),
@@ -192,11 +216,11 @@ const ReportsRecovery = () => {
       setCurrentPage(1);
 
       if (!rows.length) {
-        toast.info('No recovery payments found for the selected filters');
+        toast.info('No debit entries found for the selected filters');
       }
     } catch (err) {
-      console.error('ReportsRecovery fetch error:', err);
-      toast.error('Failed to fetch recovery data');
+      console.error('ReportsDebit fetch error:', err);
+      toast.error('Failed to fetch debit data');
       setGenerated(true);
     } finally {
       setLoading(false);
@@ -228,7 +252,7 @@ const ReportsRecovery = () => {
     if (retailers.length) {
       fetchReport({});
     }
-  }, [retailers.length]); // only when retailers first load
+  }, [retailers.length]);
 
   /* ── Date preset ── */
   const applyDatePreset = (preset) => {
@@ -271,27 +295,29 @@ const ReportsRecovery = () => {
   const handleReset = () => {
     setStartDate(''); setEndDate('');
     setSelectedRetailer(''); setSelectedSP(''); setSelectedCity('');
-    setSearchTerm(''); setStatusFilter('');
+    setSearchTerm(''); setStatusFilter(''); setTypeFilter('');
     setRetSearch(''); setSpSearch('');
     setDatePreset('all'); setCurrentPage(1);
     fetchReport({});
   };
 
-  /* ── Client-side search + status filter ── */
+  /* ── Client-side search + status + type filter ── */
   const filtered = useMemo(() => {
     let data = reportData;
     if (statusFilter) data = data.filter(r => r.status === statusFilter);
+    if (typeFilter)   data = data.filter(r => r.type   === typeFilter);
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
       data = data.filter(r =>
         r.retailerName.toLowerCase().includes(q) ||
-        r.salesPerson.toLowerCase().includes(q) ||
+        r.salesPerson.toLowerCase().includes(q)  ||
         String(r.accountNo).toLowerCase().includes(q) ||
-        r.city.toLowerCase().includes(q)
+        r.city.toLowerCase().includes(q)          ||
+        r.refNo.toLowerCase().includes(q)
       );
     }
     return data;
-  }, [reportData, searchTerm, statusFilter]);
+  }, [reportData, searchTerm, statusFilter, typeFilter]);
 
   /* ── Summary stats ── */
   const stats = useMemo(() => ({
@@ -300,7 +326,9 @@ const ReportsRecovery = () => {
     pending:     filtered.filter(r => r.status === 'Pending').length,
     rejected:    filtered.filter(r => r.status === 'Rejected').length,
     count:       filtered.length,
-  }), [filtered]);
+    /* unique debit types present in current data */
+    types:       [...new Set(reportData.map(r => r.type))].sort(),
+  }), [filtered, reportData]);
 
   /* ── Pagination ── */
   const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
@@ -314,20 +342,26 @@ const ReportsRecovery = () => {
       'Retailer':     r.retailerName,
       'Salesperson':  r.salesPerson,
       'City':         r.city,
+      'Type':         r.type,
       'Amount (Rs)':  r.amount,
       'Date':         r.displayDate,
       'Status':       r.status,
       'Ref No.':      r.refNo,
       'Details':      r.details,
     }));
-    rows.push({ 'A/C No.': 'TOTAL', 'Retailer': '', 'Salesperson': '', 'City': '',
-      'Amount (Rs)': stats.totalAmount, 'Date': '', 'Status': '', 'Ref No.': '', 'Details': '' });
+    rows.push({
+      'A/C No.': 'TOTAL', 'Retailer': '', 'Salesperson': '', 'City': '', 'Type': '',
+      'Amount (Rs)': stats.totalAmount, 'Date': '', 'Status': '', 'Ref No.': '', 'Details': '',
+    });
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{ wch:12 },{ wch:28 },{ wch:20 },{ wch:15 },{ wch:15 },{ wch:14 },{ wch:12 },{ wch:14 },{ wch:22 }];
+    ws['!cols'] = [
+      { wch:12 },{ wch:28 },{ wch:20 },{ wch:15 },{ wch:12 },
+      { wch:15 },{ wch:14 },{ wch:12 },{ wch:14 },{ wch:22 },
+    ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Recovery Report');
+    XLSX.utils.book_append_sheet(wb, ws, 'Debit Report');
     const suffix = startDate && endDate ? `${startDate}_to_${endDate}` : 'all-time';
-    XLSX.writeFile(wb, `Recovery_Report_${suffix}.xlsx`);
+    XLSX.writeFile(wb, `Debit_Report_${suffix}.xlsx`);
     toast.success('Report exported');
   };
 
@@ -342,11 +376,20 @@ const ReportsRecovery = () => {
   const selectedSPObj  = salesPersons.find(s => s._id === selectedSP);
   const activeFilterCount = [selectedRetailer, selectedSP, selectedCity, startDate || endDate, datePreset !== 'all'].filter(Boolean).length;
 
-  /* ── status badge style ── */
+  /* ── status badge ── */
   const statusBadge = (s) => {
     if (s === 'Approved') return 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200';
     if (s === 'Rejected') return 'bg-red-50 text-red-600 ring-1 ring-red-200';
     return 'bg-amber-50 text-amber-600 ring-1 ring-amber-200';
+  };
+
+  /* ── type badge ── */
+  const typeBadge = (t) => {
+    if (t === 'PURCHASE') return 'bg-[#FF5934]/10 text-[#FF5934]';
+    if (t === 'INVOICE')  return 'bg-blue-50 text-blue-600';
+    if (t === 'SALE')     return 'bg-purple-50 text-purple-600';
+    if (t === 'ORDER')    return 'bg-sky-50 text-sky-600';
+    return 'bg-gray-100 text-gray-500';
   };
 
   return (
@@ -360,7 +403,7 @@ const ReportsRecovery = () => {
           background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px;
           padding:10px 14px; font-size:13px; color:#111827; outline:none;
           font-family:'DM Sans',sans-serif; width:100%;
-          transition:border-color 0.15s,box-shadow 0.15s;
+          transition:border-color 0.15s, box-shadow 0.15s;
         }
         .rr-input:focus { border-color:#FF5934; box-shadow:0 0 0 3px rgba(255,89,52,0.1); }
         .rr-no-scroll::-webkit-scrollbar { display:none; }
@@ -373,10 +416,10 @@ const ReportsRecovery = () => {
         {/* ── Header ── */}
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
           <div>
-            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Recovery Report</h1>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Debit Report</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">
               {generated
-                ? `${stats.count} payment entries · ${presetLabel()}${selectedRetObj ? ` · ${selectedRetObj.shopName || selectedRetObj.name}` : ''}`
+                ? `${stats.count} debit entries · ${presetLabel()}${selectedRetObj ? ` · ${selectedRetObj.shopName || selectedRetObj.name}` : ''}`
                 : 'Select filters and generate report'}
             </p>
           </div>
@@ -401,7 +444,7 @@ const ReportsRecovery = () => {
 
           <div className="flex flex-wrap gap-4 items-end">
 
-            {/* ── Date preset ── */}
+            {/* Date preset */}
             <div className="flex-1 min-w-[200px] rr-dropdown">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                 <MdCalendarToday size={12} className="text-[#FF5934]" /> Date Range
@@ -426,7 +469,7 @@ const ReportsRecovery = () => {
               )}
             </div>
 
-            {/* ── Custom date inputs ── */}
+            {/* Custom date inputs */}
             {datePreset === 'custom' && (
               <>
                 <div className="flex-1 min-w-[140px]">
@@ -444,7 +487,7 @@ const ReportsRecovery = () => {
               </>
             )}
 
-            {/* ── Retailer picker ── */}
+            {/* Retailer picker */}
             <div className="flex-1 min-w-[200px] rr-dropdown">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                 <MdStorefront size={12} className="text-[#FF5934]" /> Retailer
@@ -506,7 +549,7 @@ const ReportsRecovery = () => {
               )}
             </div>
 
-            {/* ── Salesperson picker ── */}
+            {/* Salesperson picker */}
             <div className="flex-1 min-w-[200px] rr-dropdown">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                 <MdPerson size={12} className="text-[#FF5934]" /> Salesperson
@@ -568,13 +611,14 @@ const ReportsRecovery = () => {
               )}
             </div>
 
-            {/* ── Status filter ── */}
+            {/* Status filter */}
             <div className="flex-1 min-w-[140px]">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                 <MdCheckCircle size={12} className="text-[#FF5934]" /> Status
               </label>
               <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-                className="rr-input" style={{ appearance:'none', paddingRight:28,
+                className="rr-input"
+                style={{ appearance:'none', paddingRight:28,
                   backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
                   backgroundRepeat:'no-repeat', backgroundPosition:'right 10px center' }}>
                 <option value="">All Statuses</option>
@@ -584,7 +628,24 @@ const ReportsRecovery = () => {
               </select>
             </div>
 
-            {/* ── Buttons ── */}
+            {/* Debit type filter — only shown when data is loaded */}
+            {stats.types.length > 1 && (
+              <div className="flex-1 min-w-[140px]">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                  <MdTrendingUp size={12} className="text-[#FF5934]" /> Entry Type
+                </label>
+                <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setCurrentPage(1); }}
+                  className="rr-input"
+                  style={{ appearance:'none', paddingRight:28,
+                    backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+                    backgroundRepeat:'no-repeat', backgroundPosition:'right 10px center' }}>
+                  <option value="">All Types</option>
+                  {stats.types.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Buttons */}
             <div className="flex gap-2 flex-shrink-0">
               <button onClick={handleReset}
                 className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
@@ -599,7 +660,7 @@ const ReportsRecovery = () => {
             </div>
           </div>
 
-          {/* Active chips */}
+          {/* Active filter chips */}
           {(selectedRetObj || selectedSPObj || datePreset !== 'all') && (
             <div className="mt-4 flex flex-wrap gap-2">
               {datePreset !== 'all' && (
@@ -627,24 +688,24 @@ const ReportsRecovery = () => {
           )}
         </div>
 
-        {/* ── Loading state ── */}
+        {/* Loading */}
         {loading && (
           <div className="bg-white border border-gray-100 rounded-2xl shadow-sm py-20 flex flex-col items-center gap-3">
             <div className="w-10 h-10 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
-            <p className="text-[13px] text-[#9CA3AF]">Fetching recovery entries from ledgers…</p>
+            <p className="text-[13px] text-[#9CA3AF]">Fetching debit entries from ledgers…</p>
           </div>
         )}
 
-        {/* ── Results ── */}
+        {/* Results */}
         {!loading && generated && (
           <>
             {/* Stat cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
               {[
-                { label:'Total Recovered', value:`Rs. ${fmt(stats.totalAmount)}`, color:'text-emerald-600', bg:'bg-emerald-50', Icon:MdAttachMoney },
-                { label:'Approved',        value:stats.approved,                  color:'text-green-600',   bg:'bg-green-50',   Icon:MdCheckCircle },
-                { label:'Pending',         value:stats.pending,                   color:'text-amber-600',   bg:'bg-amber-50',   Icon:MdBarChart },
-                { label:'Total Records',   value:stats.count,                     color:'text-[#FF5934]',   bg:'bg-[#FF5934]/10', Icon:MdStorefront },
+                { label:'Total Debit',   value:`Rs. ${fmt(stats.totalAmount)}`, color:'text-[#FF5934]',   bg:'bg-[#FF5934]/10', Icon:MdTrendingUp   },
+                { label:'Approved',      value:stats.approved,                  color:'text-emerald-600', bg:'bg-emerald-50',   Icon:MdCheckCircle  },
+                { label:'Pending',       value:stats.pending,                   color:'text-amber-600',   bg:'bg-amber-50',     Icon:MdBarChart     },
+                { label:'Total Records', value:stats.count,                     color:'text-blue-600',    bg:'bg-blue-50',      Icon:MdAttachMoney  },
               ].map(({ label, value, color, bg, Icon }) => (
                 <div key={label} className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4">
                   <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center flex-shrink-0`}>
@@ -658,7 +719,7 @@ const ReportsRecovery = () => {
               ))}
             </div>
 
-            {/* Search bar */}
+            {/* Search */}
             <div className="flex items-center gap-3 mb-4">
               <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 flex-1 max-w-sm shadow-sm">
                 <MdSearch size={16} className="text-[#9CA3AF] flex-shrink-0" />
@@ -684,13 +745,14 @@ const ReportsRecovery = () => {
               {filtered.length === 0 ? (
                 <div className="py-16 text-center flex flex-col items-center gap-3">
                   <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                    <MdAttachMoney size={22} className="text-gray-300" />
+                    <MdTrendingUp size={22} className="text-gray-300" />
                   </div>
                   <p className="text-[#9CA3AF] text-sm font-medium">
-                    {searchTerm ? 'No records match your search' : 'No recovery payments found'}
+                    {searchTerm ? 'No records match your search' : 'No debit entries found'}
                   </p>
-                  {(searchTerm || statusFilter) && (
-                    <button onClick={() => { setSearchTerm(''); setStatusFilter(''); }} className="text-[#FF5934] text-xs hover:underline">Clear filters</button>
+                  {(searchTerm || statusFilter || typeFilter) && (
+                    <button onClick={() => { setSearchTerm(''); setStatusFilter(''); setTypeFilter(''); }}
+                      className="text-[#FF5934] text-xs hover:underline">Clear filters</button>
                   )}
                 </div>
               ) : (
@@ -699,7 +761,7 @@ const ReportsRecovery = () => {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-[#FAFAFA] border-b border-gray-100">
-                          {['#','A/C No.','Retailer / City','Salesperson','Amount (Rs.)','Date','Status'].map(h => (
+                          {['#','A/C No.','Retailer / City','Salesperson','Type','Amount (Rs.)','Date','Status'].map(h => (
                             <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
@@ -729,8 +791,14 @@ const ReportsRecovery = () => {
                                   <span className="text-[13px] text-[#374151] font-medium">{row.salesPerson}</span>
                                 </div>
                               </td>
+                              {/* NEW: type column */}
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold ${typeBadge(row.type)}`}>
+                                  {row.type}
+                                </span>
+                              </td>
                               <td className="px-4 py-3 text-right">
-                                <span className="text-[13px] font-bold text-emerald-600">Rs. {fmt(row.amount)}</span>
+                                <span className="text-[13px] font-bold text-[#FF5934]">Rs. {fmt(row.amount)}</span>
                               </td>
                               <td className="px-4 py-3">
                                 <span className="text-[12px] text-[#6B7280] font-medium">{row.displayDate}</span>
@@ -750,8 +818,8 @@ const ReportsRecovery = () => {
                   {/* Footer */}
                   <div className="border-t border-gray-100 bg-[#FAFAFA] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total Recovered (filtered)</p>
-                      <p className="text-[16px] font-bold text-emerald-600">Rs. {fmt(stats.totalAmount)}</p>
+                      <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total Debit (filtered)</p>
+                      <p className="text-[16px] font-bold text-[#FF5934]">Rs. {fmt(stats.totalAmount)}</p>
                     </div>
                     {totalPages > 1 && (
                       <div className="flex items-center gap-1.5">
@@ -781,4 +849,4 @@ const ReportsRecovery = () => {
   );
 };
 
-export default ReportsRecovery;
+export default ReportsDebit;

@@ -312,7 +312,6 @@ const ProductAndInventory = () => {
   const enrichedStock = useMemo(() => stockData.map(p => {
     const baseQty   = parseFloat(p.stock || 0);
     const cortanSz  = parseFloat(p.cortanSize || 1);
-    /* UM Qty = stock (cartons) × cortanSize (units per carton), e.g. 53 × 4 = 212 */
     const umQty     = baseQty * cortanSz;
     return {
       ...p,
@@ -321,7 +320,7 @@ const ProductAndInventory = () => {
       _city:     resolveNameFrom(p.cityID,                   cities, 'name'),
       _status:   getStockStatus(p.stock),
       _pktInCtn: p.cortanSize ? `1x${p.cortanSize}` : '—',
-      _umQty:    umQty,   // ← corrected: base qty × carton size
+      _umQty:    umQty,
     };
   }), [stockData, categories, brands, cities]);
 
@@ -345,8 +344,8 @@ const ProductAndInventory = () => {
       low:         all.filter(p => p._status === 'Low Stock').length,
       out:         all.filter(p => p._status === 'Out of Stock').length,
       neg:         all.filter(p => p._status === 'Negative').length,
-      totalQty:    all.reduce((s, p) => s + parseFloat(p.stock || 0), 0),  // base qty (ctns)
-      totalUmQty:  all.reduce((s, p) => s + p._umQty, 0),                  // um qty (units)
+      totalQty:    all.reduce((s, p) => s + parseFloat(p.stock || 0), 0),
+      totalUmQty:  all.reduce((s, p) => s + p._umQty, 0),
     };
   }, [enrichedStock]);
 
@@ -372,7 +371,7 @@ const ProductAndInventory = () => {
         'Base Unit':   'Ctns',
         'Base Qty':    parseFloat(p.stock || 0),
         'UM Unit':     'Ctns',
-        'UM Qty':      p._umQty,        // ← corrected
+        'UM Qty':      p._umQty,
         Status:        p._status,
       }));
       const totBase = items.reduce((s, p) => s + parseFloat(p.stock || 0), 0);
@@ -387,23 +386,25 @@ const ProductAndInventory = () => {
   };
 
   /* ══ TAB 2 — SALES ══ */
-  const [salesRows,      setSalesRows]      = useState([]);
-  const [salesLoading,   setSalesLoading]   = useState(false);
-  const [salesError,     setSalesError]     = useState(null);
-  const [salesPage,      setSalesPage]      = useState(1);
-  const [salesTotalPgs,  setSalesTotalPgs]  = useState(1);
-  const [salesLimit,     setSalesLimit]     = useState(50);
-  const [salesSearch,    setSalesSearch]    = useState('');
-  const [salesDebSearch, setSalesDebSearch] = useState('');
-  const [salesCity,      setSalesCity]      = useState('');
-  const [salesCategory,  setSalesCategory]  = useState('');
-  const [salesBrand,     setSalesBrand]     = useState('');
-  const [salesDateFrom,  setSalesDateFrom]  = useState('');
-  const [salesDateTo,    setSalesDateTo]    = useState('');
-  const [salesGroupBy,   setSalesGroupBy]   = useState('product');
-  const [salesSort,      setSalesSort]      = useState({ key: 'productName', dir: 'asc' });
-  const [salesGroups,    setSalesGroups]    = useState({});
-  const [salesRowMenu,   setSalesRowMenu]   = useState(null);
+  const [salesRows,         setSalesRows]         = useState([]);
+  const [salesLoading,      setSalesLoading]      = useState(false);
+  const [salesError,        setSalesError]        = useState(null);
+  const [salesPage,         setSalesPage]         = useState(1);
+  const [salesTotalPgs,     setSalesTotalPgs]     = useState(1);
+  const [salesLimit,        setSalesLimit]        = useState(50);
+  const [salesSearch,       setSalesSearch]       = useState('');
+  const [salesDebSearch,    setSalesDebSearch]    = useState('');
+  const [salesCity,         setSalesCity]         = useState('');
+  const [salesCategory,     setSalesCategory]     = useState('');
+  const [salesBrand,        setSalesBrand]        = useState('');
+  const [salesDateFrom,     setSalesDateFrom]     = useState('');
+  const [salesDateTo,       setSalesDateTo]       = useState('');
+  const [salesGroupBy,      setSalesGroupBy]      = useState('product');
+  const [salesSort,         setSalesSort]         = useState({ key: 'productName', dir: 'asc' });
+  const [salesGroups,       setSalesGroups]       = useState({});
+  const [salesRowMenu,      setSalesRowMenu]      = useState(null);
+  // ── NEW: salesperson filter ──
+  const [salesPersonFilter, setSalesPersonFilter] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setSalesDebSearch(salesSearch), 500);
@@ -435,7 +436,6 @@ const ProductAndInventory = () => {
           ? (retailerObj.shopName || retailerObj.name || retailerObj.storeName || `R-${retailerObj._id?.slice(-4)}`)
           : (typeof retailerObj === 'string' ? retailerObj : (order.customerName || '—'));
 
-        /* City: resolve ID → name via cities list */
         const cityIdValue = order.city || order.cityId || order.cityID || null;
         const cityName    = resolveNameFrom(cityIdValue, cities, 'name');
 
@@ -469,16 +469,41 @@ const ProductAndInventory = () => {
 
   useEffect(() => { fetchSales(); }, [fetchSales]);
 
+  // ── NEW: unique salesperson list derived from salesRows ──
+  const uniqueSalespersons = useMemo(() => {
+    const seen = new Set();
+    return salesRows
+      .filter(r => r.salesperson && r.salesperson !== '—')
+      .filter(r => {
+        if (seen.has(r.salesperson)) return false;
+        seen.add(r.salesperson);
+        return true;
+      })
+      .sort((a, b) => a.salesperson.localeCompare(b.salesperson));
+  }, [salesRows]);
+
+  // ── UPDATED: filteredSalesRows now also applies salesPersonFilter ──
   const filteredSalesRows = useMemo(() => {
-    if (!salesDebSearch) return salesRows;
-    const q = salesDebSearch.toLowerCase();
-    return salesRows.filter(r =>
-      r.productName.toLowerCase().includes(q) ||
-      r.productCode.toLowerCase().includes(q) ||
-      r.customer.toLowerCase().includes(q)    ||
-      r.salesperson.toLowerCase().includes(q)
-    );
-  }, [salesRows, salesDebSearch]);
+    let rows = salesRows;
+
+    // text search filter
+    if (salesDebSearch) {
+      const q = salesDebSearch.toLowerCase();
+      rows = rows.filter(r =>
+        r.productName.toLowerCase().includes(q) ||
+        r.productCode.toLowerCase().includes(q) ||
+        r.customer.toLowerCase().includes(q)    ||
+        r.salesperson.toLowerCase().includes(q)
+      );
+    }
+
+    // salesperson dropdown filter
+    if (salesPersonFilter) {
+      rows = rows.filter(r => r.salesperson === salesPersonFilter);
+    }
+
+    return rows;
+  }, [salesRows, salesDebSearch, salesPersonFilter]);
 
   const salesGrouped = useMemo(() => {
     const rows = [...filteredSalesRows].sort((a, b) => {
@@ -581,6 +606,8 @@ const ProductAndInventory = () => {
         .pi-groupby-btn { padding:5px 12px; border-radius:8px; font-size:12px; font-weight:600; border:1px solid #E5E7EB; background:white; cursor:pointer; transition:all 0.15s; }
         .pi-groupby-btn.active { background:#FF5934; color:white; border-color:#FF5934; }
         .pi-groupby-btn:not(.active):hover { background:#FFF5F3; border-color:#FF5934; color:#FF5934; }
+        .sp-active { border-color:#FF5934 !important; background:#FFF5F3 !important; }
+        .sp-active select { color:#FF5934 !important; font-weight:600; }
       `}</style>
 
       <div className="pi-page">
@@ -664,6 +691,8 @@ const ProductAndInventory = () => {
 
           {/* ── Filters ── */}
           <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-gray-100">
+
+            {/* Search */}
             <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2 flex-1 min-w-[200px]">
               <MdSearch size={17} className="text-[#9CA3AF] flex-shrink-0" />
               <input type="search"
@@ -676,6 +705,7 @@ const ProductAndInventory = () => {
               )}
             </div>
 
+            {/* Location */}
             <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
               <MdLocationOn size={14} className="text-[#FF5934]" />
               <span className="text-[11px] font-semibold text-[#9CA3AF] uppercase tracking-wide select-none">Location</span>
@@ -687,6 +717,7 @@ const ProductAndInventory = () => {
               </select>
             </div>
 
+            {/* Category */}
             <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
               <MdCategory size={14} className="text-[#9CA3AF]" />
               <select value={activeTab === 'stock' ? stockCategory : salesCategory}
@@ -697,6 +728,7 @@ const ProductAndInventory = () => {
               </select>
             </div>
 
+            {/* Brand */}
             <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
               <MdBrandingWatermark size={14} className="text-[#9CA3AF]" />
               <select value={activeTab === 'stock' ? stockBrand : salesBrand}
@@ -707,17 +739,55 @@ const ProductAndInventory = () => {
               </select>
             </div>
 
+            {/* ── Sales-only filters ── */}
             {activeTab === 'sales' && (<>
+
+              {/* Date From */}
               <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
                 <MdCalendarToday size={14} className="text-[#9CA3AF]" />
                 <input type="date" value={salesDateFrom} onChange={handleSalesFilter(setSalesDateFrom)}
                   className="pi-select outline-none text-sm text-[#374151] border-none bg-transparent min-w-[120px]" title="From date" />
               </div>
+
+              {/* Date To */}
               <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
                 <MdCalendarToday size={14} className="text-[#9CA3AF]" />
                 <input type="date" value={salesDateTo} onChange={handleSalesFilter(setSalesDateTo)}
                   className="pi-select outline-none text-sm text-[#374151] border-none bg-transparent min-w-[120px]" title="To date" />
               </div>
+
+              {/* ── NEW: Salesperson dropdown ── */}
+              <div className={`flex items-center gap-2 bg-[#F9FAFB] border rounded-xl px-3 py-2 transition-all ${salesPersonFilter ? 'sp-active border-[#FF5934]' : 'border-gray-200'}`}>
+                <MdPerson size={14} className={salesPersonFilter ? 'text-[#FF5934]' : 'text-[#9CA3AF]'} />
+                <span className={`text-[11px] font-semibold uppercase tracking-wide select-none ${salesPersonFilter ? 'text-[#FF5934]' : 'text-[#9CA3AF]'}`}>SP</span>
+                <select
+                  value={salesPersonFilter}
+                  onChange={e => {
+                    setSalesPersonFilter(e.target.value);
+                    setSalesPage(1);
+                    setSalesGroups({});
+                  }}
+                  className={`pi-select outline-none text-sm border-none bg-transparent min-w-[130px] ${salesPersonFilter ? 'text-[#FF5934] font-semibold' : 'text-[#374151]'}`}
+                >
+                  <option value="">All Salespersons</option>
+                  {uniqueSalespersons.map(r => (
+                    <option key={r.salespersonId || r.salesperson} value={r.salesperson}>
+                      {r.salesperson}
+                    </option>
+                  ))}
+                </select>
+                {salesPersonFilter && (
+                  <button
+                    onClick={() => { setSalesPersonFilter(''); setSalesPage(1); setSalesGroups({}); }}
+                    className="text-[#FF5934] hover:text-[#e84d2a] ml-0.5 flex-shrink-0"
+                    title="Clear salesperson filter"
+                  >
+                    <MdClose size={13} />
+                  </button>
+                )}
+              </div>
+
+              {/* Group By */}
               <div className="flex items-center gap-1.5 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
                 <MdPerson size={14} className="text-[#9CA3AF]" />
                 <span className="text-xs text-[#9CA3AF] mr-1">Group:</span>
@@ -726,15 +796,23 @@ const ProductAndInventory = () => {
               </div>
             </>)}
 
+            {/* Expand / Collapse All */}
             <button onClick={activeTab === 'stock' ? toggleAll : toggleAllSales}
               className="flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#FF5934] px-3 py-2 rounded-xl hover:bg-orange-50 transition-all">
               {(activeTab === 'stock' ? allExpanded : allSalesExpanded) ? <MdExpandLess size={16} /> : <MdExpandMore size={16} />}
               {(activeTab === 'stock' ? allExpanded : allSalesExpanded) ? 'Collapse' : 'Expand'} All
             </button>
 
+            {/* Reset */}
             <button onClick={() => {
-              if (activeTab === 'stock') { setStockSearch(''); setStockDebSearch(''); setStockCity(''); setStockCategory(''); setStockBrand(''); setStockStatus(''); setStockPage(1); }
-              else { setSalesSearch(''); setSalesDebSearch(''); setSalesCity(''); setSalesCategory(''); setSalesBrand(''); setSalesDateFrom(''); setSalesDateTo(''); setSalesPage(1); setSalesGroups({}); }
+              if (activeTab === 'stock') {
+                setStockSearch(''); setStockDebSearch(''); setStockCity(''); setStockCategory(''); setStockBrand(''); setStockStatus(''); setStockPage(1);
+              } else {
+                setSalesSearch(''); setSalesDebSearch(''); setSalesCity(''); setSalesCategory(''); setSalesBrand('');
+                setSalesDateFrom(''); setSalesDateTo(''); setSalesPage(1); setSalesGroups({});
+                // ── NEW: also reset salesperson filter ──
+                setSalesPersonFilter('');
+              }
             }} className="flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#FF5934] px-3 py-2 rounded-xl hover:bg-orange-50 transition-all">
               <MdRefresh size={15} /> Reset
             </button>
@@ -815,29 +893,22 @@ const ProductAndInventory = () => {
                                   const rowId   = p._id || `stock-${idx}`;
                                   return (
                                     <tr key={rowId} className="table-row border-b border-gray-50">
-                                      {/* Code */}
                                       <td className="px-4 py-3 pl-10">
                                         <span className="text-[12px] font-mono font-semibold text-[#6B7280] bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-lg">{p.productId || '—'}</span>
                                       </td>
-                                      {/* Product */}
                                       <td className="px-4 py-3">
                                         <p className="text-[13px] font-medium text-[#111827] leading-tight max-w-xs">{p.englishTitle || '—'}</p>
                                       </td>
-                                      {/* PKT in CTN */}
                                       <td className="px-4 py-3 text-center">
                                         <span className="text-[12px] text-[#374151] bg-[#F3F4F6] px-2 py-1 rounded-lg font-mono">{p._pktInCtn}</span>
                                       </td>
-                                      {/* Base Unit */}
                                       <td className="px-4 py-3 text-center text-[13px] text-[#374151]">Ctns</td>
-                                      {/* Base Qty — stock (cartons) */}
                                       <td className="px-4 py-3 text-right">
                                         <span className={`text-[14px] font-bold ${negBase ? 'pi-negative' : 'pi-positive'}`}>
                                           {negBase ? `(${fmtNum(Math.abs(p.stock))})` : fmtNum(p.stock)}
                                         </span>
                                       </td>
-                                      {/* UM Unit */}
                                       <td className="px-4 py-3 text-center text-[13px] text-[#374151]">Ctns</td>
-                                      {/* UM Qty — stock × cortanSize (e.g. 53 × 4 = 212) */}
                                       <td className="px-4 py-3 text-right">
                                         <span className={`text-[13px] font-semibold ${negUm ? 'pi-negative' : 'pi-positive'}`}>
                                           {negUm ? `(${fmtNum(Math.abs(p._umQty))})` : fmtNum(p._umQty)}
@@ -848,13 +919,11 @@ const ProductAndInventory = () => {
                                           </span>
                                         )}
                                       </td>
-                                      {/* Status */}
                                       <td className="px-4 py-3">
                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${sc.pill}`}>
                                           <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />{p._status}
                                         </span>
                                       </td>
-                                      {/* Row download */}
                                       <td className="px-2 py-3 text-center">
                                         <div className="row-dl-btn flex justify-center">
                                           <RowActions rowId={rowId} activeMenu={stockRowMenu} setMenu={setStockRowMenu}
@@ -864,17 +933,14 @@ const ProductAndInventory = () => {
                                     </tr>
                                   );
                                 })}
-                                {/* Group subtotal */}
                                 <tr className="subtotal-row">
                                   <td className="px-4 py-2 pl-10" colSpan={4}>
                                     <span className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total — {brand}</span>
                                   </td>
-                                  {/* Base Qty subtotal */}
                                   <td className="px-4 py-2 text-right">
                                     <span className={`text-[13px] font-bold ${isNeg(groupBase) ? 'pi-negative' : 'text-[#FF5934]'}`}>{fmtNum(groupBase)}</span>
                                   </td>
                                   <td />
-                                  {/* UM Qty subtotal — sum of stock × cortanSize */}
                                   <td className="px-4 py-2 text-right">
                                     <span className={`text-[13px] font-bold ${isNeg(groupUm) ? 'pi-negative' : 'text-[#FF5934]'}`}>{fmtNum(groupUm)}</span>
                                   </td>
@@ -898,7 +964,6 @@ const ProductAndInventory = () => {
                       </div>
                       <div>
                         <p className="text-[10px] text-[#9CA3AF] font-bold uppercase tracking-widest">UM Qty (Units)</p>
-                        {/* ← Correctly sums stock × cortanSize across all products */}
                         <p className="text-[15px] font-bold text-[#FF5934]">{fmtNum(stockStats.totalUmQty)}</p>
                       </div>
                     </div>
@@ -1084,7 +1149,18 @@ const ProductAndInventory = () => {
 
                   {/* Grand total */}
                   <div className="border-t-2 border-[#FFD7CE] bg-[#FFF5F3] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                    <span className="text-[12px] font-bold text-[#9CA3AF] uppercase tracking-widest">Grand Total</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[12px] font-bold text-[#9CA3AF] uppercase tracking-widest">Grand Total</span>
+                      {/* ── NEW: show active salesperson filter badge ── */}
+                      {salesPersonFilter && (
+                        <span className="inline-flex items-center gap-1.5 bg-purple-50 border border-purple-200 text-purple-600 text-[11px] font-bold px-2.5 py-1 rounded-full">
+                          <MdPerson size={11} /> {salesPersonFilter}
+                          <button onClick={() => { setSalesPersonFilter(''); setSalesPage(1); setSalesGroups({}); }} className="hover:text-purple-800 ml-0.5">
+                            <MdClose size={10} />
+                          </button>
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-8">
                       <div><p className="text-[10px] text-[#9CA3AF] font-bold uppercase tracking-widest">Total UM Qty</p><p className="text-[15px] font-bold text-[#FF5934]">{fmtNum(salesStats.totalQty)} Ctns</p></div>
                       <div><p className="text-[10px] text-[#9CA3AF] font-bold uppercase tracking-widest">Total Net Amount</p><p className="text-[15px] font-bold text-[#FF5934]">{fmtAmt(salesStats.totalAmt)}</p></div>
@@ -1095,6 +1171,7 @@ const ProductAndInventory = () => {
                   <div className="border-t border-gray-100 bg-[#FAFAFA] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
                       {salesStats.totalRows} line{salesStats.totalRows !== 1 ? 's' : ''} · {salesStats.uniqueOrders} order{salesStats.uniqueOrders !== 1 ? 's' : ''}
+                      {salesPersonFilter && <> · <span className="text-purple-500">{salesPersonFilter}</span></>}
                     </p>
                     <div className="flex items-center gap-1.5">
                       <button className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all"

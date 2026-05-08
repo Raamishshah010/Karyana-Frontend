@@ -24,7 +24,6 @@ const formatDate = (dateString) => {
   try { return new Date(dateString).toLocaleDateString('en-GB'); } catch { return '—'; }
 };
 
-/* Parse yyyy-mm-dd (from <input type="date">) or ISO string to a Date at midnight */
 const parseToDate = (str) => {
   if (!str) return null;
   const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -32,11 +31,92 @@ const parseToDate = (str) => {
   return new Date(str);
 };
 
-/* Convert yyyy-mm-dd → dd/mm/yyyy for display & PDF */
 const isoToDisplay = (iso) => {
   if (!iso) return '';
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y}`;
+};
+
+/* ─────────────────────────────────────────
+   NORMALISE a single ledger entry from any
+   API response shape into a consistent row.
+   Handles: { amount, type } and { dr, cr }
+   and { debit, credit } field names.
+───────────────────────────────────────── */
+const normaliseEntry = (item, idx) => {
+  /* ── Determine raw debit / credit ──
+     Priority: explicit dr/cr fields → type-based amount → debit/credit fields */
+  let rawDr = 0;
+  let rawCr = 0;
+
+  if (item.dr != null || item.cr != null) {
+    // Already split
+    rawDr = parseFloat(item.dr || 0);
+    rawCr = parseFloat(item.cr || 0);
+  } else if (item.debit != null || item.credit != null) {
+    rawDr = parseFloat(item.debit  || 0);
+    rawCr = parseFloat(item.credit || 0);
+  } else if (item.amount != null) {
+    // Determine direction from type field
+    const t = (item.type || '').toUpperCase();
+    const isCredit = t === 'PAYMENT' || t === 'CREDIT' || t === 'RETURN';
+    if (isCredit) rawCr = parseFloat(item.amount || 0);
+    else          rawDr = parseFloat(item.amount || 0);
+  }
+
+  /* ── Determine type label ── */
+  const typeRaw = item.type || item.transactionType || item.txnType || '';
+  const type    = typeRaw.toUpperCase() || (rawCr > 0 ? 'PAYMENT' : 'PURCHASE');
+
+  /* ── Determine running balance ── */
+  const rawBalance = parseFloat(
+    item.balance ?? item.runningBalance ?? item.closingBalance ?? 0
+  );
+
+  return {
+    sr:         idx + 1,
+    id:         item._id || item.id || `row-${idx}`,
+    details:    item.details || item.description || item.narration || item.remarks || 'Transaction',
+    type,
+    date:       formatDate(item.date || item.createdAt || item.transactionDate),
+    rawDate:    item.date || item.createdAt || item.transactionDate || '',
+    bankName:   item.bankId?.name || item.bankName || item.bank || '',
+    refNo:      item.refNo || item.referenceNo || item.reference || '',
+    vNo:        item.voucherNo || item.vNo || item.v || item.invoiceNo || '',
+    bilty:      item.biltyNumber || item.bilty || '',
+    quantity:   item.quantity ?? item.qty ?? 0,
+    /* formatted strings for display */
+    dr:         rawDr > 0 ? formatNumber(rawDr) : '0',
+    cr:         rawCr > 0 ? formatNumber(rawCr) : '0',
+    balance:    formatNumber(rawBalance),
+    /* raw numbers for calculations */
+    rawDr,
+    rawCr,
+    rawBalance,
+  };
+};
+
+/* ─────────────────────────────────────────
+   Extract the ledger array from ANY response
+   shape the API might return:
+   - { success, ledgers: [...] }
+   - { success, data: [...] }
+   - { ledgers: [...] }
+   - { data: [...] }
+   - [...]  (bare array)
+───────────────────────────────────────── */
+const extractLedgerArray = (res) => {
+  if (!res) return [];
+  if (Array.isArray(res))             return res;
+  if (Array.isArray(res.ledgers))     return res.ledgers;
+  if (Array.isArray(res.data))        return res.data;
+  if (Array.isArray(res.transactions)) return res.transactions;
+  if (Array.isArray(res.entries))     return res.entries;
+  /* Last resort: look for any array-valued key */
+  for (const key of Object.keys(res)) {
+    if (Array.isArray(res[key]) && res[key].length > 0) return res[key];
+  }
+  return [];
 };
 
 /* ─────────────────────────────────────────
@@ -76,7 +156,6 @@ const exportToPdf = (ledgerData, retailer, totals, dateFrom, dateTo) => {
     doc.setFont('helvetica', 'normal');
     doc.text(`Mobile: ${retailer.phoneNumber || retailer.phone || ''}`, ml, 39);
     doc.text(retailer.city || '', ml, 44);
-    doc.text(retailer.region || '', ml, 49);
 
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...DARK);
     doc.text(`Salesperson: ${retailer.salesperson || ''}`, pw / 2, 32, { align: 'center' });
@@ -102,7 +181,7 @@ const exportToPdf = (ledgerData, retailer, totals, dateFrom, dateTo) => {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLACK);
     cols.forEach(col => {
       const xPos = ml + col.x;
-      if (col.align === 'right')       doc.text(col.label, xPos + col.w - 1, y + 5, { align: 'right' });
+      if      (col.align === 'right')  doc.text(col.label, xPos + col.w - 1, y + 5, { align: 'right' });
       else if (col.align === 'center') doc.text(col.label, xPos + col.w / 2, y + 5, { align: 'center' });
       else                             doc.text(col.label, xPos + 1, y + 5);
     });
@@ -113,20 +192,18 @@ const exportToPdf = (ledgerData, retailer, totals, dateFrom, dateTo) => {
 
   const ROW_H = 7, FOOTER_H = 16, USABLE = ph - FOOTER_H;
   let tempY = drawPageHeader(1, 1); tempY = drawTableHeader(tempY);
-  const rowsPerFirstPage = Math.floor((USABLE - tempY - 10) / ROW_H);
-  const rowsPerOtherPage = Math.floor((USABLE - 53 - 7 - 10) / ROW_H);
-  const remainingRows    = Math.max(0, ledgerData.length + 1 - rowsPerFirstPage);
-  const totalPages       = 1 + (remainingRows > 0 ? Math.ceil(remainingRows / rowsPerOtherPage) : 0);
+  const rowsPerFirstPage  = Math.floor((USABLE - tempY - 10) / ROW_H);
+  const rowsPerOtherPage  = Math.floor((USABLE - 53 - 7 - 10) / ROW_H);
+  const remainingRows     = Math.max(0, ledgerData.length + 1 - rowsPerFirstPage);
+  const totalPages        = 1 + (remainingRows > 0 ? Math.ceil(remainingRows / rowsPerOtherPage) : 0);
 
   let currentPage = 1;
   let y = drawPageHeader(currentPage, totalPages);
   y = drawTableHeader(y);
   doc.setFontSize(7.5);
 
-  /* Brought Forward */
   doc.setFont('helvetica', 'normal'); doc.setTextColor(...DARK);
-  doc.text('Brought', ml + cols[1].x + 1, y + 3.5);
-  doc.text('Forward', ml + cols[1].x + 1, y + 7.5);
+  doc.text('Brought Forward', ml + cols[1].x + 1, y + 5);
   doc.text('0', ml + cols[5].x + cols[5].w - 1, y + 5, { align: 'right' });
   if (retailer.openingBalance != null)
     doc.text(formatNumber(retailer.openingBalance), ml + cols[8].x + cols[8].w - 1, y + 5, { align: 'right' });
@@ -155,7 +232,7 @@ const exportToPdf = (ledgerData, retailer, totals, dateFrom, dateTo) => {
     ].forEach(({ col, v }) => {
       if (!v) return;
       const c = cols[col], xPos = ml + c.x;
-      if (c.align === 'right')       doc.text(v, xPos + c.w - 1, y + 5, { align: 'right' });
+      if      (c.align === 'right')  doc.text(v, xPos + c.w - 1, y + 5, { align: 'right' });
       else if (c.align === 'center') doc.text(v, xPos + c.w / 2, y + 5, { align: 'center' });
       else                           doc.text(v, xPos + 1, y + 5);
     });
@@ -167,9 +244,9 @@ const exportToPdf = (ledgerData, retailer, totals, dateFrom, dateTo) => {
   doc.setDrawColor(...BLACK); doc.setLineWidth(0.4); doc.line(ml, y, ml + cw, y);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLACK);
   const totalQty = ledgerData.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
-  doc.text(String(totalQty),              ml + cols[5].x + cols[5].w - 1, y + 5, { align: 'right' });
-  doc.text(formatNumber(totals.totalDr),  ml + cols[6].x + cols[6].w - 1, y + 5, { align: 'right' });
-  doc.text(formatNumber(totals.totalCr),  ml + cols[7].x + cols[7].w - 1, y + 5, { align: 'right' });
+  doc.text(String(totalQty),             ml + cols[5].x + cols[5].w - 1, y + 5, { align: 'right' });
+  doc.text(formatNumber(totals.totalDr), ml + cols[6].x + cols[6].w - 1, y + 5, { align: 'right' });
+  doc.text(formatNumber(totals.totalCr), ml + cols[7].x + cols[7].w - 1, y + 5, { align: 'right' });
   doc.line(ml, y + 7, ml + cw, y + 7);
 
   doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...GRAY);
@@ -189,9 +266,9 @@ const exportToExcel = (ledgerData, retailer, totals, dateFrom, dateTo) => {
   rows.push(['Karyana', '', '', '', '', '', '', '', '']);
   rows.push(['Customer Ledger Report', '', '', '', '', '', '', '', '']);
   rows.push([]);
-  rows.push(['Account No:', retailer.accountNo || '', '', 'Salesperson:', retailer.salesperson || '', '', '', '', '']);
-  rows.push(['Customer:', retailer.name || '', '', 'Phone:', retailer.phoneNumber || retailer.phone || '', '', '', '', '']);
-  rows.push(['Date From:', dateFrom ? isoToDisplay(dateFrom) : 'All', 'to:', dateTo ? isoToDisplay(dateTo) : new Date().toLocaleDateString('en-GB'), '', 'Total Due:', totals.finalBal, '', '']);
+  rows.push(['Account No:', retailer.accountNo || '', '', 'Salesperson:', retailer.salesperson || '']);
+  rows.push(['Customer:', retailer.name || '', '', 'Phone:', retailer.phoneNumber || retailer.phone || '']);
+  rows.push(['Date From:', dateFrom ? isoToDisplay(dateFrom) : 'All', 'to:', dateTo ? isoToDisplay(dateTo) : new Date().toLocaleDateString('en-GB'), '', 'Total Due:', totals.finalBal]);
   rows.push([]);
   rows.push(['Date', 'Details', 'Bank Name', 'Ref No.', 'V. No.', 'Quantity', 'Debit (Dr.)', 'Credit (Cr.)', 'Balance']);
   rows.push(['', 'Brought Forward', '', '', '', 0, '', '', retailer.openingBalance || '']);
@@ -225,7 +302,6 @@ const ReportsCustomerLedger = () => {
   const [searchTerm, setSearchTerm]             = useState('');
   const [error, setError]                       = useState('');
 
-  /* Date range — yyyy-mm-dd strings (native <input type="date"> format) */
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo,   setDateTo]   = useState('');
 
@@ -233,23 +309,37 @@ const ReportsCustomerLedger = () => {
   useEffect(() => {
     setLoading(true);
     getAllRetailers()
-      .then(res => setRetailers(res?.data?.data || []))
+      .then(res => {
+        /* getAllRetailers returns response directly (axios); data is in res.data.data */
+        const list = res?.data?.data || res?.data || [];
+        setRetailers(Array.isArray(list) ? list : []);
+      })
       .catch(() => toast.error('Failed to load customers'))
       .finally(() => setLoading(false));
   }, []);
 
-  /* Re-filter whenever date range or raw data changes — no extra API call needed */
+  /* ── FIX: show ALL data by default.
+     Only filter when at least one date bound is set.
+     When neither bound is set, ledgerData === allLedgerData. ── */
   useEffect(() => {
-    if (!allLedgerData.length) { setLedgerData([]); return; }
+    if (!allLedgerData.length) {
+      setLedgerData([]);
+      return;
+    }
+
+    /* No dates set → show everything */
+    if (!dateFrom && !dateTo) {
+      setLedgerData(allLedgerData.map((r, i) => ({ ...r, sr: i + 1 })));
+      return;
+    }
 
     const from = parseToDate(dateFrom);
     const to   = parseToDate(dateTo);
-    if (to) to.setHours(23, 59, 59, 999); // inclusive end-of-day
+    if (to) to.setHours(23, 59, 59, 999);
 
     const filtered = allLedgerData.filter(row => {
-      if (!from && !to) return true;
       const rowDate = parseToDate(row.rawDate);
-      if (!rowDate) return true;
+      if (!rowDate) return true; // no date → always include
       if (from && rowDate < from) return false;
       if (to   && rowDate > to)   return false;
       return true;
@@ -263,42 +353,35 @@ const ReportsCustomerLedger = () => {
     if (!selectedRetailer?._id) { setError('Please select a customer'); return; }
     setLoading(true);
     try {
+      /* getRetailerLedgerById in APIS.js returns response.data already
+         (it does: return response.data inside try/catch).
+         So res here IS the parsed body, not the axios envelope. */
       const res = await getRetailerLedgerById(selectedRetailer._id);
-      if (res?.success && Array.isArray(res?.ledgers)) {
-        const data = res.ledgers;
-        if (data.length === 0) {
-          setError('No transactions found for this customer');
-          setAllLedgerData([]);
-        } else {
-          setAllLedgerData(data.map((item, idx) => ({
-            sr:         idx + 1,
-            id:         item._id,
-            details:    item.details     || item.description || 'Transaction',
-            type:       item.type        || 'PURCHASE',
-            date:       formatDate(item.date),
-            rawDate:    item.date        || '',   // kept for date filtering
-            bankName:   item.bankId      || '',
-            refNo:      item.refNo       || '',
-            vNo:        item.voucherNo   || item.v || '',
-            bilty:      item.biltyNumber || '',
-            quantity:   item.quantity    ?? 0,
-            dr:         item.type !== 'PAYMENT' ? formatNumber(item.amount || 0) : '0',
-            cr:         item.type === 'PAYMENT' ? formatNumber(item.amount || 0) : '0',
-            balance:    formatNumber(item.balance || 0),
-            rawDr:      item.type !== 'PAYMENT' ? parseFloat(item.amount || 0) : 0,
-            rawCr:      item.type === 'PAYMENT' ? parseFloat(item.amount || 0) : 0,
-            rawBalance: parseFloat(item.balance || 0),
-          })));
-        }
-        setView('report');
-      } else {
-        setError('No ledger data found');
+
+      /* Log what we got so you can inspect in DevTools */
+      console.log('[CustomerLedger] raw API response:', res);
+
+      /* Extract the array from whatever shape the API returned */
+      const rawArray = extractLedgerArray(res);
+
+      console.log(`[CustomerLedger] extracted ${rawArray.length} entries`);
+
+      if (rawArray.length === 0) {
+        setError('No transactions found for this customer');
         setAllLedgerData([]);
-        setView('report');
+      } else {
+        /* Normalise every entry to a consistent row shape */
+        const normalised = rawArray.map((item, idx) => normaliseEntry(item, idx));
+        setAllLedgerData(normalised);
+        setError('');
       }
-    } catch {
-      setError('Failed to fetch ledger data');
+
+      setView('report');
+    } catch (err) {
+      console.error('[CustomerLedger] fetch error:', err);
+      setError(err?.message || 'Failed to fetch ledger data');
       setAllLedgerData([]);
+      setView('report');
     } finally {
       setLoading(false);
     }
@@ -319,8 +402,9 @@ const ReportsCustomerLedger = () => {
   };
 
   const filteredRetailers = retailers.filter(r =>
-    (r.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (r.shopName || '').toLowerCase().includes(searchTerm.toLowerCase())
+    (r.name      || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (r.shopName  || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (r.phoneNumber|| '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const isDateFiltered = !!(dateFrom || dateTo);
@@ -399,7 +483,7 @@ const ReportsCustomerLedger = () => {
                         <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
                           <MdSearch size={14} className="text-[#9CA3AF]" />
                           <input autoFocus value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                            placeholder="Search by name or shop…"
+                            placeholder="Search by name, shop or phone…"
                             className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
                           {searchTerm && <button onClick={() => setSearchTerm('')}><MdClose size={13} className="text-[#9CA3AF] hover:text-[#FF5934]" /></button>}
                         </div>
@@ -434,11 +518,11 @@ const ReportsCustomerLedger = () => {
                 </div>
               )}
 
-              {/* ── Date Range ── */}
+              {/* Date Range — optional pre-filter */}
               <div className="mb-6">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-2">
                   <MdCalendarToday size={12} className="text-[#FF5934]" /> Date Range
-                  <span className="text-[#9CA3AF] font-normal normal-case tracking-normal ml-1">(optional — filters results after loading)</span>
+                  <span className="text-[#9CA3AF] font-normal normal-case tracking-normal ml-1">(optional — leave blank to show all)</span>
                 </label>
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
@@ -497,6 +581,11 @@ const ReportsCustomerLedger = () => {
                 <p className="text-sm text-[#9CA3AF] mt-0.5">
                   {selectedRetailer?.shopName && <>{selectedRetailer.shopName} · </>}
                   {selectedRetailer?.phoneNumber || selectedRetailer?.phone || ''}
+                  {allLedgerData.length > 0 && (
+                    <span className="ml-2 text-[#FF5934] font-semibold">
+                      {allLedgerData.length} total transaction{allLedgerData.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -515,10 +604,10 @@ const ReportsCustomerLedger = () => {
               </div>
             </div>
 
-            {/* ── Inline date range controls (always visible in report view) ── */}
+            {/* Inline date range controls */}
             <div className="flex flex-wrap items-center gap-2 mb-5 bg-white border border-gray-100 rounded-2xl shadow-sm px-4 py-3">
               <MdCalendarToday size={14} className="text-[#FF5934] flex-shrink-0" />
-              <span className="text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mr-1">Date Range:</span>
+              <span className="text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mr-1">Filter by Date:</span>
               <input type="date" value={dateFrom} max={dateTo || undefined}
                 onChange={e => setDateFrom(e.target.value)}
                 className="date-inp" />
@@ -526,16 +615,20 @@ const ReportsCustomerLedger = () => {
               <input type="date" value={dateTo} min={dateFrom || undefined}
                 onChange={e => setDateTo(e.target.value)}
                 className="date-inp" />
-              {isDateFiltered && (
+              {isDateFiltered ? (
                 <>
                   <span className="text-[11px] font-semibold text-[#FF5934] bg-orange-50 border border-orange-100 px-2.5 py-1 rounded-lg ml-1">
                     {ledgerData.length} / {allLedgerData.length} rows
                   </span>
                   <button onClick={handleClearDates}
                     className="h-8 px-3 rounded-xl border border-gray-200 text-[#9CA3AF] text-[12px] font-semibold hover:text-[#FF5934] hover:border-orange-200 flex items-center gap-1.5 transition-colors">
-                    <MdClose size={12} /> Clear
+                    <MdClose size={12} /> Show All
                   </button>
                 </>
+              ) : (
+                <span className="text-[11px] text-[#9CA3AF] ml-1">
+                  Showing all {allLedgerData.length} transaction{allLedgerData.length !== 1 ? 's' : ''}
+                </span>
               )}
             </div>
 
@@ -552,10 +645,10 @@ const ReportsCustomerLedger = () => {
                 {/* Summary cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
                   {[
-                    { icon: MdReceipt,        label: 'Transactions',  value: ledgerData.length,                     color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
-                    { icon: MdTrendingUp,     label: 'Total Debit',   value: `Rs. ${formatNumber(totals.totalDr)}`,  color: 'text-emerald-600', bg: 'bg-emerald-50'   },
-                    { icon: MdTrendingDown,   label: 'Total Credit',  value: `Rs. ${formatNumber(totals.totalCr)}`,  color: 'text-red-500',     bg: 'bg-red-50'       },
-                    { icon: MdAccountBalance, label: 'Balance',       value: `Rs. ${formatNumber(totals.finalBal)}`, color: totals.finalBal >= 0 ? 'text-[#FF5934]' : 'text-red-600', bg: 'bg-[#FF5934]/10' },
+                    { icon: MdReceipt,        label: 'Transactions', value: ledgerData.length,                     color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
+                    { icon: MdTrendingUp,     label: 'Total Debit',  value: `Rs. ${formatNumber(totals.totalDr)}`,  color: 'text-emerald-600', bg: 'bg-emerald-50'   },
+                    { icon: MdTrendingDown,   label: 'Total Credit', value: `Rs. ${formatNumber(totals.totalCr)}`,  color: 'text-red-500',     bg: 'bg-red-50'       },
+                    { icon: MdAccountBalance, label: 'Balance',      value: `Rs. ${formatNumber(totals.finalBal)}`, color: totals.finalBal >= 0 ? 'text-[#FF5934]' : 'text-red-600', bg: 'bg-[#FF5934]/10' },
                   ].map(({ icon: Icon, label, value, color, bg }) => (
                     <div key={label} className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4 hover:-translate-y-0.5 transition-transform">
                       <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center flex-shrink-0`}>
@@ -576,15 +669,16 @@ const ReportsCustomerLedger = () => {
                       <thead>
                         <tr className="bg-[#FFF4F1] border-b border-orange-100">
                           {[
-                            { label: 'Date',         cls: 'text-left   px-3 w-24'  },
-                            { label: 'Details',      cls: 'text-left   px-3'       },
-                            { label: 'Bank Name',    cls: 'text-left   px-3 w-32'  },
-                            { label: 'Ref No.',      cls: 'text-left   px-3 w-36'  },
-                            { label: 'V. No.',       cls: 'text-center px-3 w-20'  },
-                            { label: 'Quantity',     cls: 'text-right  px-3 w-20'  },
-                            { label: 'Debit (Dr.)',  cls: 'text-right  px-3 w-28'  },
-                            { label: 'Credit (Cr.)', cls: 'text-right  px-3 w-28'  },
-                            { label: 'Balance',      cls: 'text-right  px-3 w-28'  },
+                            { label: '#',            cls: 'text-center px-3 w-12'   },
+                            { label: 'Date',         cls: 'text-left   px-3 w-24'   },
+                            { label: 'Details',      cls: 'text-left   px-3'        },
+                            { label: 'Bank Name',    cls: 'text-left   px-3 w-32'   },
+                            { label: 'Ref No.',      cls: 'text-left   px-3 w-36'   },
+                            { label: 'V. No.',       cls: 'text-center px-3 w-20'   },
+                            { label: 'Quantity',     cls: 'text-right  px-3 w-20'   },
+                            { label: 'Debit (Dr.)',  cls: 'text-right  px-3 w-28'   },
+                            { label: 'Credit (Cr.)', cls: 'text-right  px-3 w-28'   },
+                            { label: 'Balance',      cls: 'text-right  px-3 w-28'   },
                           ].map(h => (
                             <th key={h.label} className={`text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest py-3 ${h.cls}`}>
                               {h.label}
@@ -593,8 +687,9 @@ const ReportsCustomerLedger = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {/* Brought Forward row */}
+                        {/* Brought Forward */}
                         <tr className="trow bg-gray-50/50">
+                          <td className="px-3 py-2.5 text-center"><span className="text-[11px] text-[#D1D5DB]">—</span></td>
                           <td className="px-3 py-2.5" />
                           <td className="px-3 py-2.5"><span className="text-[12px] italic text-[#6B7280]">Brought Forward</span></td>
                           <td className="px-3 py-2.5" /><td className="px-3 py-2.5" />
@@ -610,6 +705,9 @@ const ReportsCustomerLedger = () => {
 
                         {ledgerData.map((row) => (
                           <tr key={row.id || row.sr} className="trow">
+                            <td className="px-3 py-2.5 text-center">
+                              <span className="text-[11px] text-[#D1D5DB]">{row.sr}</span>
+                            </td>
                             <td className="px-3 py-2.5">
                               <span className="text-[12px] text-[#6B7280] whitespace-nowrap">{row.date}</span>
                             </td>
@@ -619,6 +717,7 @@ const ReportsCustomerLedger = () => {
                                 row.type === 'PAYMENT'  ? 'bg-blue-50 text-blue-600'    :
                                 row.type === 'RETURN'   ? 'bg-amber-50 text-amber-600'  :
                                 row.type === 'PURCHASE' ? 'bg-orange-50 text-[#FF5934]' :
+                                row.type === 'CREDIT'   ? 'bg-purple-50 text-purple-600':
                                                           'bg-gray-100 text-gray-500'
                               }`}>{row.type}</span>
                             </td>
@@ -648,8 +747,8 @@ const ReportsCustomerLedger = () => {
                   {/* Footer totals */}
                   <div className="border-t-2 border-orange-100 bg-[#FFF4F1] px-4 py-3 flex flex-wrap items-center justify-between gap-4">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
-                      {ledgerData.length} transaction{ledgerData.length !== 1 ? 's' : ''}
-                      {isDateFiltered && <span className="ml-1.5 text-[#FF5934]">(filtered)</span>}
+                      {ledgerData.length} of {allLedgerData.length} transaction{allLedgerData.length !== 1 ? 's' : ''}
+                      {isDateFiltered && <span className="ml-1.5 text-[#FF5934]">(date filtered)</span>}
                     </p>
                     <div className="flex items-center gap-6 flex-wrap">
                       <div className="text-right">
@@ -688,8 +787,8 @@ const ReportsCustomerLedger = () => {
                   {isDateFiltered ? 'No transactions in this date range' : 'No transactions found for this customer'}
                 </p>
                 {isDateFiltered
-                  ? <button onClick={handleClearDates} className="text-[#FF5934] text-xs hover:underline">Clear date filter</button>
-                  : <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline">Go back</button>
+                  ? <button onClick={handleClearDates} className="text-[#FF5934] text-xs hover:underline font-semibold">Show all transactions</button>
+                  : <button onClick={handleReset} className="text-[#FF5934] text-xs hover:underline font-semibold">Go back</button>
                 }
               </div>
             )}
