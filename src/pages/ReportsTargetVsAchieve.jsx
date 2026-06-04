@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { getAllSalesPersons, getTargetsBySalesperson } from '../APIS';
+import { getAllCities, getAllSalesPersons, getTargetsBySalesperson } from '../APIS';
 import { toast } from 'react-toastify';
 import { GrFormPrevious, GrFormNext } from 'react-icons/gr';
 import {
   MdRefresh, MdFilterList, MdExpandMore,
   MdPictureAsPdf, MdGridOn, MdBarChart, MdCalendarToday,
-  MdCheckCircle, MdSearch, MdClose,
+  MdCheckCircle, MdSearch, MdClose, MdLocationOn,
   MdTrackChanges, MdDone, MdShowChart, MdHourglassEmpty,
 } from 'react-icons/md';
 import jsPDF from 'jspdf';
@@ -23,6 +23,13 @@ const fmtNum = (n) => (!n && n !== 0 ? 0 : Number(n).toLocaleString('en-PK'));
 const pctColor = (p) => p >= 80 ? '#16a34a' : p >= 60 ? '#d97706' : '#dc2626';
 const pctBg    = (p) => p >= 80 ? '#f0fdf4' : p >= 60 ? '#fffbeb' : '#fef2f2';
 const ROWS_PER_PAGE  = 10;
+const getCityId = (city) => (typeof city === 'object' ? city?._id : city) || '';
+const getCityName = (city, cityList = []) => {
+  if (!city) return '';
+  if (typeof city === 'object') return city.name || city.cityName || '';
+  const found = cityList.find(c => c._id === city);
+  return found?.name || found?.cityName || '';
+};
 
 /* ─── status badge ─── */
 const getStatus = (pct) => {
@@ -44,6 +51,7 @@ const statusColors = {
 const ReportsTargetVsAchieve = () => {
   /* ── data ── */
   const [salesPersons, setSalesPersons] = useState([]);
+  const [cities,       setCities]       = useState([]);
   const [reportData,   setReportData]   = useState([]);
   const [loading,      setLoading]      = useState(false);
   const [generated,    setGenerated]    = useState(false);
@@ -51,9 +59,11 @@ const ReportsTargetVsAchieve = () => {
   /* ── filters ── */
   const [selectedMonth, setSelectedMonth]       = useState(String(new Date().getMonth() + 1));
   const [selectedSP,    setSelectedSP]          = useState('');
+  const [selectedCity,  setSelectedCity]        = useState('');
   const [spDropOpen,    setSpDropOpen]           = useState(false);
   const [spSearch,      setSpSearch]             = useState('');
   const [monthDropOpen, setMonthDropOpen]        = useState(false);
+  const [cityDropOpen,  setCityDropOpen]         = useState(false);
 
   /* ── pagination ── */
   const [currentPage, setCurrentPage] = useState(1);
@@ -64,6 +74,7 @@ const ReportsTargetVsAchieve = () => {
       if (!e.target.closest('.rta-dropdown-wrap')) {
         setSpDropOpen(false);
         setMonthDropOpen(false);
+        setCityDropOpen(false);
       }
     };
     document.addEventListener('mousedown', h);
@@ -72,13 +83,23 @@ const ReportsTargetVsAchieve = () => {
 
   /* ── load sales persons ── */
   useEffect(() => {
-    getAllSalesPersons()
-      .then(res => setSalesPersons(res?.data?.data || []))
-      .catch(() => toast.error('Failed to load sales persons'));
+    const loadFilters = async () => {
+      try {
+        const [spRes, cityRes] = await Promise.all([
+          getAllSalesPersons(),
+          getAllCities(),
+        ]);
+        setSalesPersons(spRes?.data?.data || []);
+        setCities(cityRes?.data?.data || []);
+      } catch {
+        toast.error('Failed to load report filters');
+      }
+    };
+    loadFilters();
   }, []);
 
   /* ── FETCH REPORT ── */
-  const fetchReport = useCallback(async ({ spId = '', month = selectedMonth } = {}) => {
+  const fetchReport = useCallback(async ({ spId = '', month = selectedMonth, cityId = selectedCity } = {}) => {
     setLoading(true);
     setGenerated(false);
     setReportData([]);
@@ -86,9 +107,10 @@ const ReportsTargetVsAchieve = () => {
 
     try {
       const monthName = getMonthName(month);
-      const persons   = spId
+      const persons   = (spId
         ? salesPersons.filter(s => s._id === spId)
-        : salesPersons;
+        : salesPersons
+      ).filter(sp => !cityId || getCityId(sp.city) === cityId);
 
       if (!persons.length) {
         toast.info('No sales persons found');
@@ -119,7 +141,7 @@ const ReportsTargetVsAchieve = () => {
               name:       sp.name  || '—',
               email:      sp.email || '',
               image:      sp.image || null,
-              city:       sp.city?.name || '',
+              city:       getCityName(sp.city, cities),
               totalTarget,
               totalAchieved,
               pending,
@@ -133,7 +155,7 @@ const ReportsTargetVsAchieve = () => {
               name:          sp.name  || '—',
               email:         sp.email || '',
               image:         sp.image || null,
-              city:          '',
+              city:          getCityName(sp.city, cities),
               totalTarget:   0,
               totalAchieved: 0,
               pending:       0,
@@ -161,11 +183,11 @@ const ReportsTargetVsAchieve = () => {
     } finally {
       setLoading(false);
     }
-  }, [salesPersons, selectedMonth]);
+  }, [cities, salesPersons, selectedCity, selectedMonth]);
 
   useEffect(() => {
     if (salesPersons.length && !generated) {
-      fetchReport({ spId: selectedSP, month: selectedMonth });
+      fetchReport({ spId: selectedSP, month: selectedMonth, cityId: selectedCity });
     }
   // eslint-disable-next-line
   }, [salesPersons.length]);
@@ -194,19 +216,21 @@ const ReportsTargetVsAchieve = () => {
     (s.email || '').toLowerCase().includes(spSearch.toLowerCase())
   );
   const selectedSPObj = salesPersons.find(s => s._id === selectedSP);
+  const selectedCityObj = cities.find(c => c._id === selectedCity);
 
   /* ── handlers ── */
-  const handleGenerate = () => fetchReport({ spId: selectedSP, month: selectedMonth });
+  const handleGenerate = () => fetchReport({ spId: selectedSP, month: selectedMonth, cityId: selectedCity });
 
   const handleReset = () => {
     setSelectedSP('');
+    setSelectedCity('');
     setSelectedMonth(String(new Date().getMonth() + 1));
     setSpSearch('');
     setCurrentPage(1);
     setGenerated(false);
     setReportData([]);
     setTimeout(() => {
-      fetchReport({ spId: '', month: String(new Date().getMonth() + 1) });
+      fetchReport({ spId: '', month: String(new Date().getMonth() + 1), cityId: '' });
     }, 0);
   };
 
@@ -295,7 +319,7 @@ const ReportsTargetVsAchieve = () => {
   };
 
   /* ── active filter count ── */
-  const activeFilters = [selectedSP, selectedMonth !== String(new Date().getMonth() + 1)].filter(Boolean).length;
+  const activeFilters = [selectedSP, selectedCity, selectedMonth !== String(new Date().getMonth() + 1)].filter(Boolean).length;
 
   /* ── stat card config — Material icons instead of emojis ── */
   const overallPctNum = Number(overallPct);
@@ -411,7 +435,7 @@ const ReportsTargetVsAchieve = () => {
               </label>
               <div
                 className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                onClick={() => { setSpDropOpen(p => !p); setMonthDropOpen(false); }}
+                onClick={() => { setSpDropOpen(p => !p); setMonthDropOpen(false); setCityDropOpen(false); }}
               >
                 {selectedSPObj ? (
                   <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -468,6 +492,63 @@ const ReportsTargetVsAchieve = () => {
               )}
             </div>
 
+            {/* Site / Location dropdown */}
+            <div className="flex-1 min-w-[200px] rta-dropdown-wrap">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdLocationOn size={12} className="text-[#FF5934]" /> Site / Location
+              </label>
+              <div
+                className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                onClick={() => { setCityDropOpen(p => !p); setSpDropOpen(false); setMonthDropOpen(false); }}
+              >
+                {selectedCityObj ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <MdLocationOn size={14} className="text-blue-500 flex-shrink-0" />
+                    <span className="text-[13px] text-[#111827] font-medium truncate">
+                      {selectedCityObj.name || selectedCityObj.cityName}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-[13px] text-[#9CA3AF] flex-1">All locations</span>
+                )}
+                <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform flex-shrink-0 ${cityDropOpen ? 'rotate-180' : ''}`} />
+              </div>
+
+              {cityDropOpen && (
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden" style={{ top:'100%' }}>
+                  <div className="max-h-56 overflow-y-auto rta-no-scroll">
+                    <div onClick={() => { setSelectedCity(''); setCityDropOpen(false); }}
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 ${!selectedCity ? 'bg-orange-50' : ''}`}>
+                      <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-[11px] font-bold text-gray-400">All</div>
+                      <div className="flex-1">
+                        <p className="text-[13px] font-medium text-[#374151]">All Locations</p>
+                        <p className="text-[11px] text-[#9CA3AF]">Combined report</p>
+                      </div>
+                      {!selectedCity && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                    </div>
+                    {cities.map(city => {
+                      const isSelected = selectedCity === city._id;
+                      return (
+                        <div key={city._id} onClick={() => { setSelectedCity(city._id); setCityDropOpen(false); }}
+                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 last:border-0 ${isSelected ? 'bg-orange-50' : ''}`}>
+                          <div className="w-7 h-7 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
+                            <MdLocationOn size={13} className="text-blue-500" />
+                          </div>
+                          <p className={`text-[13px] font-medium truncate flex-1 ${isSelected ? 'text-[#FF5934]' : 'text-[#111827]'}`}>
+                            {city.name || city.cityName}
+                          </p>
+                          {isSelected && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                        </div>
+                      );
+                    })}
+                    {cities.length === 0 && (
+                      <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No locations found</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Month dropdown */}
             <div className="flex-1 min-w-[180px] rta-dropdown-wrap">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
@@ -475,7 +556,7 @@ const ReportsTargetVsAchieve = () => {
               </label>
               <div
                 className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                onClick={() => { setMonthDropOpen(p => !p); setSpDropOpen(false); }}
+                onClick={() => { setMonthDropOpen(p => !p); setSpDropOpen(false); setCityDropOpen(false); }}
               >
                 <span className="text-[13px] text-[#111827] font-medium flex-1">{getMonthName(selectedMonth)}</span>
                 <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform flex-shrink-0 ${monthDropOpen ? 'rotate-180' : ''}`} />

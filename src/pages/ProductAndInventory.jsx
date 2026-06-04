@@ -137,7 +137,7 @@ const downloadSalesRowExcel = (r) => {
     { Field: 'Category',     Value: r.category    || '—' },
     { Field: 'Salesperson',  Value: r.salesperson || '—' },
     { Field: 'Customer',     Value: r.customer    || '—' },
-    { Field: 'Location',     Value: r.city        || '—' },
+    { Field: 'Site',     Value: r.city        || '—' },
     { Field: 'Order Date',   Value: fmtDate(r.orderDate) },
     { Field: 'UM Unit',      Value: r.umUnit      || 'Ctns' },
     { Field: 'UM Qty',       Value: r.umQty },
@@ -197,7 +197,7 @@ const downloadSalesRowPDF = (r) => {
   <tr><td>Category</td><td>${r.category || '—'}</td></tr>
   <tr><td>Salesperson</td><td>${r.salesperson || '—'}</td></tr>
   <tr><td>Customer</td><td>${r.customer || '—'}</td></tr>
-  <tr><td>Location</td><td>${r.city || '—'}</td></tr>
+  <tr><td>Site</td><td>${r.city || '—'}</td></tr>
   <tr><td>Order Date</td><td>${fmtDate(r.orderDate)}</td></tr>
   <tr><td>UM Unit</td><td>${r.umUnit || 'Ctns'}</td></tr>
   <tr><td>UM Quantity</td><td style="font-weight:700;font-size:15px">${fmtNum(r.umQty)}</td></tr>
@@ -370,7 +370,7 @@ const ProductAndInventory = () => {
         'PKT in CTN':  p._pktInCtn,
         'Base Unit':   'Ctns',
         'Base Qty':    parseFloat(p.stock || 0),
-        'UM Unit':     'Ctns',
+        'UM Unit':     'Pcs',
         'UM Qty':      p._umQty,
         Status:        p._status,
       }));
@@ -378,10 +378,21 @@ const ProductAndInventory = () => {
       const totUm   = items.reduce((s, p) => s + p._umQty, 0);
       rows.push({ 'Brand/Group': `Total — ${brand}`, Code: '', Product: '', 'PKT in CTN': '', 'Base Unit': '', 'Base Qty': totBase, 'UM Unit': '', 'UM Qty': totUm, Status: '' });
     });
+    rows.push({
+      'Brand/Group': 'Grand Total',
+      Code: '',
+      Product: '',
+      'PKT in CTN': '',
+      'Base Unit': 'Ctns',
+      'Base Qty': stockStats.totalQty,
+      'UM Unit': 'Pcs',
+      'UM Qty': stockStats.totalUmQty,
+      Status: '',
+    });
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [18, 14, 45, 12, 12, 12, 10, 12, 14].map(w => ({ wch: w }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Stock by Location');
+    XLSX.utils.book_append_sheet(wb, ws, 'Stock by Site');
     XLSX.writeFile(wb, `product-stock-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
@@ -545,11 +556,25 @@ const ProductAndInventory = () => {
     if (!filteredSalesRows.length) return;
     const rows = [];
     Object.entries(salesGrouped).forEach(([groupKey, items]) => {
-      rows.push({ Group: groupKey, 'Txn Type': '', 'Product Code': '', 'Product Name': '', Salesperson: '', Customer: '', Location: '', 'Order Date': '', 'UM Unit': '', 'UM Qty': '', 'Unit Price': '', 'Net Amount': '' });
-      items.forEach(r => rows.push({ Group: '', 'Txn Type': r.txnType, 'Product Code': r.productCode, 'Product Name': r.productName, Salesperson: r.salesperson, Customer: r.customer, Location: r.city, 'Order Date': fmtDate(r.orderDate), 'UM Unit': r.umUnit, 'UM Qty': r.umQty, 'Unit Price': r.price, 'Net Amount': r.netAmt }));
+      rows.push({ Group: groupKey, 'Txn Type': '', 'Product Code': '', 'Product Name': '', Salesperson: '', Customer: '', Site: '', 'Order Date': '', 'UM Unit': '', 'UM Qty': '', 'Unit Price': '', 'Net Amount': '' });
+      items.forEach(r => rows.push({ Group: '', 'Txn Type': r.txnType, 'Product Code': r.productCode, 'Product Name': r.productName, Salesperson: r.salesperson, Customer: r.customer, Site: r.city, 'Order Date': fmtDate(r.orderDate), 'UM Unit': r.umUnit, 'UM Qty': r.umQty, 'Unit Price': r.price, 'Net Amount': r.netAmt }));
       const totQty = items.reduce((s, r) => s + r.umQty,  0);
       const totAmt = items.reduce((s, r) => s + r.netAmt, 0);
-      rows.push({ Group: `Total — ${groupKey}`, 'Txn Type': '', 'Product Code': '', 'Product Name': '', Salesperson: '', Customer: '', Location: '', 'Order Date': '', 'UM Unit': '', 'UM Qty': totQty, 'Unit Price': '', 'Net Amount': totAmt });
+      rows.push({ Group: `Total — ${groupKey}`, 'Txn Type': '', 'Product Code': '', 'Product Name': '', Salesperson: '', Customer: '', Site: '', 'Order Date': '', 'UM Unit': '', 'UM Qty': totQty, 'Unit Price': '', 'Net Amount': totAmt });
+    });
+    rows.push({
+      Group: 'Grand Total',
+      'Txn Type': '',
+      'Product Code': '',
+      'Product Name': '',
+      Salesperson: '',
+      Customer: '',
+      Site: '',
+      'Order Date': '',
+      'UM Unit': 'Pcs',
+      'UM Qty': salesStats.totalQty,
+      'Unit Price': '',
+      'Net Amount': salesStats.totalAmt,
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [20, 10, 14, 40, 18, 20, 14, 12, 8, 12, 12, 16].map(w => ({ wch: w }));
@@ -640,7 +665,7 @@ const ProductAndInventory = () => {
           {/* ── Tabs ── */}
           <div className="flex border-b border-gray-100 px-3 pt-2 gap-1">
             {[
-              { key: 'stock', icon: MdWarehouse,  label: 'Product Stock',        sub: 'By Location / Batch' },
+              { key: 'stock', icon: MdWarehouse,  label: 'Product Stock',        sub: 'By Site / Batch' },
               { key: 'sales', icon: MdLocalOffer,  label: 'Product Sale Summary', sub: 'Completed Orders'    },
             ].map(({ key, icon: Icon, label, sub }) => (
               <button key={key} onClick={() => setActiveTab(key)}
@@ -677,7 +702,7 @@ const ProductAndInventory = () => {
                   { label: 'Unique Products', value: salesStats.uniqueProducts,              color: 'text-blue-500'    },
                   { label: 'Unique Orders',   value: salesStats.uniqueOrders,                color: 'text-purple-500'  },
                   { label: 'Salespersons',    value: salesStats.uniqueSalespersons,          color: 'text-amber-600'   },
-                  { label: 'Total UM Qty',    value: `${fmtNum(salesStats.totalQty)} Ctns`, color: 'text-sky-600'     },
+                  { label: 'Total UM Qty',    value: `${fmtNum(salesStats.totalQty)} Pcs`, color: 'text-sky-600'     },
                   { label: 'Net Amount',      value: fmtAmt(salesStats.totalAmt),           color: 'text-emerald-600' },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="pi-stat bg-white border border-gray-100 rounded-xl px-3 py-3">
@@ -708,7 +733,7 @@ const ProductAndInventory = () => {
             {/* Location */}
             <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
               <MdLocationOn size={14} className="text-[#FF5934]" />
-              <span className="text-[11px] font-semibold text-[#9CA3AF] uppercase tracking-wide select-none">Location</span>
+              <span className="text-[11px] font-semibold text-[#9CA3AF] uppercase tracking-wide select-none">Site</span>
               <select value={activeTab === 'stock' ? stockCity : salesCity}
                 onChange={activeTab === 'stock' ? handleStockFilter(setStockCity) : handleSalesFilter(setSalesCity)}
                 className="pi-select outline-none text-sm text-[#374151] min-w-[110px] border-none">
@@ -908,7 +933,7 @@ const ProductAndInventory = () => {
                                           {negBase ? `(${fmtNum(Math.abs(p.stock))})` : fmtNum(p.stock)}
                                         </span>
                                       </td>
-                                      <td className="px-4 py-3 text-center text-[13px] text-[#374151]">Ctns</td>
+                                      <td className="px-4 py-3 text-center text-[13px] text-[#374151]">Pcs</td>
                                       <td className="px-4 py-3 text-right">
                                         <span className={`text-[13px] font-semibold ${negUm ? 'pi-negative' : 'pi-positive'}`}>
                                           {negUm ? `(${fmtNum(Math.abs(p._umQty))})` : fmtNum(p._umQty)}
@@ -950,6 +975,19 @@ const ProductAndInventory = () => {
                             </React.Fragment>
                           );
                         })}
+                        <tr className="subtotal-row border-t-2 border-[#FFD7CE]">
+                          <td className="px-4 py-2.5 pl-10" colSpan={4}>
+                            <span className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Grand Total</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <span className={`text-[13px] font-bold ${isNeg(stockStats.totalQty) ? 'pi-negative' : 'text-[#FF5934]'}`}>{fmtNum(stockStats.totalQty)}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-center text-[12px] text-[#6B7280]">Pcs</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <span className={`text-[13px] font-bold ${isNeg(stockStats.totalUmQty) ? 'pi-negative' : 'text-[#FF5934]'}`}>{fmtNum(stockStats.totalUmQty)}</span>
+                          </td>
+                          <td /><td />
+                        </tr>
                       </tbody>
                     </table>
                   </div>
@@ -1030,7 +1068,7 @@ const ProductAndInventory = () => {
                             { label: 'Product Name', key: 'productName', align: 'left',   w: ''          },
                             { label: 'Salesperson',  key: 'salesperson', align: 'left',   w: 'w-[120px]' },
                             { label: 'Customer',     key: 'customer',    align: 'left',   w: 'w-[115px]' },
-                            { label: 'Location',     key: 'city',        align: 'left',   w: 'w-[105px]' },
+                            { label: 'Site',     key: 'city',        align: 'left',   w: 'w-[105px]' },
                             { label: 'Date',         key: 'orderDate',   align: 'left',   w: 'w-[95px]'  },
                             { label: 'UM Unit',      key: null,          align: 'center', w: 'w-[72px]'  },
                             { label: 'UM Qty',       key: 'umQty',       align: 'right',  w: 'w-[85px]'  },
@@ -1143,6 +1181,19 @@ const ProductAndInventory = () => {
                             </React.Fragment>
                           );
                         })}
+                        <tr className="subtotal-row border-t-2 border-[#FFD7CE]">
+                          <td colSpan={8} className="px-4 py-2.5 pl-10">
+                            <span className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Grand Total</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <span className="text-[13px] font-bold text-[#FF5934]">{fmtNum(salesStats.totalQty)}</span>
+                          </td>
+                          <td />
+                          <td className="px-3 py-2.5 text-right">
+                            <span className="text-[13px] font-bold text-[#FF5934]">{fmtAmt(salesStats.totalAmt)}</span>
+                          </td>
+                          <td />
+                        </tr>
                       </tbody>
                     </table>
                   </div>

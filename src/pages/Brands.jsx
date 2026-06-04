@@ -493,7 +493,7 @@ const Brands = () => {
                           <span className="flex-1 border-t border-gray-100" />Classification<span className="flex-1 border-t border-gray-100" />
                         </p>
                         <div className="flex flex-col gap-3">
-                          <FieldGroup icon={MdLocationOn} label="Location">
+                          <FieldGroup icon={MdLocationOn} label="Site">
                             <Select name="cityID" data={cities.data} searchKey="_id" searchValue="name"
                               value={state.cityID} changeHandler={changeHandler} className={inputCls} />
                           </FieldGroup>
@@ -588,7 +588,7 @@ const Brands = () => {
                 {[
                   { icon: MdBadge, label: "Brand ID", value: selectedProduct.brandId, mono: true },
                   { icon: MdCategory, label: "Category", value: selectedProduct.categoryID?.englishName },
-                  { icon: MdLocationOn, label: "Location", value: selectedProduct.cityID?.name },
+                  { icon: MdLocationOn, label: "Site", value: selectedProduct.cityID?.name },
                   { icon: MdCalendarToday, label: "Created On", value: new Date(selectedProduct.createdAt).toLocaleDateString() },
                 ].map(({ icon: Icon, label, value, mono }) => (
                   <div key={label} className="flex items-start gap-3 bg-[#F9FAFB] rounded-2xl px-4 py-3 border border-gray-100">

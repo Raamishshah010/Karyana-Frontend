@@ -34,11 +34,11 @@ import {
   MdSupervisorAccount,
   MdWarehouse,
   MdBadge,
-  MdMenuBook,   // ← Catalogue group icon
+  MdMenuBook,
 } from 'react-icons/md';
 import { useSelector } from 'react-redux';
 import { ROLES } from '../utils';
-import { useMemo, useState, useRef, useEffect } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 /* ─────────────────────────────────────────
@@ -103,9 +103,13 @@ const FlyoutPortal = ({ anchorRef, children, label, onMouseEnter, onMouseLeave }
 
 /* ─────────────────────────────────────────
    Collapsible group nav item
+   Props:
+     groupId    – unique string key for this group
+     openGroup  – currently open group id (from Sidebar state)
+     onToggle   – callback(groupId) to open/close
 ───────────────────────────────────────── */
-const NavGroup = ({ icon: Icon, label, children, collapsed, defaultOpen = false }) => {
-  const [open, setOpen] = useState(defaultOpen);
+const NavGroup = ({ icon: Icon, label, children, collapsed, groupId, openGroup, onToggle }) => {
+  const open = openGroup === groupId;
   const [flyoutOpen, setFlyoutOpen] = useState(false);
   const anchorRef = useRef(null);
   const hideTimer = useRef(null);
@@ -147,7 +151,7 @@ const NavGroup = ({ icon: Icon, label, children, collapsed, defaultOpen = false 
   return (
     <div className="mx-2 my-[2px]">
       <button
-        onClick={() => setOpen(p => !p)}
+        onClick={() => onToggle(groupId)}
         className={`group w-full flex items-center gap-3 px-3 py-[9px] rounded-xl transition-all duration-200 text-sm font-medium
           ${open ? 'text-[#FF5934] bg-[#FF5934]/5' : 'text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]'}`}
       >
@@ -209,6 +213,14 @@ const Sidebar = () => {
   const user = useSelector(st => st.admin);
   const [collapsed, setCollapsed] = useState(false);
 
+  // Only one group can be open at a time. null = all closed.
+  const [openGroup, setOpenGroup] = useState(null);
+
+  // Toggle: if the clicked group is already open → close it, else open it
+  const handleGroupToggle = useCallback((groupId) => {
+    setOpenGroup(prev => (prev === groupId ? null : groupId));
+  }, []);
+
   const logoutHandler = () => {
     if (window.confirm("Are you sure to logout?")) {
       sessionStorage.removeItem("karyana-admin");
@@ -229,6 +241,9 @@ const Sidebar = () => {
     if (isCoordinator) return "Coordinator";
     return "Administrator";
   }, [isWM, isCoordinator]);
+
+  // Shared props passed to every NavGroup
+  const groupProps = { openGroup, onToggle: handleGroupToggle, collapsed };
 
   return (
     <>
@@ -300,12 +315,11 @@ const Sidebar = () => {
               <NavItem to="/Users/Sales"         icon={FaRegUser}       label="Users"                 collapsed={collapsed} />
               <NavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Attendance & Tracking" collapsed={collapsed} />
 
-              {/* Catalogue group for Coordinator */}
               <SectionLabel collapsed={collapsed}>Catalogue</SectionLabel>
-              <NavGroup icon={MdMenuBook} label="Catalogue" collapsed={collapsed}>
-                <SubNavItem to="/Product"    icon={MdInventory2} label="Inventory"   />
-                <SubNavItem to="/Brands"     icon={SlDiamond}    label="Brands"      />
-                <SubNavItem to="/Categories" icon={MdCategory}   label="Categories"  />
+              <NavGroup icon={MdMenuBook} label="Catalogue" groupId="coord-catalogue" {...groupProps}>
+                <SubNavItem to="/Product"    icon={MdInventory2} label="Inventory"  />
+                <SubNavItem to="/Brands"     icon={SlDiamond}    label="Brands"     />
+                <SubNavItem to="/Categories" icon={MdCategory}   label="Categories" />
               </NavGroup>
 
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
@@ -320,54 +334,46 @@ const Sidebar = () => {
               <SectionLabel collapsed={collapsed}>Overview</SectionLabel>
               <NavItem to="/Dashboard" icon={MdDashboard} label="Dashboard" collapsed={collapsed} />
 
-              <NavGroup icon={MdPointOfSale} label="Sales" collapsed={collapsed}>
+              <NavGroup icon={MdPointOfSale} label="Sales" groupId="sales" {...groupProps}>
                 <SubNavItem to="/Users/Retailers" icon={MdPeople}       label="Customers" />
                 <SubNavItem to="/Order"           icon={MdShoppingCart} label="Orders"    />
                 <SubNavItem to="/Sales/Invoices"  icon={MdReceipt}      label="Invoices"  />
                 <SubNavItem to="/Sales/Payments"  icon={MdPayment}      label="Payments"  />
               </NavGroup>
 
-              <NavGroup icon={MdFingerprint} label="Attendance" collapsed={collapsed}>
+              <NavGroup icon={MdFingerprint} label="Attendance" groupId="attendance" {...groupProps}>
                 <SubNavItem to="/attendance-tracking" icon={MdCalendarMonth} label="Check-In/Out"   />
                 <SubNavItem to="/visit-duration"      icon={MdHistory}       label="Visit Duration" />
               </NavGroup>
 
-              <NavGroup icon={MdMap} label="Tracking" collapsed={collapsed}>
-                <SubNavItem to="/Tracking/Location" icon={MdLocationOn} label="Location Tracking" />
+              <NavGroup icon={MdMap} label="Tracking" groupId="tracking" {...groupProps}>
+                <SubNavItem to="/Tracking/Location" icon={MdLocationOn} label="Site Tracking" />
                 <SubNavItem to="/Tracking/Reports"  icon={MdBarChart}   label="Tracking Reports"  />
               </NavGroup>
 
-              {/* <NavGroup icon={FaBook} label="Ledger" collapsed={collapsed}>
-                <SubNavItem to="/Leders/LedgerSales" icon={MdPeople}     label="Customer Ledger" />
-                <SubNavItem to="/Ledger/Reports"     icon={MdAssessment} label="Ledger Reports"  />
-              </NavGroup> */}
-
-              <NavGroup icon={MdPeople} label="Users" collapsed={collapsed}>
+              <NavGroup icon={MdPeople} label="Users" groupId="users" {...groupProps}>
                 <SubNavItem to="/Users/Coordinators"      icon={MdSupervisorAccount} label="Coordinators"       />
                 <SubNavItem to="/Users/WarehouseManagers" icon={MdWarehouse}         label="Warehouse Managers" />
                 <SubNavItem to="/Users/Sales"             icon={MdBadge}             label="Sales Person"       />
               </NavGroup>
 
-              {/* ── Catalogue group (replaces the flat Catalog section) ── */}
-              <NavGroup icon={MdMenuBook} label="Catalogue" collapsed={collapsed}>
-                <SubNavItem to="/Product"    icon={MdInventory2}  label="Inventory"   />
-                <SubNavItem to="/Brands"     icon={SlDiamond}     label="Brands"      />
-                <SubNavItem to="/Categories" icon={MdCategory}    label="Categories"  />
+              <NavGroup icon={MdMenuBook} label="Catalogue" groupId="catalogue" {...groupProps}>
+                <SubNavItem to="/Product"    icon={MdInventory2} label="Inventory"  />
+                <SubNavItem to="/Brands"     icon={SlDiamond}    label="Brands"     />
+                <SubNavItem to="/Categories" icon={MdCategory}   label="Categories" />
               </NavGroup>
 
-              <NavGroup icon={MdAssessment} label="Reports" collapsed={collapsed}>
-                <SubNavItem to="/Reports/Sales"           icon={MdPointOfSale} label="Sales"                 />
-                {/* <SubNavItem to="/Product"                 icon={MdInventory2}  label="Inventory"             /> */}
-                <SubNavItem to="/Reports/Recovery"        icon={MdAutorenew}   label="Recovery"              />
-                {/* <SubNavItem to="/Reports/Attendance"      icon={MdFingerprint} label="Attendance"            /> */}
-                <SubNavItem to="/Reports/CustomerLedger"  icon={MdReceipt}     label="Customer Ledger"       />
-                <SubNavItem to="/Reports/ProductAndInventory"  icon={MdReceipt}     label="Product & Inventory Report"       />
-                <SubNavItem to="/Reports/TargetVsAchieve" icon={FaBullseye}    label="Target vs Achievement" />
+              <NavGroup icon={MdAssessment} label="Reports" groupId="reports" {...groupProps}>
+                <SubNavItem to="/Reports/Sales"                icon={MdPointOfSale} label="Sales"                      />
+                <SubNavItem to="/Reports/Recovery"             icon={MdAutorenew}   label="Recovery"                   />
+                <SubNavItem to="/Reports/CustomerLedger"       icon={MdReceipt}     label="Customer Ledger"            />
+                <SubNavItem to="/Reports/ProductAndInventory"  icon={MdReceipt}     label="Product & Inventory Report" />
+                <SubNavItem to="/Reports/TargetVsAchieve"      icon={FaBullseye}    label="Target vs Achievement"      />
               </NavGroup>
 
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
               <NavItem to="/coupon" icon={RiCoupon3Line} label="Coupon"    collapsed={collapsed} />
-              <NavItem to="/Cities" icon={MdLocationOn}  label="Locations" collapsed={collapsed} />
+              <NavItem to="/Cities" icon={MdLocationOn}  label="Sites" collapsed={collapsed} />
               <NavItem to="/target" icon={FaBullseye}    label="Target"    collapsed={collapsed} />
             </>
           )}

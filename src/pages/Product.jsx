@@ -804,7 +804,7 @@ const Product = () => {
             <MdFilterList size={16} className="text-[#9CA3AF]" />
             <select value={selectedCityId} onChange={citySelectHandler} disabled={isCoordinator}
               className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[120px]">
-              <option value="">All Locations</option>
+              <option value="">All Sites</option>
               {cities.data.map(item => <option value={item._id} key={item._id}>{item.name}</option>)}
             </select>
           </div>
@@ -1098,7 +1098,7 @@ const Product = () => {
                           <span className="flex-1 border-t border-gray-100" />Classification<span className="flex-1 border-t border-gray-100" />
                         </p>
                         <div className="grid grid-cols-1 gap-3">
-                          <FieldGroup icon={MdLocationOn} label="Location">
+                          <FieldGroup icon={MdLocationOn} label="Site">
                             <Select name="cityID" data={cities.data} searchKey="_id" searchValue="name" value={state.cityID} changeHandler={changeHandler} className={inputCls} />
                           </FieldGroup>
                           <FieldGroup icon={MdCategory} label="Category">

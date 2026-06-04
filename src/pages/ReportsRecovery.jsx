@@ -407,7 +407,7 @@ const ReportsDebit = () => {
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [{ wch:12 },{ wch:28 },{ wch:20 },{ wch:15 },{ wch:12 },{ wch:15 },{ wch:14 },{ wch:12 },{ wch:14 },{ wch:22 }];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Debit Report');
+    XLSX.utils.book_append_sheet(wb, ws, 'Customer Recovery Report');
     const suffix = startDate && endDate ? `${startDate}_to_${endDate}` : 'all-time';
     XLSX.writeFile(wb, `Debit_Report_${suffix}.xlsx`);
     toast.success('Report exported');
@@ -519,7 +519,7 @@ const ReportsDebit = () => {
         {/* ── Header ── */}
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
           <div>
-            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Debit Report</h1>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Customer Recovery Report</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">
               {generated
                 ? `${stats.count} debit entries · ${stats.recoveryCount} recovery entries · ${presetLabel()}${selectedRetObj ? ` · ${selectedRetObj.shopName || selectedRetObj.name}` : ''}`
@@ -880,7 +880,7 @@ const ReportsDebit = () => {
                         <table className="w-full">
                           <thead>
                             <tr className="bg-[#FAFAFA] border-b border-gray-100">
-                              {['#','A/C No.','Retailer / City','Salesperson','Type','Amount (Rs.)','Date','Status'].map(h => (
+                              {['#','A/C No.','Retailer / City','Salesperson','Amount (Rs.)','Date','Status'].map(h => (
                                 <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 whitespace-nowrap">{h}</th>
                               ))}
                             </tr>
@@ -906,9 +906,9 @@ const ReportsDebit = () => {
                                       <span className="text-[13px] text-[#374151] font-medium">{row.salesPerson}</span>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-3">
+                                  {/* <td className="px-4 py-3">
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold ${typeBadge(row.type)}`}>{row.type}</span>
-                                  </td>
+                                  </td> */}
                                   <td className="px-4 py-3 text-right">
                                     <span className="text-[13px] font-bold text-[#FF5934]">Rs. {fmt(row.amount)}</span>
                                   </td>

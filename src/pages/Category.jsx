@@ -288,7 +288,7 @@ const Category = () => {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-100 bg-[#FAFAFA]">
-                {["Image", "Brand", "Location", "Created On", "Active", "Admin Verified", "Actions"].map(h => (
+                {["Image", "Brand", "Site", "Created On", "Active", "Admin Verified", "Actions"].map(h => (
                   <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
                 ))}
               </tr>
@@ -523,7 +523,7 @@ const Category = () => {
                         <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-3 flex items-center gap-2">
                           <span className="flex-1 border-t border-gray-100" />Classification<span className="flex-1 border-t border-gray-100" />
                         </p>
-                        <FieldGroup icon={MdLocationOn} label="Location">
+                        <FieldGroup icon={MdLocationOn} label="Site">
                           <Select
                             name="cityID"
                             data={cities.data}
@@ -630,7 +630,7 @@ const Category = () => {
               <div className="cat-no-scroll overflow-y-auto px-5 pt-5 pb-4 flex flex-col gap-3">
                 {[
                   { icon: MdBadge, label: "Category ID", value: selectedProduct.categoryId, mono: true },
-                  { icon: MdLocationOn, label: "Location", value: selectedProduct.cityID?.name },
+                  { icon: MdLocationOn, label: "Site", value: selectedProduct.cityID?.name },
                   { icon: MdCalendarToday, label: "Created On", value: new Date(selectedProduct.createdAt).toLocaleDateString() },
                 ].map(({ icon: Icon, label, value, mono }) => (
                   <div key={label} className="flex items-start gap-3 bg-[#F9FAFB] rounded-2xl px-4 py-3 border border-gray-100">

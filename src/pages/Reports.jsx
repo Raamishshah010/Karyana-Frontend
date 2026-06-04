@@ -61,7 +61,7 @@ const Reports = () => {
       {show && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-lg w-96 relative">
-            <h2 className="text-xl px-6 py-4 border-b border-gray-300 font-bold mb-4">Location</h2>
+            <h2 className="text-xl px-6 py-4 border-b border-gray-300 font-bold mb-4">Site</h2>
             <div className="px-6 pb-6">
               <GoogleMapComponent
                 apiKey="AIzaSyAuJYLmzmglhCpBYTn0BjbJhjWYg0fPEEA"

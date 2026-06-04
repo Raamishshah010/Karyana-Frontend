@@ -389,7 +389,7 @@ const WarehouseManagers = () => {
               onChange={e => handleCityChange(e.target.value)}
               className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[130px]"
             >
-              <option value="">All Locations</option>
+              <option value="">All Sites</option>
               {cities.data.map(city => (
                 <option value={city._id} key={city._id}>{city.name}</option>
               ))}

@@ -554,7 +554,7 @@ const Retailers = () => {
               onChange={e => handleCityChange(e.target.value)} // ← CHANGED
               className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[130px]"
             >
-              <option value="">All Locations</option>
+              <option value="">All Sites</option>
               {cities.data.map(city => (
                 <option value={city._id} key={city._id}>{city.name}</option>
               ))}
@@ -824,7 +824,7 @@ const Retailers = () => {
                             <FieldGroup icon={MdLocationCity} label="City">
                               <select name="cityID" value={values.cityID} onChange={handleChange}
                                 className={inputClsErr(errors.cityID, touched.cityID)}>
-                                <option value="">Select Location</option>
+                                <option value="">Select Site</option>
                                 {cities.data.map(city => <option value={city._id} key={city._id}>{city.name}</option>)}
                               </select>
                               {errors.cityID && touched.cityID && <p className="text-red-400 text-[11px] mt-1">{errors.cityID}</p>}
@@ -836,7 +836,7 @@ const Retailers = () => {
                       {/* Location & Assignment */}
                       <div>
                         <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-3 flex items-center gap-2">
-                          <span className="flex-1 border-t border-gray-100" /> Location & Assignment <span className="flex-1 border-t border-gray-100" />
+                          <span className="flex-1 border-t border-gray-100" /> Site & Assignment <span className="flex-1 border-t border-gray-100" />
                         </p>
                         <div className="grid grid-cols-3 gap-3">
                           <FieldGroup icon={MdMyLocation} label="Distance">
@@ -1008,7 +1008,7 @@ const Retailers = () => {
                 {/* Location */}
                 <div>
                   <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-2 flex items-center gap-2">
-                    <span className="flex-1 border-t border-gray-100" /> Location <span className="flex-1 border-t border-gray-100" />
+                    <span className="flex-1 border-t border-gray-100" /> Site <span className="flex-1 border-t border-gray-100" />
                   </p>
                   <div className="grid grid-cols-3 gap-2">
                     {[

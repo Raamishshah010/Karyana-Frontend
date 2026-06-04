@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
-import { getAllSalesPersons, getTrackingHistoryBySalesId, getAllRetailers } from "../APIS";
+import { getAllSalesPersons, getTrackingHistoryBySalesId, getAllRetailers, getAllCities } from "../APIS";
 import shopIcon from "../assets/karyana-icon.png";
 import {
   MdSearch, MdClose, MdPerson, MdCalendarToday,
   MdFilterList, MdCheckCircle, MdMap, MdRoute,
-  MdLocationOn, MdAccessTime, MdMyLocation, MdBarChart,
+  MdLocationOn, MdMyLocation, MdExpandMore,
 } from "react-icons/md";
 
 /* ─── Google Maps loader (singleton) ─── */
@@ -30,13 +29,14 @@ const loadGoogleMaps = () => {
   return googleMapsPromise;
 };
 
-/* ─── helpers ─── */
 const formatDate = (d) => {
   if (!d) return "—";
   try { return new Date(d).toLocaleDateString("en-GB"); } catch { return d; }
 };
 
-/* ─── Route Preview Modal (same logic as TrackingReport.jsx) ─── */
+/* ─────────────────────────────────────────────────────────────
+   ROUTE PREVIEW MODAL
+───────────────────────────────────────────────────────────── */
 const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
   const mapRef         = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -44,7 +44,6 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
   const markersRef     = useRef([]);
   const shopMarkersRef = useRef([]);
 
-  /* Normalize to sessions (arrays of points) */
   const sessions = useMemo(() => {
     const arr = Array.isArray(coordinates) ? coordinates : [];
     return arr
@@ -86,7 +85,7 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
           <div style="padding:8px;font-family:sans-serif;">
             <h4 style="margin:0 0 4px 0;font-weight:bold;color:#FF5934;">${shop.shopName || shop.name}</h4>
             <p style="margin:0 0 2px 0;font-size:12px;"><b>Owner:</b> ${shop.name}</p>
-            <p style="margin:0 0 2px 0;font-size:12px;"><b>Phone:</b> ${shop.phoneNumber}</p>
+            <p style="margin:0 0 2px 0;font-size:12px;"><b>Phone:</b> ${shop.phoneNumber || '—'}</p>
             <p style="margin:0;font-size:12px;"><b>Address:</b> ${shop.shopAddress1 || "N/A"}</p>
           </div>
         `,
@@ -96,7 +95,6 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
     });
   };
 
-  /* Road-following path via DirectionsService, falls back to raw points */
   const buildRoadPath = async (points) => {
     const norm = points
       .map(p => ({ lat: parseFloat(p.lat), lng: parseFloat(p.lng) }))
@@ -131,10 +129,8 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
     try {
       for (const chunk of chunks) {
         const res = await routeAsync({
-          origin: chunk.origin,
-          destination: chunk.destination,
-          waypoints: chunk.waypoints,
-          travelMode: window.google.maps.TravelMode.DRIVING,
+          origin: chunk.origin, destination: chunk.destination,
+          waypoints: chunk.waypoints, travelMode: window.google.maps.TravelMode.DRIVING,
           optimizeWaypoints: false,
         });
         const overview = res?.routes?.[0]?.overview_path || [];
@@ -146,46 +142,36 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
 
   useEffect(() => {
     if (!open) return;
-
     const init = () => {
       if (!mapRef.current || !window.google) return;
       clearOverlays();
       const map = new window.google.maps.Map(mapRef.current, {
-        center: defaultCenter,
-        zoom: sessions.length ? 14 : 12,
-        mapTypeControl: true,
-        streetViewControl: true,
-        zoomControl: true,
-        fullscreenControl: true,
+        center: defaultCenter, zoom: sessions.length ? 14 : 12,
+        mapTypeControl: true, streetViewControl: true,
+        zoomControl: true, fullscreenControl: true,
       });
       mapInstanceRef.current = map;
-
       const render = async () => {
         const bounds = new window.google.maps.LatLngBounds();
-
         if (shops?.length) {
           addShopMarkers(map, shops);
           shops.forEach(s => {
             if (s.lat && s.lng) bounds.extend({ lat: parseFloat(s.lat), lng: parseFloat(s.lng) });
           });
         }
-
         for (let i = 0; i < sessions.length; i++) {
           const roadPath = await buildRoadPath(sessions[i]);
           if (!roadPath.length) continue;
-
           markersRef.current.push(new window.google.maps.Marker({
             position: roadPath[0], map,
             label: { text: "S", color: "#fff" },
             icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: "#2ECC71", fillOpacity: 1, strokeColor: "#1B5E20", strokeWeight: 2 },
           }));
-
           markersRef.current.push(new window.google.maps.Marker({
             position: roadPath[roadPath.length - 1], map,
             label: { text: "E", color: "#fff" },
             icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: "#E74C3C", fillOpacity: 1, strokeColor: "#7F1D1D", strokeWeight: 2 },
           }));
-
           const pl = new window.google.maps.Polyline({
             path: roadPath, geodesic: true,
             strokeColor: "#FF5934", strokeOpacity: 0.95, strokeWeight: 5,
@@ -198,12 +184,10 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
       };
       render();
     };
-
     loadGoogleMaps().then(init).catch(() => {});
     return () => clearOverlays();
   }, [open, sessions, defaultCenter, shops]);
 
-  /* Escape key */
   useEffect(() => {
     if (!open) return;
     const h = (e) => { if (e.key === "Escape") onClose(); };
@@ -219,7 +203,6 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-[860px] overflow-hidden flex flex-col" style={{ maxHeight: "90vh" }}>
-        {/* Modal header */}
         <div className="relative bg-gradient-to-r from-[#FF5934] to-[#ff8c6b] px-6 pt-5 pb-5 flex-shrink-0">
           <div className="absolute inset-0 opacity-10"
             style={{ backgroundImage: "radial-gradient(circle at 80% 50%, white 1px, transparent 1px)", backgroundSize: "18px 18px" }} />
@@ -239,28 +222,22 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
             </button>
           </div>
         </div>
-
-        {/* Stats bar */}
         <div className="flex items-center gap-6 px-6 py-3 bg-[#FAFAFA] border-b border-gray-100 flex-shrink-0 flex-wrap">
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-            <span className="text-[12px] font-semibold text-[#374151]">Start point</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
-            <span className="text-[12px] font-semibold text-[#374151]">End point</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#FF5934]" />
-            <span className="text-[12px] font-semibold text-[#374151]">Route</span>
-          </div>
+          {[
+            { color:'bg-emerald-400', label:'Start point' },
+            { color:'bg-red-400',     label:'End point' },
+            { color:'bg-[#FF5934]',   label:'Route' },
+          ].map(({ color, label }) => (
+            <div key={label} className="flex items-center gap-2">
+              <div className={`w-2.5 h-2.5 rounded-full ${color}`} />
+              <span className="text-[12px] font-semibold text-[#374151]">{label}</span>
+            </div>
+          ))}
           <div className="ml-auto flex items-center gap-1.5 text-[12px] text-[#9CA3AF]">
             <MdLocationOn size={13} className="text-[#FF5934]" />
             {sessions.reduce((acc, s) => acc + s.length, 0)} location points
           </div>
         </div>
-
-        {/* Map */}
         <div className="flex-1 relative" style={{ minHeight: 420 }}>
           <div ref={mapRef} className="w-full h-full" style={{ minHeight: 420 }} />
         </div>
@@ -269,113 +246,180 @@ const RoutePreviewModal = ({ open, onClose, coordinates, shops }) => {
   );
 };
 
-/* ════════════════════════════════════════
+/* ─────────────────────────────────────────────────────────────
    MAIN COMPONENT
-════════════════════════════════════════ */
+───────────────────────────────────────────────────────────── */
 const TrackingReports = () => {
-  const [salesPersons, setSalesPersons]               = useState([]);
-  const [selectedSalesPerson, setSelectedSalesPerson] = useState("");
-  const [spSearch, setSpSearch]                       = useState("");
-  const [spDropOpen, setSpDropOpen]                   = useState(false);
-  const [history, setHistory]                         = useState([]);
-  const [filteredHistory, setFilteredHistory]         = useState([]);
-  const [shops, setShops]                             = useState([]);
-  const [loading, setLoading]                         = useState(false);
-  const [generated, setGenerated]                     = useState(false);
-  const [modalOpen, setModalOpen]                     = useState(false);
-  const [selectedCoordinates, setSelectedCoordinates] = useState([]);
-  const [startDate, setStartDate]                     = useState("");
-  const [endDate, setEndDate]                         = useState("");
+  /* ── static data ── */
+  const [salesPersons, setSalesPersons] = useState([]);
+  const [cities,       setCities]       = useState([]);
+  const [shops,        setShops]        = useState([]);
 
-  const [searchParams] = useSearchParams();
-  const salesIdFromUrl  = searchParams.get("salesId");
+  /* ── filter state ── */
+  const [selectedSP,   setSelectedSP]   = useState("all"); // "all" | sp._id
+  const [selectedCity, setSelectedCity] = useState("all"); // "all" | city._id
+  const [spSearch,     setSpSearch]     = useState("");
+  const [spDropOpen,   setSpDropOpen]   = useState(false);
+  const [cityDropOpen, setCityDropOpen] = useState(false);
 
-  /* Load sales persons */
+  /* ── result state ── */
+  // allHistory = { [spId]: [...days] }
+  const [allHistory,  setAllHistory]  = useState({});
+  const [loading,     setLoading]     = useState(false);
+  const [generated,   setGenerated]   = useState(false);
+
+  /* ── modal ── */
+  const [modalOpen,          setModalOpen]          = useState(false);
+  const [selectedCoords,     setSelectedCoords]     = useState([]);
+  const [modalShops,         setModalShops]         = useState([]);
+
+  /* ── close dropdowns on outside click ── */
   useEffect(() => {
-    getAllSalesPersons()
-      .then(res => setSalesPersons(res.data.data || []))
-      .catch(() => {});
-    if (salesIdFromUrl) setSelectedSalesPerson(salesIdFromUrl);
+    const h = (e) => {
+      if (!e.target.closest(".tr-drop")) {
+        setSpDropOpen(false);
+        setCityDropOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  /* Auto-fetch if salesId in URL */
+  /* ── initial data load + auto-generate ── */
   useEffect(() => {
-    if (salesIdFromUrl && salesPersons.length > 0) fetchRoutes(salesIdFromUrl);
-  }, [salesIdFromUrl, salesPersons]);
-
-  /* Apply date filter client-side whenever raw history or dates change */
-  useEffect(() => {
-    if (!startDate && !endDate) { setFilteredHistory(history); return; }
-    setFilteredHistory(history.filter(day => {
-      if (!day.date) return false;
-      if (startDate && day.date < startDate) return false;
-      if (endDate   && day.date > endDate)   return false;
-      return true;
-    }));
-  }, [history, startDate, endDate]);
-
-  const selectedPersonObj = salesPersons.find(sp => sp._id === selectedSalesPerson);
-  const filteredSP        = salesPersons.filter(sp =>
-    (sp.name || "").toLowerCase().includes(spSearch.toLowerCase())
-  );
-  const activeSalesId = selectedSalesPerson || salesIdFromUrl;
-
-  /* Fetch tracking history + shops via API (same as TrackingReport.jsx) */
-  const fetchRoutes = async (overrideSid) => {
-    const sid = overrideSid || activeSalesId;
-    if (!sid) { alert("Please select a sales person first."); return; }
-    try {
-      setLoading(true);
-      setGenerated(false);
-      setHistory([]);
-      setShops([]);
-
-      /* History */
-      const res = await getTrackingHistoryBySalesId(sid, 30);
-      if (res.data?.msg === "success") {
-        setHistory(res.data.data || []);
-      }
-
-      /* Shops assigned to this sales person */
+    const init = async () => {
       try {
-        const shopRes = await getAllRetailers();
-        if (shopRes.data?.msg === "success") {
-          const all = shopRes.data.data || [];
-          const filtered = all.filter(s =>
-            s.salesPersonID && (s.salesPersonID._id === sid || s.salesPersonID === sid)
-          );
-          setShops(filtered);
-        }
-      } catch { /* shops are optional */ }
+        const [spRes, retRes, citRes] = await Promise.all([
+          getAllSalesPersons(),
+          getAllRetailers(),
+          getAllCities(),
+        ]);
 
-      setGenerated(true);
-    } catch (err) {
-      console.error("fetchRoutes error:", err);
-      setGenerated(true);
-    } finally {
-      setLoading(false);
-    }
+        const spList  = spRes?.data?.data  || [];
+        const retList = retRes?.data?.data || [];
+        /* getAllCities returns { data: { data: [...] } } same as other list APIs */
+        const citList = citRes?.data?.data || [];
+
+        setSalesPersons(spList);
+        setShops(retList);
+        setCities(citList);
+
+        /* ── auto-fetch all salespersons on load ── */
+        if (spList.length) {
+          await fetchAllHistory(spList);
+        }
+      } catch (err) {
+        console.error("TrackingReports init error:", err);
+      }
+    };
+    init();
+  // eslint-disable-next-line
+  }, []);
+
+  /* ── fetch tracking history for a list of SPs ── */
+  const fetchAllHistory = async (spList) => {
+    setLoading(true);
+    setGenerated(false);
+    setAllHistory({});
+
+    const results = await Promise.allSettled(
+      spList.map(async sp => {
+        try {
+          const res = await getTrackingHistoryBySalesId(sp._id, 30);
+          const days = res?.data?.data || [];
+          return [sp._id, Array.isArray(days) ? days : []];
+        } catch {
+          return [sp._id, []];
+        }
+      })
+    );
+
+    const map = {};
+    results.forEach(r => {
+      if (r.status === "fulfilled" && Array.isArray(r.value)) {
+        const [id, days] = r.value;
+        if (days.length) map[id] = days;
+      }
+    });
+
+    setAllHistory(map);
+    setLoading(false);
+    setGenerated(true);
   };
 
-  /* Open route modal — same logic as TrackingReport.jsx */
-  const openRoute = (day) => {
-    const coords = (day.sessions || day.allCoordinatesArray || []).map(s =>
-      s.coordinates ? s.coordinates : s
-    );
-    setSelectedCoordinates(coords);
-    setModalOpen(true);
+  /* ── "Generate Report" button ── */
+  const handleGenerate = async () => {
+    const list = selectedSP === "all"
+      ? salesPersons
+      : salesPersons.filter(s => s._id === selectedSP);
+    await fetchAllHistory(list);
   };
 
   const handleReset = () => {
-    setSelectedSalesPerson("");
-    setHistory([]);
-    setFilteredHistory([]);
-    setShops([]);
-    setGenerated(false);
+    setSelectedSP("all");
+    setSelectedCity("all");
     setSpSearch("");
-    setStartDate("");
-    setEndDate("");
+    setGenerated(false);
+    setAllHistory({});
+    /* re-fetch all */
+    if (salesPersons.length) fetchAllHistory(salesPersons);
   };
+
+  /* ── computed flat rows with city filter applied ── */
+  const rows = useMemo(() => {
+    const out = [];
+    const spsToShow = selectedSP === "all"
+      ? salesPersons
+      : salesPersons.filter(s => s._id === selectedSP);
+
+    spsToShow.forEach(sp => {
+      const days = allHistory[sp._id] || [];
+      days.forEach((day, i) => {
+        /* city filter: if a city is selected, only show days whose
+           shops include at least one shop in that city assigned to this SP */
+        if (selectedCity !== "all") {
+          const hasShopInCity = shops.some(sh => {
+            const shCityId = typeof sh.city === "object" ? sh.city?._id : sh.city;
+            const shSpId   = typeof sh.salesPersonID === "object" ? sh.salesPersonID?._id : sh.salesPersonID;
+            return shCityId === selectedCity && shSpId === sp._id;
+          });
+          if (!hasShopInCity) return;
+        }
+        out.push({ sp, day, dayIndex: i });
+      });
+    });
+    return out;
+  }, [allHistory, salesPersons, selectedSP, selectedCity, shops]);
+
+  /* ── open route modal ── */
+  const openRoute = (sp, day) => {
+    const coords = (day.sessions || day.allCoordinatesArray || []).map(s =>
+      s.coordinates ? s.coordinates : s
+    );
+    /* shops for this SP, optionally filtered by city */
+    let spShops = shops.filter(sh => {
+      const shSpId = typeof sh.salesPersonID === "object" ? sh.salesPersonID?._id : sh.salesPersonID;
+      return shSpId === sp._id;
+    });
+    if (selectedCity !== "all") {
+      spShops = spShops.filter(sh => {
+        const shCityId = typeof sh.city === "object" ? sh.city?._id : sh.city;
+        return shCityId === selectedCity;
+      });
+    }
+    setSelectedCoords(coords);
+    setModalShops(spShops);
+    setModalOpen(true);
+  };
+
+  /* ── dropdown helpers ── */
+  const filteredSPs = salesPersons.filter(s =>
+    (s.name || "").toLowerCase().includes(spSearch.toLowerCase()) ||
+    (s.email || "").toLowerCase().includes(spSearch.toLowerCase())
+  );
+  const selectedSPObj   = selectedSP !== "all" ? salesPersons.find(s => s._id === selectedSP) : null;
+  const selectedCityObj = selectedCity !== "all" ? cities.find(c => c._id === selectedCity) : null;
+  const activeFilters   = [selectedSP !== "all", selectedCity !== "all"].filter(Boolean).length;
 
   return (
     <>
@@ -386,8 +430,9 @@ const TrackingReports = () => {
         .tr-page .table-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
         .tr-no-scroll::-webkit-scrollbar { display: none; }
         .tr-no-scroll { scrollbar-width: none; }
-        @keyframes trFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-        .tr-row-appear { animation: trFadeIn 0.25s ease both; }
+        @keyframes trFadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
+        .tr-row-appear { animation: trFadeIn 0.22s ease both; }
+        .tr-drop { position: relative; }
       `}</style>
 
       <div className="tr-page">
@@ -396,240 +441,260 @@ const TrackingReports = () => {
         <div className="flex flex-wrap items-center justify-between mt-6 mb-5 gap-3">
           <div>
             <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Tracking Reports</h1>
-            {generated && (
-              <p className="text-sm text-[#9CA3AF] mt-0.5">
-                {filteredHistory.length > 0
-                  ? <>{filteredHistory.length}{history.length !== filteredHistory.length ? ` of ${history.length}` : ""} day{filteredHistory.length !== 1 ? "s" : ""} with recorded routes</>
-                  : "No route data found"}
-              </p>
-            )}
+            <p className="text-sm text-[#9CA3AF] mt-0.5">
+              {loading
+                ? "Loading route data…"
+                : generated
+                  ? `${rows.length} route${rows.length !== 1 ? "s" : ""} found${selectedCity !== "all" && selectedCityObj ? ` in ${selectedCityObj.name}` : ""}`
+                  : "Select filters and generate report"}
+            </p>
           </div>
         </div>
 
-        {/* ── Main Card ── */}
-        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-visible">
+        {/* ── Filter Card ── */}
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-5 mb-5">
+          <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-4 flex items-center gap-2">
+            <MdFilterList size={13} className="text-[#FF5934]" /> Filters
+            {activeFilters > 0 && (
+              <span className="w-5 h-5 rounded-full bg-[#FF5934] text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                {activeFilters}
+              </span>
+            )}
+          </p>
 
-          {/* Filter Section */}
-          <div className="px-5 py-5 border-b border-gray-100 bg-[#FAFAFA]">
-            <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-4 flex items-center gap-2">
-              <MdFilterList size={13} className="text-[#FF5934]" /> Select Sales Person
-            </p>
+          <div className="flex flex-wrap gap-4 items-end">
 
-            <div className="flex flex-wrap gap-4 items-end">
-
-              {/* Sales Person Picker */}
-              <div className="flex-1 min-w-[260px]">
-                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdPerson size={12} className="text-[#FF5934]" /> Sales Person
-                </label>
-                <div className="relative">
-                  <div
-                    className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                    onClick={() => setSpDropOpen(p => !p)}
-                  >
-                    {selectedPersonObj ? (
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
-                          <span className="text-[#FF5934] text-[10px] font-bold">
-                            {(selectedPersonObj.name || "?")[0].toUpperCase()}
-                          </span>
-                        </div>
-                        <span className="text-[13px] text-[#111827] font-medium truncate">{selectedPersonObj.name}</span>
-                      </div>
-                    ) : (
-                      <span className="text-[13px] text-gray-300 flex-1">Select sales person…</span>
-                    )}
-                    <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
-                  </div>
-
-                  {spDropOpen && (
-                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
-                      <div className="p-2 border-b border-gray-100">
-                        <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
-                          <MdSearch size={14} className="text-[#9CA3AF]" />
-                          <input
-                            autoFocus
-                            value={spSearch}
-                            onChange={e => setSpSearch(e.target.value)}
-                            placeholder="Search…"
-                            className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
-                          />
-                          {spSearch && (
-                            <button onClick={() => setSpSearch("")} className="text-[#9CA3AF] hover:text-[#FF5934]">
-                              <MdClose size={13} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <div className="max-h-52 overflow-y-auto tr-no-scroll">
-                        {filteredSP.length ? filteredSP.map(sp => (
-                          <div
-                            key={sp._id}
-                            onClick={() => { setSelectedSalesPerson(sp._id); setSpDropOpen(false); setSpSearch(""); }}
-                            className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSalesPerson === sp._id ? "bg-orange-50" : ""}`}
-                          >
-                            <div className="w-7 h-7 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
-                              <span className="text-[#FF5934] text-[11px] font-bold">{(sp.name || "?")[0].toUpperCase()}</span>
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[13px] font-medium text-[#111827] truncate">{sp.name}</p>
-                              <p className="text-[11px] text-[#9CA3AF] truncate">{sp.email}</p>
-                            </div>
-                            {selectedSalesPerson === sp._id && (
-                              <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0" />
-                            )}
-                          </div>
-                        )) : (
-                          <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No results found</div>
-                        )}
-                      </div>
+            {/* ── Sales Person dropdown ── */}
+            <div className="flex-1 min-w-[240px] tr-drop">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdPerson size={12} className="text-[#FF5934]" /> Sales Person
+              </label>
+              <div
+                className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                onClick={() => { setSpDropOpen(p => !p); setCityDropOpen(false); }}
+              >
+                {selectedSPObj ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                      <span className="text-[#FF5934] text-[10px] font-bold">{(selectedSPObj.name || "?")[0].toUpperCase()}</span>
                     </div>
-                  )}
+                    <span className="text-[13px] text-[#111827] font-medium truncate">{selectedSPObj.name}</span>
+                  </div>
+                ) : (
+                  <span className="text-[13px] text-[#111827] font-medium flex-1">All Salespersons</span>
+                )}
+                <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform flex-shrink-0 ${spDropOpen ? "rotate-180" : ""}`} />
+              </div>
+
+              {spDropOpen && (
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden" style={{ top: "100%" }}>
+                  <div className="p-2 border-b border-gray-100">
+                    <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
+                      <MdSearch size={14} className="text-[#9CA3AF]" />
+                      <input autoFocus value={spSearch} onChange={e => setSpSearch(e.target.value)}
+                        placeholder="Search…"
+                        className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full" />
+                      {spSearch && <button onClick={() => setSpSearch("")} className="text-[#9CA3AF] hover:text-[#FF5934]"><MdClose size={13} /></button>}
+                    </div>
+                  </div>
+                  <div className="max-h-52 overflow-y-auto tr-no-scroll">
+                    {/* All option */}
+                    <div onClick={() => { setSelectedSP("all"); setSpDropOpen(false); setSpSearch(""); }}
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSP === "all" ? "bg-orange-50" : ""}`}>
+                      <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-gray-400">All</div>
+                      <div className="flex-1">
+                        <p className="text-[13px] font-medium text-[#374151]">All Salespersons</p>
+                        <p className="text-[11px] text-[#9CA3AF]">Show everyone</p>
+                      </div>
+                      {selectedSP === "all" && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                    </div>
+                    {filteredSPs.map(sp => (
+                      <div key={sp._id} onClick={() => { setSelectedSP(sp._id); setSpDropOpen(false); setSpSearch(""); }}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors ${selectedSP === sp._id ? "bg-orange-50" : ""}`}>
+                        <div className="w-7 h-7 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                          <span className="text-[#FF5934] text-[11px] font-bold">{(sp.name || "?")[0].toUpperCase()}</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-medium text-[#111827] truncate">{sp.name}</p>
+                          <p className="text-[11px] text-[#9CA3AF] truncate">{sp.email}</p>
+                        </div>
+                        {selectedSP === sp._id && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                      </div>
+                    ))}
+                    {filteredSPs.length === 0 && (
+                      <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No results</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-
-              {/* Date From */}
-              {/* <div className="flex-1 min-w-[150px]">
-                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdCalendarToday size={12} className="text-[#FF5934]" /> From
-                </label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={e => setStartDate(e.target.value)}
-                  className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-[#111827] outline-none w-full focus:border-[#FF5934] transition-all"
-                />
-              </div> */}
-
-              {/* Date To */}
-              {/* <div className="flex-1 min-w-[150px]">
-                <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdCalendarToday size={12} className="text-[#FF5934]" /> To
-                </label>
-                <input
-                  type="date"
-                  value={endDate}
-                  min={startDate || undefined}
-                  onChange={e => setEndDate(e.target.value)}
-                  className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-[#111827] outline-none w-full focus:border-[#FF5934] transition-all"
-                />
-              </div> */}
-
-              {/* Buttons */}
-              <div className="flex gap-2 flex-shrink-0">
-                <button
-                  onClick={handleReset}
-                  className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
-                >
-                  <MdClose size={15} /> Reset
-                </button>
-                <button
-                  onClick={() => fetchRoutes()}
-                  disabled={!activeSalesId || loading}
-                  className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2"
-                >
-                  {loading ? (
-                    <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Loading…</>
-                  ) : (
-                    <><MdRoute size={16} /> Load Routes</>
-                  )}
-                </button>
-              </div>
+              )}
             </div>
 
-            {/* Active filter chips */}
-            {(selectedPersonObj || (startDate && endDate)) && (
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                {selectedPersonObj && (
-                  <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-3 py-1.5">
-                    <div className="w-5 h-5 rounded-full bg-[#FF5934]/20 flex items-center justify-center flex-shrink-0">
-                      <span className="text-[#FF5934] text-[9px] font-bold">{(selectedPersonObj.name || "?")[0].toUpperCase()}</span>
-                    </div>
-                    <span className="text-[12px] font-semibold text-[#FF5934]">{selectedPersonObj.name}</span>
-                    <button
-                      onClick={() => { setSelectedSalesPerson(""); setHistory([]); setFilteredHistory([]); setGenerated(false); }}
-                      className="text-[#FF5934]/50 hover:text-[#FF5934] ml-1"
-                    >
-                      <MdClose size={13} />
-                    </button>
+            {/* ── City / Location dropdown — from getAllCities ── */}
+            <div className="flex-1 min-w-[220px] tr-drop">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdLocationOn size={12} className="text-[#FF5934]" /> Location / City
+              </label>
+              <div
+                className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
+                onClick={() => { setCityDropOpen(p => !p); setSpDropOpen(false); }}
+              >
+                {selectedCityObj ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <MdLocationOn size={14} className="text-blue-500 flex-shrink-0" />
+                    <span className="text-[13px] text-[#111827] font-medium truncate">{selectedCityObj.name}</span>
                   </div>
+                ) : (
+                  <span className="text-[13px] text-[#111827] font-medium flex-1">All Locations</span>
                 )}
-                {startDate && endDate && (
-                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
-                    <MdCalendarToday size={12} className="text-blue-500" />
-                    <span className="text-[12px] font-semibold text-blue-600">{startDate} → {endDate}</span>
-                    <button onClick={() => { setStartDate(""); setEndDate(""); }} className="text-blue-400 hover:text-blue-600 ml-1">
-                      <MdClose size={13} />
-                    </button>
-                  </div>
-                )}
+                <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform flex-shrink-0 ${cityDropOpen ? "rotate-180" : ""}`} />
               </div>
-            )}
+
+              {cityDropOpen && (
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden" style={{ top: "100%" }}>
+                  <div className="max-h-56 overflow-y-auto tr-no-scroll">
+                    {/* All locations */}
+                    <div onClick={() => { setSelectedCity("all"); setCityDropOpen(false); }}
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 ${selectedCity === "all" ? "bg-orange-50" : ""}`}>
+                      <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-gray-400">All</div>
+                      <p className="text-[13px] font-medium text-[#374151] flex-1">All Locations</p>
+                      {selectedCity === "all" && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                    </div>
+                    {cities.length ? cities.map(city => (
+                      <div key={city._id} onClick={() => { setSelectedCity(city._id); setCityDropOpen(false); }}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 last:border-0 ${selectedCity === city._id ? "bg-orange-50" : ""}`}>
+                        <div className="w-7 h-7 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
+                          <MdLocationOn size={13} className="text-blue-500" />
+                        </div>
+                        <p className="text-[13px] font-medium text-[#111827] truncate flex-1">{city.name}</p>
+                        {selectedCity === city._id && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                      </div>
+                    )) : (
+                      <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No locations found</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Buttons ── */}
+            <div className="flex gap-2 flex-shrink-0">
+              <button onClick={handleReset}
+                className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
+                <MdClose size={15} /> Reset
+              </button>
+              <button onClick={handleGenerate} disabled={loading}
+                className="h-10 px-5 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-orange-100 transition-all flex items-center gap-2">
+                {loading
+                  ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Loading…</>
+                  : <><MdRoute size={16} /> Generate Report</>
+                }
+              </button>
+            </div>
           </div>
 
-          {/* ── Table ── */}
+          {/* Active chips */}
+          {(selectedSPObj || selectedCityObj) && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {selectedSPObj && (
+                <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-3 py-1.5">
+                  <div className="w-5 h-5 rounded-full bg-[#FF5934]/20 flex items-center justify-center flex-shrink-0">
+                    <span className="text-[#FF5934] text-[9px] font-bold">{(selectedSPObj.name || "?")[0].toUpperCase()}</span>
+                  </div>
+                  <span className="text-[12px] font-semibold text-[#FF5934]">{selectedSPObj.name}</span>
+                  <button onClick={() => setSelectedSP("all")} className="text-[#FF5934]/50 hover:text-[#FF5934] ml-1"><MdClose size={13} /></button>
+                </div>
+              )}
+              {selectedCityObj && (
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
+                  <MdLocationOn size={12} className="text-blue-500" />
+                  <span className="text-[12px] font-semibold text-blue-600">{selectedCityObj.name}</span>
+                  <button onClick={() => setSelectedCity("all")} className="text-blue-400 hover:text-blue-600 ml-1"><MdClose size={13} /></button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Table ── */}
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
           {loading ? (
             <div className="py-20 flex flex-col items-center gap-3">
               <div className="w-10 h-10 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
-              <p className="text-[13px] text-[#9CA3AF]">Fetching route data…</p>
+              <p className="text-[13px] text-[#9CA3AF]">Fetching route data for all salespersons…</p>
             </div>
           ) : !generated ? (
             <div className="py-20 text-center flex flex-col items-center gap-3">
               <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
                 <MdMap size={24} className="text-gray-300" />
               </div>
-              <p className="text-[#9CA3AF] text-sm font-medium">Select a sales person and click Load Routes</p>
-              <p className="text-[#C4C9D4] text-xs">Route history will appear here</p>
+              <p className="text-[#9CA3AF] text-sm font-medium">Click Generate Report to load route history</p>
             </div>
-          ) : filteredHistory.length === 0 ? (
+          ) : rows.length === 0 ? (
             <div className="py-20 text-center flex flex-col items-center gap-3">
               <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
                 <MdMyLocation size={24} className="text-gray-300" />
               </div>
-              <p className="text-[#9CA3AF] text-sm font-medium">No route data found for this sales person</p>
-              <p className="text-[#C4C9D4] text-xs">Location tracking may not have been active</p>
+              <p className="text-[#9CA3AF] text-sm font-medium">No route data found</p>
+              <p className="text-[#C4C9D4] text-xs">Try a different filter or date range</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
               <table className="w-full">
                 <thead>
                   <tr className="bg-[#FAFAFA] border-b border-gray-100">
-                    <th className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-6 py-3 w-20">ID</th>
-                    <th className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Day</th>
-                    <th className="text-right text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-6 py-3">Actions</th>
+                    {['#', 'Sales Person', 'Day / Date', 'Location', 'Actions'].map(h => (
+                      <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 whitespace-nowrap">{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredHistory.map((day, index) => (
-                    <tr
-                      key={index}
-                      className="table-row tr-row-appear"
-                      style={{ animationDelay: `${index * 40}ms` }}
-                    >
-                      {/* ID */}
-                      <td className="px-6 py-4">
-                        <span className="text-[13px] font-bold text-[#9CA3AF]">{index + 1}</span>
+                  {rows.map(({ sp, day, dayIndex }, i) => (
+                    <tr key={`${sp._id}-${dayIndex}`} className="table-row tr-row-appear" style={{ animationDelay: `${i * 30}ms` }}>
+                      {/* # */}
+                      <td className="px-4 py-3">
+                        <span className="text-[12px] font-bold text-[#C4C9D4]">{i + 1}</span>
                       </td>
 
-                      {/* Day */}
-                      <td className="px-4 py-4">
+                      {/* Sales Person */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-[#FF5934] text-[12px] font-bold">{(sp.name || "?")[0].toUpperCase()}</span>
+                          </div>
+                          <div>
+                            <p className="text-[13px] font-semibold text-[#111827]">{sp.name}</p>
+                            <p className="text-[11px] text-[#9CA3AF]">{sp.email}</p>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Date */}
+                      <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <div className="w-8 h-8 rounded-xl bg-orange-50 flex items-center justify-center flex-shrink-0">
                             <MdCalendarToday size={14} className="text-[#FF5934]" />
                           </div>
                           <div>
-                            <p className="text-[13px] font-semibold text-[#111827]">{day.date}</p>
+                            <p className="text-[13px] font-semibold text-[#111827]">{day.date || `Day ${dayIndex + 1}`}</p>
                             <p className="text-[11px] text-[#9CA3AF]">{formatDate(day.date)}</p>
                           </div>
                         </div>
                       </td>
 
-                      {/* Show Route */}
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => openRoute(day)}
-                          className="inline-flex items-center gap-2 h-9 px-4 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-[12px] font-bold shadow-sm shadow-orange-100 transition-all"
-                        >
+                      {/* City */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <MdLocationOn size={14} className="text-blue-400 flex-shrink-0" />
+                          <span className="text-[13px] text-[#374151]">
+                            {sp.city?.name || selectedCityObj?.name || 'All locations'}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Action */}
+                      <td className="px-4 py-3">
+                        <button onClick={() => openRoute(sp, day)}
+                          className="inline-flex items-center gap-2 h-9 px-4 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-[12px] font-bold shadow-sm shadow-orange-100 transition-all">
                           <MdRoute size={14} /> Show Route
                         </button>
                       </td>
@@ -639,28 +704,25 @@ const TrackingReports = () => {
               </table>
 
               {/* Footer */}
-              <div className="px-6 py-4 bg-[#FAFAFA] border-t border-gray-100 flex items-center justify-between">
+              <div className="px-4 py-3 bg-[#FAFAFA] border-t border-gray-100 flex items-center justify-between">
                 <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">
-                  {filteredHistory.length} day{filteredHistory.length !== 1 ? "s" : ""} of data
+                  {rows.length} route{rows.length !== 1 ? "s" : ""}
+                  {selectedCity !== "all" && selectedCityObj ? ` · ${selectedCityObj.name}` : ""}
                 </p>
-                {selectedPersonObj && (
-                  <div className="flex items-center gap-2 text-[12px] text-[#9CA3AF]">
-                    <MdPerson size={13} className="text-[#FF5934]" />
-                    {selectedPersonObj.name}
-                  </div>
-                )}
+                <p className="text-[11px] text-[#9CA3AF]">
+                  {Object.keys(allHistory).length} salesperson{Object.keys(allHistory).length !== 1 ? "s" : ""} with data
+                </p>
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>
 
-      {/* Route Preview Modal */}
       <RoutePreviewModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        coordinates={selectedCoordinates}
-        shops={shops}
+        coordinates={selectedCoords}
+        shops={modalShops}
       />
     </>
   );

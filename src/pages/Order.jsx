@@ -6,7 +6,7 @@ import {
 } from "../APIS";
 import { Loader } from '../components/common/loader';
 import { GrFormNext, GrFormPrevious } from "react-icons/gr";
-import { FaRegEye, FaTrash, FaFilePdf } from "react-icons/fa6";
+import { FaRegEye, FaTrash, FaFilePdf, FaPrint } from "react-icons/fa6";
 import DateRangePicker from "../components/DateRangePicker";
 import { toast } from 'react-toastify';
 import { ROLES } from '../utils';
@@ -23,6 +23,8 @@ import {
 const ORDER_STATUSES = ['Placed', 'Processed', 'Cancelled', 'Satelment'];
 const LIMIT = 10;
 const FILTER_FETCH_LIMIT = 1000;
+const displayStatus = (status) =>
+  String(status || '').toLowerCase() === 'satelment' ? 'Settlement' : (status || '—');
 
 function toMMDDYYYY(dateStr) {
   if (!dateStr) return '';
@@ -43,9 +45,9 @@ const statusColor = (status) => {
     'Placed':    'bg-amber-50 text-amber-600 ring-amber-200',
     'Processed': 'bg-blue-50 text-blue-600 ring-blue-200',
     'Cancelled': 'bg-red-50 text-red-500 ring-red-200',
-    'Satelment': 'bg-orange-50 text-orange-500 ring-orange-200',
+    'Settlement': 'bg-orange-50 text-orange-500 ring-orange-200',
   };
-  return map[status] || 'bg-gray-50 text-gray-500 ring-gray-200';
+  return map[displayStatus(status)] || 'bg-gray-50 text-gray-500 ring-gray-200';
 };
 
 const statusDot = (status) => {
@@ -53,9 +55,9 @@ const statusDot = (status) => {
     'Placed':    'bg-amber-400',
     'Processed': 'bg-blue-400',
     'Cancelled': 'bg-red-400',
-    'Satelment': 'bg-orange-400',
+    'Settlement': 'bg-orange-400',
   };
-  return map[status] || 'bg-gray-400';
+  return map[displayStatus(status)] || 'bg-gray-400';
 };
 
 const getOrderDateKey = (order) => {
@@ -120,7 +122,7 @@ const generateOrderPDF = (item) => {
     <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
       <div style="width:10px;height:10px;border-radius:50%;background:#FF5934;margin-top:3px;flex-shrink:0"></div>
       <div>
-        <div style="font-size:12px;font-weight:600;color:#111827">${s.status}</div>
+        <div style="font-size:12px;font-weight:600;color:#111827">${displayStatus(s.status)}</div>
         <div style="font-size:11px;color:#9ca3af">${new Date(s.date).toLocaleString()}</div>
       </div>
     </div>`).join('');
@@ -136,7 +138,7 @@ const generateOrderPDF = (item) => {
             <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;opacity:0.7;text-transform:uppercase;margin-bottom:4px">Order Receipt</div>
             <div style="font-size:22px;font-weight:800">#${item._id.slice(-10).toUpperCase()}</div>
           </div>
-          <span style="background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700">${item.status}</span>
+          <span style="background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700">${displayStatus(item.status)}</span>
         </div>
         <div style="margin-top:16px;font-size:12px;opacity:0.8">${new Date(item.createdAt).toLocaleString()}</div>
       </div>
@@ -238,11 +240,6 @@ const Order = () => {
       .catch(() => {});
   }, []);
 
-  /* ─── CORE FETCH ────────────────────────────────────────────────────
-     Always called with the current snapshot of all filter values.
-     Uses getSearchOrders whenever ANY filter/search is active,
-     otherwise falls back to plain getOrders.
-  ─────────────────────────────────────────────────────────────────── */
   const doFetch = useCallback(async ({
     page          = 1,
     term          = '',
@@ -257,7 +254,6 @@ const Order = () => {
       if (hasAnyFilter) {
         const filterState = { term, sd, ed, salesperson, status };
         let rows = [];
-
         if (isWarehouseManager) {
           const res = await getWarhouseManagerOrders(1, FILTER_FETCH_LIMIT);
           rows = res.data.data ?? [];
@@ -268,7 +264,6 @@ const Order = () => {
           const res = await getOrders(1, FILTER_FETCH_LIMIT);
           rows = res.data.data ?? [];
         }
-
         const filteredRows = rows.filter((order) => orderMatchesFilters(order, filterState));
         setData(paginate(filteredRows, page, LIMIT));
         setTotalPages(Math.ceil(filteredRows.length / LIMIT) || 0);
@@ -288,11 +283,6 @@ const Order = () => {
     }
   }, [isCoordinator, isWarehouseManager, user?.city]);
 
-  /* ─── INITIAL LOAD for warehouse / coordinator roles ── */
-  /* ─── RE-FETCH whenever any filter / page changes ─────────────────
-     Skipped for warehouse / coordinator roles (they have their own
-     fetch above and don't use the search endpoint).
-  ─────────────────────────────────────────────────────────────────── */
   useEffect(() => {
     if (isCoordinator && !user?.city) return;
     doFetch({
@@ -305,14 +295,12 @@ const Order = () => {
     });
   }, [currentPage, searchTerm, startDate, endDate, selectedSalesPerson, selectedStatus, doFetch, isCoordinator, user?.city]);
 
-  /* ─── close sidebar on outside click ── */
   useEffect(() => {
     const h = (e) => { if (sidebarRef.current && !sidebarRef.current.contains(e.target)) setShow(false); };
     if (show) document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [show]);
 
-  /* ─── filter handlers — update state, reset to page 1 ── */
   const dateRangeHandler = useCallback((sd, ed) => {
     setStartDate(sd || '');
     setEndDate(ed || '');
@@ -343,7 +331,6 @@ const Order = () => {
     setCurrentPage(1);
   }, []);
 
-  /* ─── status update ── */
   const statusHandler = async (e) => {
     const newStatus = e.target.value;
     if (!newStatus) return;
@@ -362,7 +349,6 @@ const Order = () => {
       setLoading(false);
       setShow(false);
       toast.success('Status Updated');
-      /* refresh current view */
       doFetch({ page: currentPage, term: searchTerm, sd: startDate, ed: endDate, salesperson: selectedSalesPerson, status: selectedStatus });
     } catch (error) {
       setLoading(false);
@@ -395,7 +381,7 @@ const Order = () => {
         }),
       }));
       setIsSatelmentPopupVisible(false);
-      toast.success('Satelment Updated');
+      toast.success('Settlement Updated');
       setLoading(false);
       doFetch({ page: currentPage, term: searchTerm, sd: startDate, ed: endDate, salesperson: selectedSalesPerson, status: selectedStatus });
     } catch (error) { setLoading(false); toast.error(error.message); }
@@ -515,16 +501,6 @@ const Order = () => {
             <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Orders</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">{data.length} orders on this page</p>
           </div>
-          {/* {!isWarehouseManager && (
-            <div className="flex flex-wrap gap-2 items-center">
-              <button onClick={invoiceHandler} className="flex items-center gap-2 bg-white border border-gray-200 hover:bg-orange-50 hover:border-[#FF5934] text-[#374151] hover:text-[#FF5934] text-sm font-semibold px-4 py-2.5 rounded-xl transition-all">
-                <MdReceipt size={16} /> Generate Invoice
-              </button>
-              <button onClick={openLoadFormModal} className="flex items-center gap-2 bg-white border border-gray-200 hover:bg-orange-50 hover:border-[#FF5934] text-[#374151] hover:text-[#FF5934] text-sm font-semibold px-4 py-2.5 rounded-xl transition-all">
-                <MdLocalShipping size={16} /> Generate Load Form
-              </button>
-            </div>
-          )} */}
         </div>
 
         {/* ── Filter Bar ── */}
@@ -575,7 +551,7 @@ const Order = () => {
             >
               <option value="">All Statuses</option>
               {ORDER_STATUSES.map(s => (
-                <option value={s} key={s}>{s}</option>
+                <option value={s} key={s}>{displayStatus(s)}</option>
               ))}
             </select>
           </div>
@@ -647,11 +623,15 @@ const Order = () => {
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${statusColor(item.status)}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${statusDot(item.status)}`} />
-                      {item.status}
+                      {displayStatus(item.status)}
                     </span>
                   </td>
+
+                  {/* ── Actions column — PDF + Print + View ── */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
+
+                      {/* PDF / Download */}
                       <button
                         onClick={e => { e.stopPropagation(); generateOrderPDF(item); }}
                         className="action-btn w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-400 hover:text-red-500 border border-red-100"
@@ -659,6 +639,17 @@ const Order = () => {
                       >
                         <FaFilePdf size={13} />
                       </button>
+
+                      {/* ── NEW: Print button ── */}
+                      <button
+                        onClick={e => { e.stopPropagation(); generateOrderPDF(item); }}
+                        className="action-btn w-8 h-8 flex items-center justify-center rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-400 hover:text-indigo-500 border border-indigo-100"
+                        title="Print Order"
+                      >
+                        <FaPrint size={13} />
+                      </button>
+
+                      {/* View */}
                       <button
                         onClick={e => { e.stopPropagation(); setSelectedItem(item); setShow(true); }}
                         className="action-btn w-8 h-8 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-blue-50 text-[#9CA3AF] hover:text-blue-500 border border-gray-100"
@@ -666,6 +657,7 @@ const Order = () => {
                       >
                         <FaRegEye size={13} />
                       </button>
+
                     </div>
                   </td>
                 </tr>
@@ -842,16 +834,16 @@ const Order = () => {
                 <div className="flex gap-2 mt-2">
                   <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold ${statusColor(selectedItem.status)}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${statusDot(selectedItem.status)}`} />
-                    {selectedItem.status}
+                    {displayStatus(selectedItem.status)}
                   </span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 mx-5 -mt-4 z-10 relative">
+              <div className="grid grid-cols-2 gap-2 mx-5 -mt-4 z-10 relative">
                 {[
                   { label: 'Items', value: selectedItem.items.length },
                   { label: 'Total', value: `Rs. ${selectedItem.total}` },
-                  { label: 'Steps', value: selectedItem.statuses.length },
+                  // { label: 'Steps', value: selectedItem.statuses.length },
                 ].map(({ label, value }) => (
                   <div key={label} className="bg-white rounded-2xl border border-gray-100 shadow-md px-2 py-3 text-center">
                     <p className="text-[12px] font-bold text-[#FF5934] truncate">{value}</p>
@@ -876,7 +868,7 @@ const Order = () => {
                           {i < selectedItem.statuses.length - 1 && <div className="w-0.5 h-5 bg-[#FF5934]/20 my-1" />}
                         </div>
                         <div className="pb-2 min-w-0">
-                          <p className="text-[13px] font-semibold text-[#111827]">{s.status}</p>
+                          <p className="text-[13px] font-semibold text-[#111827]">{displayStatus(s.status)}</p>
                           <p className="text-[11px] text-[#9CA3AF]">{new Date(s.date).toLocaleString()}</p>
                         </div>
                       </div>
@@ -910,7 +902,7 @@ const Order = () => {
                 </div>
 
                 {/* Items */}
-                <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100 overflow-hidden">
+                <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100 overflow-scroll">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Items</p>
                     <span className="text-[11px] text-[#FF5934] font-bold">{selectedItem.items.length} items</span>
@@ -957,7 +949,7 @@ const Order = () => {
                     className="bg-[#F9FAFB] border border-gray-200 focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-3 py-2.5 rounded-xl w-full outline-none text-sm text-[#111827] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="" disabled>Change status…</option>
-                    {orderStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                    {orderStatuses.map(s => <option key={s} value={s}>{displayStatus(s)}</option>)}
                   </select>
                 </div>
               </div>

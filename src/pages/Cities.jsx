@@ -204,14 +204,14 @@ const Cities = () => {
         {/* ── Page Header ── */}
         <div className="flex items-center justify-between mt-6 mb-5">
           <div>
-            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Locations</h1>
-            <p className="text-sm text-[#9CA3AF] mt-0.5">{data.length} locations on this page</p>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Sites</h1>
+            <p className="text-sm text-[#9CA3AF] mt-0.5">{data.length} Sites on this page</p>
           </div>
           <button
             onClick={addHandler}
             className="flex items-center gap-2 bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-md shadow-orange-100 transition-all duration-200"
           >
-            <MdAdd size={18} /> Add Location
+            <MdAdd size={18} /> Add Site
           </button>
         </div>
 
@@ -246,7 +246,7 @@ const Cities = () => {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-100 bg-[#FAFAFA]">
-                {["Location", "Location ID", "Created On", "Active", "Admin Verified", "Actions"].map(h => (
+                {["Site", "Site ID", "Created On", "Active", "Admin Verified", "Actions"].map(h => (
                   <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
                 ))}
               </tr>
@@ -332,7 +332,7 @@ const Cities = () => {
                       <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
                         <MdLocationOn size={24} className="text-gray-300" />
                       </div>
-                      <p className="text-[#9CA3AF] text-sm font-medium">No locations found</p>
+                      <p className="text-[#9CA3AF] text-sm font-medium">No Sites found</p>
                       <button onClick={refreshData} className="text-[#FF5934] text-xs hover:underline">Clear filters</button>
                     </div>
                   </td>
@@ -382,7 +382,7 @@ const Cities = () => {
                       {state.id ? 'Editing' : 'New'}
                     </p>
                     <h2 className="text-white text-xl font-bold">
-                      {state.id ? 'Edit Location' : 'Add Location'}
+                      {state.id ? 'Edit Site' : 'Add Site'}
                     </h2>
                   </div>
                   <button
@@ -404,9 +404,9 @@ const Cities = () => {
                   <Form className="city-no-scroll overflow-y-auto flex-1 flex flex-col">
                     <div className="px-6 pt-7 pb-6 flex flex-col gap-4">
                       <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest flex items-center gap-2">
-                        <span className="flex-1 border-t border-gray-100" />Location Details<span className="flex-1 border-t border-gray-100" />
+                        <span className="flex-1 border-t border-gray-100" />Site Details<span className="flex-1 border-t border-gray-100" />
                       </p>
-                      <FieldGroup icon={MdBadge} label="Location ID">
+                      <FieldGroup icon={MdBadge} label="Site ID">
                         <Input
                           changeHandler={changeHandler}
                           name="locationId"
@@ -439,7 +439,7 @@ const Cities = () => {
                         type="submit"
                         className="flex-1 h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold shadow-lg shadow-orange-100 transition-all flex items-center justify-center gap-2"
                       >
-                        {state.id ? <><MdEdit size={16} /> Save Changes</> : <><MdAdd size={16} /> Add Location</>}
+                        {state.id ? <><MdEdit size={16} /> Save Changes</> : <><MdAdd size={16} /> Add Site</>}
                       </button>
                     </div>
                   </Form>
@@ -467,7 +467,7 @@ const Cities = () => {
                 <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#FF5934]/10" />
                 <div className="absolute -bottom-6 -left-6 w-32 h-32 rounded-full bg-white/5" />
                 <div className="relative flex items-start justify-between mb-4">
-                  <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Location Details</span>
+                  <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Site Details</span>
                   <button
                     onClick={() => setSelectedCity(null)}
                     className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70 hover:text-white transition-colors"
@@ -514,7 +514,7 @@ const Cities = () => {
               {/* Info rows */}
               <div className="city-no-scroll overflow-y-auto px-5 pt-5 pb-4 flex flex-col gap-3">
                 {[
-                  { icon: MdBadge, label: "Location ID", value: selectedCity.locationId, mono: true },
+                  { icon: MdBadge, label: "Site ID", value: selectedCity.locationId, mono: true },
                   { icon: MdLocationOn, label: "City Name", value: selectedCity.name },
                   { icon: MdCalendarToday, label: "Created On", value: new Date(selectedCity.createdAt).toLocaleDateString() },
                   { icon: MdCheckCircle, label: "Status", value: selectedCity.isActive ? 'Active' : 'Inactive' },
@@ -539,7 +539,7 @@ const Cities = () => {
                   onClick={() => { editHandler(selectedCity); setSelectedCity(null); }}
                   className="flex-1 h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-orange-100"
                 >
-                  <MdEdit size={15} /> Edit Location
+                  <MdEdit size={15} /> Edit Site
                 </button>
                 <button
                   onClick={() => setSelectedCity(null)}

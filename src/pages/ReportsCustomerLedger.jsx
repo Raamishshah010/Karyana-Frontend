@@ -676,8 +676,8 @@ const ReportsCustomerLedger = () => {
                             { label: 'Ref No.',      cls: 'text-left   px-3 w-36'   },
                             { label: 'V. No.',       cls: 'text-center px-3 w-20'   },
                             { label: 'Quantity',     cls: 'text-right  px-3 w-20'   },
-                            { label: 'Debit (Dr.)',  cls: 'text-right  px-3 w-28'   },
                             { label: 'Credit (Cr.)', cls: 'text-right  px-3 w-28'   },
+                            { label: 'Debit (Dr.)',  cls: 'text-right  px-3 w-28'   },
                             { label: 'Balance',      cls: 'text-right  px-3 w-28'   },
                           ].map(h => (
                             <th key={h.label} className={`text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest py-3 ${h.cls}`}>

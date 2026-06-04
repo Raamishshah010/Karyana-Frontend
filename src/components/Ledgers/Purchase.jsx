@@ -1347,11 +1347,11 @@ const Purchase = () => {
                               className={`${inputCls} ${errors.date && touched.date ? 'border-red-400' : ''}`} />
                           </div>
                           <div>
-                            <label className="block text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">Location</label>
+                            <label className="block text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">Site</label>
                             <select name="location" value={values.location}
                               onChange={(e) => { handleChange(e); setFieldValue('items', [{ product: '', purchaseRate: '', purchaseDiscount: '', quantity: '', amount: 0, discountAmount: 0 }]); }}
                               className={inputCls}>
-                              <option value="">Select Location</option>
+                              <option value="">Select Site</option>
                               {cities.isLoaded && cities.data.map(city => <option key={city._id} value={city._id || city.name}>{city.name || city._id}</option>)}
                             </select>
                           </div>

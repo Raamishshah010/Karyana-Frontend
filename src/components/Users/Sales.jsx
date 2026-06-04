@@ -462,7 +462,7 @@ const Sales = () => {
               onChange={e => handleCityChange(e.target.value)}
               className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[130px]"
             >
-              <option value="">All Locations</option>
+              <option value="">All Sites</option>
               {cities.data.map(city => (
                 <option value={city._id} key={city._id}>{city.name}</option>
               ))}
@@ -1084,7 +1084,7 @@ const Sales = () => {
                 {/* Location Info */}
                 <div>
                   <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-2 flex items-center gap-2">
-                    <span className="flex-1 border-t border-gray-100" /> Location <span className="flex-1 border-t border-gray-100" />
+                    <span className="flex-1 border-t border-gray-100" /> Site <span className="flex-1 border-t border-gray-100" />
                   </p>
                   <div className="grid grid-cols-2 gap-2">
                     {[
