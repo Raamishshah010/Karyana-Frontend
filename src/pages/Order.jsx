@@ -812,25 +812,36 @@ const Order = () => {
         {show && <EscapeClose onClose={handleEscape} />}
         <div
           ref={sidebarRef}
-          className={`ord-sidebar fixed top-0 right-0 h-full w-full md:w-[420px] bg-white shadow-2xl z-40 flex flex-col ${show ? 'translate-x-0' : 'translate-x-full'}`}
+          className={`ord-sidebar fixed top-0 right-0 h-full w-full md:w-[420px] bg-white shadow-2xl z-40 flex flex-col transition-transform duration-300 ${show ? 'translate-x-0' : 'translate-x-full'}`}
         >
           {show && selectedItem && (
             <>
+              {/* ── Header ── */}
               <div className="relative bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460] px-6 pt-6 pb-6 flex-shrink-0">
-                <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#FF5934]/10" />
+                <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#FF5934]/10 pointer-events-none" />
                 <div className="flex items-start justify-between mb-3">
                   <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Order Details</span>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => generateOrderPDF(selectedItem)} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors">
+                    <button
+                      onClick={() => generateOrderPDF(selectedItem)}
+                      className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors"
+                    >
                       <FaFilePdf size={12} /> PDF
                     </button>
-                    <button onClick={() => setShow(false)} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70 hover:text-white">
+                    <button
+                      onClick={() => setShow(false)}
+                      className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70 hover:text-white transition-colors"
+                    >
                       <MdClose size={15} />
                     </button>
                   </div>
                 </div>
-                <p className="font-mono text-white/50 text-[11px]">#{selectedItem._id.slice(-10).toUpperCase()}</p>
-                <h3 className="text-white font-bold text-[17px] leading-tight">{selectedItem.RetailerUser?.name || 'Order'}</h3>
+                <p className="font-mono text-white/50 text-[11px]">
+                  #{selectedItem._id.slice(-10).toUpperCase()}
+                </p>
+                <h3 className="text-white font-bold text-[17px] leading-tight">
+                  {selectedItem.RetailerUser?.name || 'Order'}
+                </h3>
                 <div className="flex gap-2 mt-2">
                   <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold ${statusColor(selectedItem.status)}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${statusDot(selectedItem.status)}`} />
@@ -839,22 +850,25 @@ const Order = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 mx-5 -mt-4 z-10 relative">
+              {/* ── Summary cards (overlap header) ── */}
+              <div className="grid grid-cols-2 gap-2 mx-5 -mt-4 z-10 relative flex-shrink-0">
                 {[
                   { label: 'Items', value: selectedItem.items.length },
                   { label: 'Total', value: `Rs. ${selectedItem.total}` },
-                  // { label: 'Steps', value: selectedItem.statuses.length },
                 ].map(({ label, value }) => (
                   <div key={label} className="bg-white rounded-2xl border border-gray-100 shadow-md px-2 py-3 text-center">
-                    <p className="text-[12px] font-bold text-[#FF5934] truncate">{value}</p>
+                    <p className="text-[13px] font-bold text-[#FF5934] truncate">{value}</p>
                     <p className="text-[10px] text-[#9CA3AF] font-semibold uppercase tracking-wide mt-0.5">{label}</p>
                   </div>
                 ))}
               </div>
 
-              <div className="ord-no-scroll flex-1 overflow-y-auto px-5 pt-5 pb-4 flex flex-col gap-4">
-                {/* Tracking */}
-                <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100 overflow-hidden">
+              {/* ── Scrollable body — ONE scroll container, no nested scrolls ── */}
+              <div className="flex-1 overflow-y-auto px-5 pt-5 pb-4 flex flex-col gap-4"
+                style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
+
+                {/* Order Tracking */}
+                <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Order Tracking</p>
                   </div>
@@ -865,7 +879,9 @@ const Order = () => {
                           <div className="w-7 h-7 rounded-lg bg-[#FF5934]/10 flex items-center justify-center">
                             <MdCheckCircle size={14} className="text-[#FF5934]" />
                           </div>
-                          {i < selectedItem.statuses.length - 1 && <div className="w-0.5 h-5 bg-[#FF5934]/20 my-1" />}
+                          {i < selectedItem.statuses.length - 1 && (
+                            <div className="w-0.5 h-5 bg-[#FF5934]/20 my-1" />
+                          )}
                         </div>
                         <div className="pb-2 min-w-0">
                           <p className="text-[13px] font-semibold text-[#111827]">{displayStatus(s.status)}</p>
@@ -876,8 +892,8 @@ const Order = () => {
                   </div>
                 </div>
 
-                {/* Info */}
-                <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100 overflow-hidden">
+                {/* Order Info — removed fixed h-32, removed overflow-scroll */}
+                <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Order Info</p>
                   </div>
@@ -892,17 +908,18 @@ const Order = () => {
                         <div className="w-7 h-7 rounded-lg bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
                           <Icon size={13} className="text-[#FF5934]" />
                         </div>
-                        <div>
+                        <div className="min-w-0 flex-1">
                           <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">{label}</p>
-                          <p className="text-[13px] text-[#374151] font-medium">{value || '—'}</p>
+                          {/* break-words so long addresses wrap instead of overflowing */}
+                          <p className="text-[13px] text-[#374151] font-medium break-words">{value || '—'}</p>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Items */}
-                <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100 overflow-scroll">
+                {/* Items — removed overflow-scroll, expands naturally */}
+                <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Items</p>
                     <span className="text-[11px] text-[#FF5934] font-bold">{selectedItem.items.length} items</span>
@@ -914,24 +931,37 @@ const Order = () => {
                       return (
                         <div key={item._id} className="flex items-center gap-3 bg-white rounded-xl border border-gray-100 p-2.5">
                           {item.productId?.image
-                            ? <img src={item.productId.image} alt={item.productId.englishTitle} className="w-11 h-11 rounded-lg object-cover flex-shrink-0 border border-gray-100" />
-                            : <div className="w-11 h-11 rounded-lg bg-gray-50 flex items-center justify-center flex-shrink-0 border border-gray-100"><MdShoppingBag size={16} className="text-gray-300" /></div>
+                            ? <img
+                                src={item.productId.image}
+                                alt={item.productId.englishTitle}
+                                className="w-11 h-11 rounded-lg object-cover flex-shrink-0 border border-gray-100"
+                              />
+                            : <div className="w-11 h-11 rounded-lg bg-gray-50 flex items-center justify-center flex-shrink-0 border border-gray-100">
+                                <MdShoppingBag size={16} className="text-gray-300" />
+                              </div>
                           }
                           <div className="flex-1 min-w-0">
-                            <p className="text-[12px] font-semibold text-[#111827] truncate">{item.productId?.englishTitle}</p>
+                            {/* Allow product name to wrap fully — no truncate */}
+                            <p className="text-[12px] font-semibold text-[#111827] break-words leading-snug">
+                              {item.productId?.englishTitle}
+                            </p>
                             {disc
-                              ? <p className="text-[11px]"><span className="text-gray-400 line-through">{Number(item.price).toFixed(2)} Rs</span><span className="text-emerald-600 font-semibold ml-1">{Number(item.discountedPrice).toFixed(2)} Rs</span></p>
-                              : <p className="text-[11px] text-[#FF5934] font-medium">{Number(item.price).toFixed(2)} Rs</p>
+                              ? <p className="text-[11px] mt-0.5">
+                                  <span className="text-gray-400 line-through">{Number(item.price).toFixed(2)} Rs</span>
+                                  <span className="text-emerald-600 font-semibold ml-1">{Number(item.discountedPrice).toFixed(2)} Rs</span>
+                                </p>
+                              : <p className="text-[11px] text-[#FF5934] font-medium mt-0.5">{Number(item.price).toFixed(2)} Rs</p>
                             }
                           </div>
-                          <span className="inline-flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-lg text-[11px] font-bold text-[#374151] flex-shrink-0">
+                          <span className="inline-flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-lg text-[11px] font-bold text-[#374151] flex-shrink-0 whitespace-nowrap">
                             {item.quantity} {unit}
                           </span>
                         </div>
                       );
                     })}
                   </div>
-                  <div className="px-4 py-3 border-t border-gray-100 flex justify-between items-center bg-white">
+                  {/* Total row */}
+                  <div className="px-4 py-3 border-t border-gray-100 flex justify-between items-center bg-white rounded-b-2xl">
                     <span className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total</span>
                     <span className="text-[15px] font-bold text-[#111827]">Rs. {selectedItem.total}</span>
                   </div>
@@ -949,13 +979,22 @@ const Order = () => {
                     className="bg-[#F9FAFB] border border-gray-200 focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-3 py-2.5 rounded-xl w-full outline-none text-sm text-[#111827] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="" disabled>Change status…</option>
-                    {orderStatuses.map(s => <option key={s} value={s}>{displayStatus(s)}</option>)}
+                    {orderStatuses.map(s => (
+                      <option key={s} value={s}>{displayStatus(s)}</option>
+                    ))}
                   </select>
                 </div>
+
+                {/* Bottom padding so last item clears the sticky footer */}
+                <div className="h-2" />
               </div>
 
-              <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex-shrink-0">
-                <button onClick={() => setShow(false)} className="w-full h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold transition-all shadow-md shadow-orange-100">
+              {/* ── Sticky footer ── */}
+              <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex-shrink-0 bg-white">
+                <button
+                  onClick={() => setShow(false)}
+                  className="w-full h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold transition-all shadow-md shadow-orange-100"
+                >
                   Close
                 </button>
               </div>

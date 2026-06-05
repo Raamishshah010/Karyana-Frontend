@@ -880,7 +880,7 @@ const ReportsDebit = () => {
                         <table className="w-full">
                           <thead>
                             <tr className="bg-[#FAFAFA] border-b border-gray-100">
-                              {['#','A/C No.','Retailer / City','Salesperson','Amount (Rs.)','Date','Status'].map(h => (
+                              {['#','A/C No.','Retailer / Site','Salesperson','Amount (Rs.)','Date','Status'].map(h => (
                                 <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 whitespace-nowrap">{h}</th>
                               ))}
                             </tr>
@@ -909,7 +909,7 @@ const ReportsDebit = () => {
                                   {/* <td className="px-4 py-3">
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold ${typeBadge(row.type)}`}>{row.type}</span>
                                   </td> */}
-                                  <td className="px-4 py-3 text-right">
+                                  <td className="px-4 py-3 text-center">
                                     <span className="text-[13px] font-bold text-[#FF5934]">Rs. {fmt(row.amount)}</span>
                                   </td>
                                   <td className="px-4 py-3">

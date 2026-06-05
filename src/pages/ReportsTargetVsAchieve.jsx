@@ -495,7 +495,7 @@ const ReportsTargetVsAchieve = () => {
             {/* Site / Location dropdown */}
             <div className="flex-1 min-w-[200px] rta-dropdown-wrap">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                <MdLocationOn size={12} className="text-[#FF5934]" /> Site / Location
+                <MdLocationOn size={12} className="text-[#FF5934]" /> Site
               </label>
               <div
                 className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
@@ -509,7 +509,7 @@ const ReportsTargetVsAchieve = () => {
                     </span>
                   </div>
                 ) : (
-                  <span className="text-[13px] text-[#9CA3AF] flex-1">All locations</span>
+                  <span className="text-[13px] text-[#9CA3AF] flex-1">All Sites</span>
                 )}
                 <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform flex-shrink-0 ${cityDropOpen ? 'rotate-180' : ''}`} />
               </div>
@@ -521,7 +521,7 @@ const ReportsTargetVsAchieve = () => {
                       className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 ${!selectedCity ? 'bg-orange-50' : ''}`}>
                       <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-[11px] font-bold text-gray-400">All</div>
                       <div className="flex-1">
-                        <p className="text-[13px] font-medium text-[#374151]">All Locations</p>
+                        <p className="text-[13px] font-medium text-[#374151]">All Sites</p>
                         <p className="text-[11px] text-[#9CA3AF]">Combined report</p>
                       </div>
                       {!selectedCity && <MdCheckCircle size={15} className="text-[#FF5934]" />}

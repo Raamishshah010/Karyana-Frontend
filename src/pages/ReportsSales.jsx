@@ -461,10 +461,10 @@ const ReportsSales = () => {
             {cities.length > 0 && (
               <div className="flex-1 min-w-[150px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                  <MdLocationOn size={12} className="text-[#FF5934]" /> City
+                  <MdLocationOn size={12} className="text-[#FF5934]" /> Site
                 </label>
                 <select value={selectedCity} onChange={e => setSelectedCity(e.target.value)} className="rs-input rs-select">
-                  <option value="">All Cities</option>
+                  <option value="">All Sites</option>
                   {cities.map(c => <option key={c._id} value={c._id}>{c.name||c.cityName}</option>)}
                 </select>
               </div>
