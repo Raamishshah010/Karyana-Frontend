@@ -97,11 +97,16 @@ const paginate = (rows, page, limit) => {
   return rows.slice(start, start + limit);
 };
 
-/* ─────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════
    LOAD FORM PDF GENERATOR
-   Matches the reference PDF exactly.
-   Only includes orders with status = 'Placed'
-───────────────────────────────────────── */
+   Exactly matches the reference PDF layout:
+   - Logo top-left
+   - Title: "Load Form [ {formNo} ] - Open"
+   - Meta block: Deliveryman, PJP Name, Order Booker, For Date, PJP Date, Print Date
+   - Table 1: SKU summary grouped by category with bordered cells
+   - Table 2: Invoice/store detail with bordered cells + Amount column
+   - Signature lines at bottom
+═══════════════════════════════════════════════════════════ */
 const generateLoadFormPDF = (orders, salesperson, date) => {
   // Filter only Placed orders
   const placedOrders = orders.filter(o =>
@@ -113,70 +118,35 @@ const generateLoadFormPDF = (orders, salesperson, date) => {
     return;
   }
 
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pw = doc.internal.pageSize.getWidth();   // 210
-  const ph = doc.internal.pageSize.getHeight();  // 297
-  const ml = 14, mr = 14;
-  const cw = pw - ml - mr;                       // 182
-
-  // ── Colours ──
-  const BLACK  = [0, 0, 0];
-  const DARK   = [17, 24, 39];
-  const GRAY   = [107, 114, 128];
-  const LGRAY  = [229, 231, 235];
-  const TBLHDR = [245, 245, 245];   // table header bg
-  const ACCENT = [255, 89, 52];     // orange
-
-  const formatDate = (d) => {
-    if (!d) return '—';
-    try {
-      return new Date(d).toLocaleDateString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit' });
-    } catch { return '—'; }
-  };
+  // ── Open new tab with full HTML matching the reference PDF ──
+  const spName     = salesperson?.name || '—';
+  const spCode     = salesperson?.code || salesperson?.employeeCode || '';
+  const deliveryman = spCode ? `${spName} [ ${spCode} ]` : spName;
+  const forDate    = date || '—';
 
   const printDateFull = new Date().toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   }) + '   ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
-  const spName  = salesperson?.name || '—';
-  const forDate = date || '—';
-
-  // ── Helpers ──
-  const setFont  = (style = 'normal', size = 9) => { doc.setFont('helvetica', style); doc.setFontSize(size); };
-  const setColor = (rgb) => doc.setTextColor(...rgb);
-
-  const drawRect = (x, y, w, h, fillRgb, strokeRgb) => {
-    if (fillRgb)   { doc.setFillColor(...fillRgb);   doc.rect(x, y, w, h, strokeRgb ? 'FD' : 'F'); }
-    if (strokeRgb) { doc.setDrawColor(...strokeRgb); doc.rect(x, y, w, h, fillRgb ? 'FD' : 'D'); }
-  };
-
-  const drawLine = (x1, y1, x2, y2, color = LGRAY, lw = 0.3) => {
-    doc.setDrawColor(...color); doc.setLineWidth(lw);
-    doc.line(x1, y1, x2, y2);
-  };
-
-  const textL  = (txt, x, y) => doc.text(String(txt ?? ''), x, y, { align: 'left' });
-  const textR  = (txt, x, y) => doc.text(String(txt ?? ''), x, y, { align: 'right' });
-  const textC  = (txt, x, y) => doc.text(String(txt ?? ''), x, y, { align: 'center' });
+  // Form number: use first order's orderId prefix or generate one
+  const formNo = orders[0]?.loadFormId || orders[0]?.formId ||
+    `LF${String(Date.now()).slice(-7)}`;
 
   // ── Build SKU summary (grouped by product across all placed orders) ──
   const skuMap = {};
-  placedOrders.forEach((order, oi) => {
+  placedOrders.forEach((order) => {
     (order.items || []).forEach(item => {
-      const pid   = item.productId?._id || item.productId || `p${oi}`;
-      const title = item.productId?.englishTitle || item.productId?.title || '—';
-      const cat   = item.productId?.category?.name || item.productId?.categoryName || 'General';
-      const mfgCode = item.productId?.manufacturerCode || item.productId?.sku || '—';
-      const qty   = Number(item.quantity || 0);
-      const price = Number(item.discountedPrice || 0) > 0 && Number(item.discountedPrice) < Number(item.price)
-        ? Number(item.discountedPrice)
-        : Number(item.price || 0);
+      const pid     = item.productId?._id || item.productId || item._id || 'unknown';
+      const title   = item.productId?.englishTitle || item.productId?.title || item.title || '—';
+      const cat     = item.productId?.category?.name || item.productId?.categoryName || 'General';
+      const mfgCode = item.productId?.manufacturerCode || item.productId?.sku || item.productId?.mfgCode || '—';
+      const qty     = Number(item.quantity || 0);
+      const unitsPerCarton = Number(item.productId?.unitsPerCarton || item.productId?.packSize || 0);
 
       if (!skuMap[pid]) {
-        skuMap[pid] = { pid, title, cat, mfgCode, issuedUnits: 0, cartons: 0, sale: 0 };
+        skuMap[pid] = { pid, title, cat, mfgCode, issuedUnits: 0, unitsPerCarton, sale: 0 };
       }
       skuMap[pid].issuedUnits += qty;
-      skuMap[pid].sale        += qty * price;
     });
   });
 
@@ -187,253 +157,328 @@ const generateLoadFormPDF = (orders, salesperson, date) => {
     catMap[s.cat].push(s);
   });
 
-  // ─────────────────────────────────────────
-  //  PAGE DRAW
-  // ─────────────────────────────────────────
-  let y = 12;
+  // ── Helper: compute cartons ──
+  const getCartons = (sku) => {
+    if (sku.unitsPerCarton > 0) return Math.floor(sku.issuedUnits / sku.unitsPerCarton);
+    return '-';
+  };
 
-  // ── Title ──
-  setFont('bold', 14); setColor(DARK);
-  textC(`Load Form - ${spName}`, pw / 2, y);
-  y += 5;
-  drawLine(ml, y, pw - mr, y, LGRAY, 0.4);
-  y += 5;
-
-  // ── Meta info block ──
-  setFont('bold', 8.5); setColor(DARK);
-  doc.text('Salesperson:', ml, y);
-  setFont('normal', 8.5);
-  doc.text(spName, ml + 28, y);
-
-  setFont('bold', 8.5); setColor(DARK);
-  doc.text('For Date:', pw - mr - 55, y);
-  setFont('normal', 8.5);
-  doc.text(forDate, pw - mr - 30, y);
-  y += 5;
-
-  setFont('bold', 8.5); setColor(DARK);
-  doc.text('Print Date:', ml, y);
-  setFont('normal', 8.5);
-  doc.text(printDateFull, ml + 28, y);
-  y += 7;
-
-  drawLine(ml, y, pw - mr, y, LGRAY, 0.4);
-  y += 5;
-
-  // ── TABLE 1: SKU Summary ──
-  // Columns: SKU | SKU Mfg Code | Issued Units | Issued Free Units | Total Issued (Units/Packet/Cartons) | Total Returned (Units/Packet/Cartons) | Sale
-  const t1Cols = [
-    { label: 'SKU',                  x: 0,    w: 45, align: 'left'   },
-    { label: 'SKU Mfg Code',         x: 45,   w: 25, align: 'center' },
-    { label: 'Issued\nUnits',        x: 70,   w: 16, align: 'right'  },
-    { label: 'Issued\nFree Units',   x: 86,   w: 16, align: 'right'  },
-    { label: 'Units',                x: 102,  w: 12, align: 'right'  },
-    { label: 'Packet',               x: 114,  w: 12, align: 'right'  },
-    { label: 'Cartons',              x: 126,  w: 14, align: 'right'  },
-    { label: 'Units',                x: 140,  w: 12, align: 'right'  },
-    { label: 'Packet',               x: 152,  w: 12, align: 'right'  },
-    { label: 'Cartons',              x: 164,  w: 12, align: 'right'  },
-    { label: 'Sale',                 x: 176,  w: 6,  align: 'right'  },
-  ];
-
-  const t1H = 14; // header height (two rows: group labels + col labels)
-  drawRect(ml, y, cw, t1H, TBLHDR, LGRAY);
-
-  // Group header row
-  setFont('bold', 7); setColor(DARK);
-  const groupLabelY = y + 4.5;
-  textC('Total Issued',    ml + 102 + (14 + 12 + 14) / 2 - 5,  groupLabelY);
-  textC('Total Returned',  ml + 140 + (12 + 12 + 12) / 2 - 5,  groupLabelY);
-  // Dividers for groups
-  drawLine(ml + 102, y,     ml + 102, y + t1H, LGRAY, 0.2);
-  drawLine(ml + 140, y,     ml + 140, y + t1H, LGRAY, 0.2);
-  drawLine(ml + 176, y,     ml + 176, y + t1H, LGRAY, 0.2);
-  // Horizontal separator between group row and col labels
-  drawLine(ml, y + 6.5, ml + cw, y + 6.5, LGRAY, 0.2);
-
-  // Column label row
-  const t1ColY = y + 11;
-  t1Cols.forEach(c => {
-    setFont('bold', 6.5); setColor(GRAY);
-    const label = c.label.replace('\n', ' ');
-    if (c.align === 'right')  textR(label, ml + c.x + c.w - 1, t1ColY);
-    else if (c.align === 'center') textC(label, ml + c.x + c.w / 2, t1ColY);
-    else                     textL(label, ml + c.x + 1, t1ColY);
-  });
-  // Border top + bottom of header
-  drawLine(ml, y, ml + cw, y, DARK, 0.4);
-  drawLine(ml, y + t1H, ml + cw, y + t1H, DARK, 0.4);
-  y += t1H;
-
-  const ROW_H = 6.5;
-
-  // SKU rows grouped by category
-  let skuGrandIssued = 0, skuGrandSale = 0;
+  // ── Build SKU table rows HTML ──
+  let skuRowsHtml = '';
+  let skuGrandIssued = 0;
 
   Object.entries(catMap).forEach(([cat, skus]) => {
-    // Category row
-    if (y + ROW_H > ph - 20) { doc.addPage(); y = 15; }
-    setFont('bold', 7.5); setColor(DARK);
-    textL(cat.toUpperCase(), ml + 1, y + 4.5);
-    drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, LGRAY, 0.2);
-    y += ROW_H;
+    skuRowsHtml += `
+      <tr>
+        <td colspan="11" style="background:#f0f0f0;font-weight:bold;font-size:11.5px;padding:4px 7px;border:1px solid #bbb;">
+          ${cat.toUpperCase()}
+        </td>
+      </tr>`;
 
-    let catIssued = 0, catSale = 0;
-
+    let catIssued = 0;
     skus.forEach(sku => {
-      if (y + ROW_H > ph - 20) { doc.addPage(); y = 15; }
-      setFont('normal', 7.5); setColor(DARK);
-      textL(sku.title, ml + t1Cols[0].x + 1, y + 4.5);
-      textC(sku.mfgCode, ml + t1Cols[1].x + t1Cols[1].w / 2, y + 4.5);
-      textR(String(sku.issuedUnits), ml + t1Cols[2].x + t1Cols[2].w - 1, y + 4.5);
-      textR('-', ml + t1Cols[3].x + t1Cols[3].w - 1, y + 4.5);
-      textR('-', ml + t1Cols[4].x + t1Cols[4].w - 1, y + 4.5);
-      textR('-', ml + t1Cols[5].x + t1Cols[5].w - 1, y + 4.5);
-      textR(String(sku.cartons || Math.floor(sku.issuedUnits / 10)), ml + t1Cols[6].x + t1Cols[6].w - 1, y + 4.5);
-      textR('-', ml + t1Cols[7].x + t1Cols[7].w - 1, y + 4.5);
-      textR('-', ml + t1Cols[8].x + t1Cols[8].w - 1, y + 4.5);
-      textR('-', ml + t1Cols[9].x + t1Cols[9].w - 1, y + 4.5);
-      textR(String(sku.issuedUnits), ml + t1Cols[10].x + t1Cols[10].w - 1, y + 4.5);
-      drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, LGRAY, 0.15);
+      const cartons = getCartons(sku);
+      skuRowsHtml += `
+        <tr>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;">${sku.title}</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">${sku.mfgCode}</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">${sku.issuedUnits}</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">-</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">-</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">-</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">${cartons}</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">-</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;"></td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">-</td>
+          <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:right;">${sku.issuedUnits}</td>
+        </tr>`;
       catIssued += sku.issuedUnits;
-      catSale   += sku.sale;
-      y += ROW_H;
     });
 
-    // Category total row
-    if (y + ROW_H > ph - 20) { doc.addPage(); y = 15; }
-    drawRect(ml, y, cw, ROW_H, [250, 250, 250], null);
-    setFont('bold', 7.5); setColor(DARK);
-    textR('Total', ml + t1Cols[1].x + t1Cols[1].w - 1, y + 4.5);
-    textR(String(catIssued), ml + t1Cols[2].x + t1Cols[2].w - 1, y + 4.5);
-    textR('-', ml + t1Cols[3].x + t1Cols[3].w - 1, y + 4.5);
-    textR('-', ml + t1Cols[4].x + t1Cols[4].w - 1, y + 4.5);
-    textR('-', ml + t1Cols[5].x + t1Cols[5].w - 1, y + 4.5);
-    textR(String(Math.floor(catIssued / 10)), ml + t1Cols[6].x + t1Cols[6].w - 1, y + 4.5);
-    textR('-', ml + t1Cols[7].x + t1Cols[7].w - 1, y + 4.5);
-    textR('-', ml + t1Cols[8].x + t1Cols[8].w - 1, y + 4.5);
-    textR('-', ml + t1Cols[9].x + t1Cols[9].w - 1, y + 4.5);
-    textR(String(catIssued), ml + t1Cols[10].x + t1Cols[10].w - 1, y + 4.5);
-    drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, DARK, 0.4);
+    const catCartons = skus.reduce((sum, s) => {
+      const c = getCartons(s);
+      return sum + (typeof c === 'number' ? c : 0);
+    }, 0);
+
+    skuRowsHtml += `
+      <tr style="background:#f7f7f7;font-weight:bold;">
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;"></td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:right;font-weight:bold;">Total</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;font-weight:bold;">${catIssued}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;font-weight:bold;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;font-weight:bold;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;font-weight:bold;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;font-weight:bold;">${catCartons || '-'}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;font-weight:bold;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;font-weight:bold;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;font-weight:bold;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:right;font-weight:bold;">${catIssued}</td>
+      </tr>`;
+
     skuGrandIssued += catIssued;
-    skuGrandSale   += catSale;
-    y += ROW_H;
   });
 
-  y += 8;
-
-  // ── TABLE 2: Invoice / Store Detail ──
-  if (y + 20 > ph - 20) { doc.addPage(); y = 15; }
-
-  const t2Cols = [
-    { label: 'S.\nNo#',             x: 0,    w: 10,  align: 'center' },
-    { label: 'Invoice\nNumber',     x: 10,   w: 20,  align: 'center' },
-    { label: 'Store Name / Owner Name', x: 30, w: 50, align: 'left'  },
-    { label: 'Order\nBooker',       x: 80,   w: 22,  align: 'center' },
-    { label: 'Status',              x: 102,  w: 15,  align: 'center' },
-    { label: 'Issued\nUnits',       x: 117,  w: 15,  align: 'right'  },
-    { label: 'Issued\nFree Units',  x: 132,  w: 15,  align: 'right'  },
-    { label: 'Total\nIssued Units', x: 147,  w: 15,  align: 'right'  },
-    { label: '(Returned -\nExtra) Units', x: 162, w: 14, align: 'right' },
-    { label: 'Sales',               x: 176,  w: 6,   align: 'right'  },
-  ];
-
-  const t2H = 12;
-  drawRect(ml, y, cw, t2H, TBLHDR, LGRAY);
-  drawLine(ml, y, ml + cw, y, DARK, 0.4);
-  drawLine(ml, y + t2H, ml + cw, y + t2H, DARK, 0.4);
-
-  const t2HdrY = y + 8;
-  t2Cols.forEach(c => {
-    // two-line label
-    const lines = c.label.split('\n');
-    setFont('bold', 6.5); setColor(GRAY);
-    lines.forEach((line, li) => {
-      const lineY = t2HdrY - (lines.length === 2 ? 3 : 0) + li * 4;
-      if (c.align === 'right')  textR(line, ml + c.x + c.w - 1, lineY);
-      else if (c.align === 'center') textC(line, ml + c.x + c.w / 2, lineY);
-      else                      textL(line, ml + c.x + 1, lineY);
-    });
-  });
-  // Add Amount column header
-  setFont('bold', 6.5); setColor(GRAY);
-  textR('Amount', ml + cw - 1, t2HdrY);
-
-  y += t2H;
-
-  let grandIssued = 0, grandSale = 0, grandTotal = 0;
+  // ── Build Invoice/Store table rows HTML ──
+  let invRowsHtml = '';
+  let grandIssued = 0, grandSale = 0, grandAmount = 0;
 
   placedOrders.forEach((order, idx) => {
-    if (y + ROW_H > ph - 25) { doc.addPage(); y = 15; }
-
     const orderIssued = (order.items || []).reduce((s, i) => s + Number(i.quantity || 0), 0);
-    const orderTotal  = Number(order.total || 0);
-    const orderSale   = orderIssued;
-    const invoiceNo   = order.orderId || order._id?.slice(-8).toUpperCase() || '—';
+    const orderAmount = Number(order.total || 0);
+    const invoiceNo   = order.orderId || order.invoiceNo || order._id?.slice(-8).toUpperCase() || '—';
     const storeName   = order.RetailerUser?.name || '—';
     const phone       = order.phoneNumber || '';
     const address     = order.shippingAddress || '';
-    const storeLabel  = storeName + (phone ? ` / ${phone}` : '');
-    const booker      = order.SaleUser?.name || spName;
+    // Match PDF: "Store Name - address / phone"
+    let storeLabel = storeName;
+    if (address) storeLabel += ` - ${address}`;
+    if (phone) storeLabel += ` / ${phone}`;
+    const booker = order.SaleUser?.name || spName;
+    const bookerCode = order.SaleUser?.code || order.SaleUser?.employeeCode || '';
+    const bookerLabel = bookerCode
+      ? `${booker.split(' ')[0]} [${bookerCode}]`
+      : booker.split(' ').slice(0, 2).join(' ');
+    const rowBg = idx % 2 === 0 ? '#ffffff' : '#f9f9f9';
 
-    // alternating row bg
-    if (idx % 2 === 0) drawRect(ml, y, cw, ROW_H, [252, 252, 252], null);
-
-    setFont('normal', 7); setColor(DARK);
-    textC(String(idx + 1),   ml + t2Cols[0].x + t2Cols[0].w / 2, y + 4.5);
-    textC(invoiceNo,          ml + t2Cols[1].x + t2Cols[1].w / 2, y + 4.5);
-
-    // Store name — clip to fit
-    const maxStoreW = t2Cols[2].w - 2;
-    const storeLines = doc.splitTextToSize(storeLabel, maxStoreW);
-    setFont('normal', 7); setColor(DARK);
-    doc.text(storeLines[0], ml + t2Cols[2].x + 1, y + 4.5);
-
-    textC(booker.split(' ').slice(0, 2).join(' '), ml + t2Cols[3].x + t2Cols[3].w / 2, y + 4.5);
-    textC('Open',             ml + t2Cols[4].x + t2Cols[4].w / 2, y + 4.5);
-    textR(String(orderIssued), ml + t2Cols[5].x + t2Cols[5].w - 1, y + 4.5);
-    textR('-',                 ml + t2Cols[6].x + t2Cols[6].w - 1, y + 4.5);
-    textR(String(orderIssued), ml + t2Cols[7].x + t2Cols[7].w - 1, y + 4.5);
-    textR('- - -',             ml + t2Cols[8].x + t2Cols[8].w - 1, y + 4.5);
-    textR(String(orderSale),   ml + t2Cols[9].x + t2Cols[9].w - 1, y + 4.5);
-    textR(orderTotal.toLocaleString('en-PK'), ml + cw - 1, y + 4.5);
-
-    drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, LGRAY, 0.15);
+    invRowsHtml += `
+      <tr style="background:${rowBg};">
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">${idx + 1}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">${invoiceNo}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;">${storeLabel}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">${bookerLabel}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">Open</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">${orderIssued}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">${orderIssued}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:center;">- - -</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:right;">${orderIssued}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-size:11px;text-align:right;">${orderAmount.toLocaleString('en-PK')}</td>
+      </tr>`;
 
     grandIssued += orderIssued;
-    grandSale   += orderSale;
-    grandTotal  += orderTotal;
-    y += ROW_H;
+    grandSale   += orderIssued;
+    grandAmount += orderAmount;
   });
 
-  // Grand total row
-  if (y + ROW_H > ph - 25) { doc.addPage(); y = 15; }
-  drawRect(ml, y, cw, ROW_H, TBLHDR, null);
-  drawLine(ml, y, ml + cw, y, DARK, 0.4);
-  setFont('bold', 7.5); setColor(DARK);
-  textR('Total', ml + t2Cols[4].x + t2Cols[4].w - 1, y + 4.5);
-  textR(String(grandIssued),  ml + t2Cols[5].x + t2Cols[5].w - 1, y + 4.5);
-  textR('-',                  ml + t2Cols[6].x + t2Cols[6].w - 1, y + 4.5);
-  textR(String(grandIssued),  ml + t2Cols[7].x + t2Cols[7].w - 1, y + 4.5);
-  textR('-',                  ml + t2Cols[8].x + t2Cols[8].w - 1, y + 4.5);
-  textR(String(grandSale),    ml + t2Cols[9].x + t2Cols[9].w - 1, y + 4.5);
-  textR(grandTotal.toLocaleString('en-PK'), ml + cw - 1, y + 4.5);
-  drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, DARK, 0.4);
-  y += ROW_H + 20;
+  // ── Full HTML document ──
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Load Form [ ${formNo} ] - Open</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    color: #000;
+    background: #fff;
+    padding: 20px 24px;
+  }
+  .page-wrap { max-width: 960px; margin: 0 auto; }
 
-  // ── Signature lines ──
-  if (y + 20 > ph - 10) { doc.addPage(); y = 15; }
-  const sigY  = y + 8;
-  const sig1X = ml + 10;
-  const sig2X = pw - mr - 60;
-  drawLine(sig1X, sigY, sig1X + 50, sigY, DARK, 0.4);
-  drawLine(sig2X, sigY, sig2X + 50, sigY, DARK, 0.4);
-  setFont('normal', 7.5); setColor(GRAY);
-  textC('(Deliveryman Signature)', sig1X + 25, sigY + 5);
-  textC('(Stock Keeper Signature)', sig2X + 25, sigY + 5);
+  /* Header row: logo left, nothing right (title is centered below) */
+  .header-top {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
 
-  doc.save(`LoadForm_${spName.replace(/\s+/g, '_')}_${forDate}.pdf`);
-  toast.success('Load Form PDF generated!');
+  /* Title */
+  .form-title {
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 12px;
+    letter-spacing: 0.01em;
+  }
+
+  /* Meta info box */
+  .meta-box {
+    border: 1px solid #ccc;
+    padding: 8px 14px 6px 14px;
+    margin-bottom: 18px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px 20px;
+    font-size: 12px;
+  }
+  .meta-row { display: flex; gap: 6px; align-items: baseline; }
+  .meta-label { font-weight: bold; white-space: nowrap; min-width: 100px; }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 11px;
+  }
+  th {
+    background: #f0f0f0;
+    font-weight: bold;
+    text-align: center;
+    border: 1px solid #bbb;
+    padding: 5px 5px;
+    font-size: 10.5px;
+    vertical-align: middle;
+  }
+  .th-left { text-align: left; }
+  td { vertical-align: middle; }
+
+  /* Group label row in table 1 */
+  .group-th {
+    background: #e8e8e8;
+    font-weight: bold;
+    font-size: 11px;
+    text-align: center;
+    border: 1px solid #bbb;
+    padding: 4px 5px;
+  }
+
+  /* Signature section */
+  .sig-section {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 50px;
+    padding: 0 30px;
+  }
+  .sig-block { text-align: center; width: 220px; }
+  .sig-line { border-top: 1px solid #000; margin-bottom: 5px; width: 100%; }
+  .sig-label { font-size: 11px; color: #333; }
+
+  @media print {
+    body { padding: 8px; }
+    @page { size: A4; margin: 8mm; }
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- ═══ LOGO + TITLE ═══ -->
+  
+
+  <div class="form-title">Load Form [ ${formNo} ] - Open</div>
+
+  <!-- ═══ META INFO ═══ -->
+  <div class="meta-box">
+    <div class="meta-row">
+      <span class="meta-label">Deliveryman:</span>
+      <span>${deliveryman}</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">For Date:</span>
+      <span>${forDate}</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">PJP Name:</span>
+      <span>${salesperson?.pjpName || 'Un planned PJP'}</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">PJP Date:</span>
+      <span>${salesperson?.pjpDate || forDate}</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">Order Booker:</span>
+      <span>${deliveryman}</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">Print Date:</span>
+      <span>${printDateFull}</span>
+    </div>
+  </div>
+
+  <!-- ═══ TABLE 1: SKU SUMMARY ═══ -->
+  <table>
+    <thead>
+      <tr>
+        <th rowspan="2" class="th-left" style="width:26%;">SKU</th>
+        <th rowspan="2" style="width:11%;">SKU<br>Manufacturer<br>Code</th>
+        <th rowspan="2" style="width:7%;">Issued<br>Units</th>
+        <th rowspan="2" style="width:7%;">Issued<br>Free<br>Units</th>
+        <th colspan="3" class="group-th">Total Issued</th>
+        <th colspan="3" class="group-th">Total Returned</th>
+        <th rowspan="2" style="width:6%;">Sale</th>
+      </tr>
+      <tr>
+        <th style="width:5%;">Units</th>
+        <th style="width:6%;">Packet</th>
+        <th style="width:7%;">Cartons</th>
+        <th style="width:5%;">Units</th>
+        <th style="width:6%;">Packet</th>
+        <th style="width:7%;">Cartons</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${skuRowsHtml}
+    </tbody>
+  </table>
+
+  <!-- ═══ TABLE 2: INVOICE / STORE DETAIL ═══ -->
+  <table>
+    <thead>
+      <tr>
+        <th style="width:4%;">S.<br>No#</th>
+        <th style="width:8%;">Invoice<br>Number</th>
+        <th class="th-left" style="width:27%;">Store Name / Owner Name</th>
+        <th style="width:10%;">Order<br>Booker</th>
+        <th style="width:6%;">Status</th>
+        <th style="width:6%;">Issued<br>Units</th>
+        <th style="width:6%;">Issued<br>Free<br>Units</th>
+        <th style="width:7%;">Total<br>Issued<br>Units</th>
+        <th style="width:8%;">( Returned -<br>Extra ) Units</th>
+        <th style="width:5%;">Sales</th>
+        <th style="width:8%;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${invRowsHtml}
+      <!-- Grand Total Row -->
+      <tr style="background:#f0f0f0;font-weight:bold;">
+        <td colspan="4" style="border:1px solid #bbb;padding:5px 7px;"></td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-weight:bold;text-align:center;">Total</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-weight:bold;text-align:center;">${grandIssued}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-weight:bold;text-align:center;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-weight:bold;text-align:center;">${grandIssued}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-weight:bold;text-align:center;">-</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-weight:bold;text-align:right;">${grandSale}</td>
+        <td style="border:1px solid #bbb;padding:5px 7px;font-weight:bold;text-align:right;">${grandAmount.toLocaleString('en-PK')}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ═══ SIGNATURES ═══ -->
+  <div class="sig-section">
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-label">(Deliveryman Signature)</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-label">(Stock Keeper Signature)</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  window.onload = () => {
+    // Small delay to allow fonts/layout to settle before print dialog
+    setTimeout(() => window.print(), 300);
+  };
+</script>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (win) {
+    win.document.write(html);
+    win.document.close();
+  } else {
+    toast.error('Please allow pop-ups to open the Load Form');
+  }
+
+  toast.success('Load Form opened in new tab!');
 };
 
 /* ─────────────────────────────────────────
@@ -522,7 +567,7 @@ const generateOrderPDF = (item) => {
       </div>
       <div style="text-align:center;margin-top:24px;font-size:11px;color:#9ca3af">Generated on ${new Date().toLocaleString()}</div>
     </div>
-    <script>window.onload = () => { window.print(); }</script>
+    <script>window.onload = () => { window.print(); }<\/script>
     </body></html>`;
 
   const win = window.open('', '_blank');
@@ -765,7 +810,7 @@ const Order = () => {
     } catch (e) { toast.error(e.message); }
   };
 
-  /* ── Load Form: generate PDF ── */
+  /* ── Load Form: generate and open in new tab ── */
   const loadFormHandler = async () => {
     if (!loadFormData.date || !loadFormData.salePerson) {
       return toast.error('Please select a salesperson and date');
@@ -773,7 +818,6 @@ const Order = () => {
     try {
       setLoadFormGenerating(true);
 
-      // Fetch orders for that salesperson + date
       const formattedDate = toMMDDYYYY(loadFormData.date);
       const res = await getOrdersBySalesPersonAndDate(
         { salePerson: loadFormData.salePerson, date: formattedDate },
@@ -789,7 +833,7 @@ const Order = () => {
 
       const sp = salesPersons.find(s => s._id === loadFormData.salePerson);
 
-      // Generate PDF with only Placed orders
+      // Open in new tab matching reference PDF layout
       generateLoadFormPDF(orders, sp, loadFormData.date);
 
       setIsLoadFormVisible(false);
@@ -868,7 +912,6 @@ const Order = () => {
             <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Orders</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">{data.length} orders on this page</p>
           </div>
-          {/* Header action buttons */}
           <div className="flex items-center gap-2">
             <button
               onClick={invoiceHandler}
@@ -887,7 +930,6 @@ const Order = () => {
 
         {/* ── Filter Bar ── */}
         <div className="flex flex-wrap items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm mb-5">
-          {/* Search */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2 flex-1 min-w-[180px]">
             <MdSearch size={18} className="text-[#9CA3AF] flex-shrink-0" />
             <input
@@ -903,9 +945,7 @@ const Order = () => {
               </button>
             )}
           </div>
-          {/* Date Range */}
           <DateRangePicker submitHandler={dateRangeHandler} sd={startDate} ed={endDate} />
-          {/* Sales Person */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <MdPerson size={15} className="text-[#9CA3AF] flex-shrink-0" />
             <select
@@ -919,7 +959,6 @@ const Order = () => {
               ))}
             </select>
           </div>
-          {/* Status */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
             <select
@@ -933,7 +972,6 @@ const Order = () => {
               ))}
             </select>
           </div>
-          {/* Clear Filters */}
           {filterCount > 0 && (
             <button
               onClick={refreshData}
@@ -945,7 +983,6 @@ const Order = () => {
               </span>
             </button>
           )}
-          {/* Reset */}
           <button
             onClick={refreshData}
             className="flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#FF5934] px-3 py-2 rounded-xl hover:bg-orange-50 transition-all"
@@ -1074,8 +1111,6 @@ const Order = () => {
         {isLoadFormVisible && (
           <div className="ord-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
             <div className="ord-modal-card bg-white w-full max-w-[440px] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-
-              {/* Modal header */}
               <div className="relative bg-gradient-to-r from-[#FF5934] to-[#ff8c6b] px-6 pt-5 pb-10">
                 <div className="absolute inset-0 opacity-10"
                   style={{ backgroundImage: "radial-gradient(circle at 80% 50%, white 1px, transparent 1px)", backgroundSize: "20px 20px" }} />
@@ -1093,11 +1128,7 @@ const Order = () => {
                   </button>
                 </div>
               </div>
-
-              {/* Fields */}
               <div className="px-6 pt-7 pb-6 flex flex-col gap-5 -mt-5 relative z-10">
-
-                {/* Salesperson card */}
                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                   <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-2">
                     <MdPerson size={12} className="text-[#FF5934]" /> Sales Person <span className="text-[#FF5934]">*</span>
@@ -1111,8 +1142,6 @@ const Order = () => {
                     {salesPersons.map(it => <option value={it._id} key={it._id}>{it.name}</option>)}
                   </select>
                 </div>
-
-                {/* Date card */}
                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                   <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-2">
                     <MdCalendarToday size={12} className="text-[#FF5934]" /> Date <span className="text-[#FF5934]">*</span>
@@ -1124,17 +1153,13 @@ const Order = () => {
                     className={mInputCls}
                   />
                 </div>
-
-                {/* Info note */}
                 <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
                   <MdLocalShipping size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
                   <p className="text-[11px] text-amber-700 leading-relaxed">
-                    The PDF will include only orders with <strong>Placed</strong> status. Processed, Cancelled, and Settlement orders are excluded.
+                    The form will open in a new tab and include only orders with <strong>Placed</strong> status. Use your browser's print dialog to save as PDF.
                   </p>
                 </div>
               </div>
-
-              {/* Footer */}
               <div className="px-6 py-4 border-t border-gray-100 flex gap-3 bg-[#FAFAFA] rounded-b-3xl">
                 <button
                   onClick={() => setIsLoadFormVisible(false)}
@@ -1149,7 +1174,7 @@ const Order = () => {
                 >
                   {loadFormGenerating
                     ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Generating…</>
-                    : <><MdLocalShipping size={15} /> Generate PDF</>
+                    : <><MdLocalShipping size={15} /> Open Load Form</>
                   }
                 </button>
               </div>
@@ -1281,7 +1306,6 @@ const Order = () => {
               <div className="flex-1 overflow-y-auto px-5 pt-5 pb-4 flex flex-col gap-4"
                 style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
 
-                {/* Order Tracking */}
                 <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Order Tracking</p>
@@ -1304,7 +1328,6 @@ const Order = () => {
                   </div>
                 </div>
 
-                {/* Order Info */}
                 <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Order Info</p>
@@ -1329,7 +1352,6 @@ const Order = () => {
                   </div>
                 </div>
 
-                {/* Items */}
                 <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Items</p>
@@ -1370,7 +1392,6 @@ const Order = () => {
                   </div>
                 </div>
 
-                {/* Status update */}
                 <div>
                   <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                     <MdOutlineInventory2 size={12} className="text-[#FF5934]" /> Update Status
@@ -1391,7 +1412,6 @@ const Order = () => {
                 <div className="h-2" />
               </div>
 
-              {/* Sticky footer */}
               <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex-shrink-0 bg-white">
                 <button
                   onClick={() => setShow(false)}
