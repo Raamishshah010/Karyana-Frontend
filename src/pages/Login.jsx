@@ -86,7 +86,7 @@ const Login = () => {
           position: fixed;
           inset: 0;
           /* Full-cover background image — swap URL with any image you like */
-          background-image: url('https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1920&q=80&auto=format&fit=crop');
+          background-image: url('/bglogin.png');
           background-size: cover;
           background-position: center;
           z-index: 0;
@@ -269,7 +269,7 @@ const Login = () => {
                 </div>
                 <div>
                   <span className="logo-text text-[22px] font-bold tracking-tight">Karyana</span>
-                  <p className="text-white/35 text-[11px] -mt-0.5">Management Platform</p>
+                  <p className="text-black/35 text-[11px] -mt-0.5">Management Platform</p>
                 </div>
               </div>
             </div>
@@ -285,7 +285,7 @@ const Login = () => {
 
             {/* Bottom copy */}
             <div className="relative z-10">
-              <p className="text-white/55 text-[13px] leading-relaxed">
+              <p className="text-black/55 text-[13px] leading-relaxed">
                 Manage your supply chain, track inventory, and coordinate your team — all in one place.
               </p>
               <div className="flex items-center gap-2 mt-4">

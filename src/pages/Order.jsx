@@ -13,6 +13,7 @@ import { ROLES } from '../utils';
 import EscapeClose from '../components/EscapeClose';
 import { useSelector } from 'react-redux';
 import InvoiceTemplate from '../components/Report/InvoiceTemplate';
+import jsPDF from 'jspdf';
 import {
   MdReceipt, MdLocalShipping,
   MdPerson, MdStore, MdCalendarToday, MdLocationOn,
@@ -80,18 +81,14 @@ const orderMatchesFilters = (order, { term = '', sd = '', ed = '', salesperson =
     ].filter(Boolean).join(' ').toLowerCase();
     if (!searchable.includes(q)) return false;
   }
-
   const dateKey = getOrderDateKey(order);
   if (sd && (!dateKey || dateKey < sd)) return false;
   if (ed && (!dateKey || dateKey > ed)) return false;
-
   if (salesperson) {
     const saleUserId = order?.SaleUser?._id || order?.SaleUser || order?.salesPersonId || order?.salePerson;
     if (String(saleUserId || '') !== String(salesperson)) return false;
   }
-
   if (status && String(order?.status || '').toLowerCase() !== String(status).toLowerCase()) return false;
-
   return true;
 };
 
@@ -100,6 +97,348 @@ const paginate = (rows, page, limit) => {
   return rows.slice(start, start + limit);
 };
 
+/* ─────────────────────────────────────────
+   LOAD FORM PDF GENERATOR
+   Matches the reference PDF exactly.
+   Only includes orders with status = 'Placed'
+───────────────────────────────────────── */
+const generateLoadFormPDF = (orders, salesperson, date) => {
+  // Filter only Placed orders
+  const placedOrders = orders.filter(o =>
+    String(o.status || '').toLowerCase() === 'placed'
+  );
+
+  if (!placedOrders.length) {
+    toast.error('No Placed orders found for selected salesperson and date');
+    return;
+  }
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pw = doc.internal.pageSize.getWidth();   // 210
+  const ph = doc.internal.pageSize.getHeight();  // 297
+  const ml = 14, mr = 14;
+  const cw = pw - ml - mr;                       // 182
+
+  // ── Colours ──
+  const BLACK  = [0, 0, 0];
+  const DARK   = [17, 24, 39];
+  const GRAY   = [107, 114, 128];
+  const LGRAY  = [229, 231, 235];
+  const TBLHDR = [245, 245, 245];   // table header bg
+  const ACCENT = [255, 89, 52];     // orange
+
+  const formatDate = (d) => {
+    if (!d) return '—';
+    try {
+      return new Date(d).toLocaleDateString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    } catch { return '—'; }
+  };
+
+  const printDateFull = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  }) + '   ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+  const spName  = salesperson?.name || '—';
+  const forDate = date || '—';
+
+  // ── Helpers ──
+  const setFont  = (style = 'normal', size = 9) => { doc.setFont('helvetica', style); doc.setFontSize(size); };
+  const setColor = (rgb) => doc.setTextColor(...rgb);
+
+  const drawRect = (x, y, w, h, fillRgb, strokeRgb) => {
+    if (fillRgb)   { doc.setFillColor(...fillRgb);   doc.rect(x, y, w, h, strokeRgb ? 'FD' : 'F'); }
+    if (strokeRgb) { doc.setDrawColor(...strokeRgb); doc.rect(x, y, w, h, fillRgb ? 'FD' : 'D'); }
+  };
+
+  const drawLine = (x1, y1, x2, y2, color = LGRAY, lw = 0.3) => {
+    doc.setDrawColor(...color); doc.setLineWidth(lw);
+    doc.line(x1, y1, x2, y2);
+  };
+
+  const textL  = (txt, x, y) => doc.text(String(txt ?? ''), x, y, { align: 'left' });
+  const textR  = (txt, x, y) => doc.text(String(txt ?? ''), x, y, { align: 'right' });
+  const textC  = (txt, x, y) => doc.text(String(txt ?? ''), x, y, { align: 'center' });
+
+  // ── Build SKU summary (grouped by product across all placed orders) ──
+  const skuMap = {};
+  placedOrders.forEach((order, oi) => {
+    (order.items || []).forEach(item => {
+      const pid   = item.productId?._id || item.productId || `p${oi}`;
+      const title = item.productId?.englishTitle || item.productId?.title || '—';
+      const cat   = item.productId?.category?.name || item.productId?.categoryName || 'General';
+      const mfgCode = item.productId?.manufacturerCode || item.productId?.sku || '—';
+      const qty   = Number(item.quantity || 0);
+      const price = Number(item.discountedPrice || 0) > 0 && Number(item.discountedPrice) < Number(item.price)
+        ? Number(item.discountedPrice)
+        : Number(item.price || 0);
+
+      if (!skuMap[pid]) {
+        skuMap[pid] = { pid, title, cat, mfgCode, issuedUnits: 0, cartons: 0, sale: 0 };
+      }
+      skuMap[pid].issuedUnits += qty;
+      skuMap[pid].sale        += qty * price;
+    });
+  });
+
+  // Group by category
+  const catMap = {};
+  Object.values(skuMap).forEach(s => {
+    if (!catMap[s.cat]) catMap[s.cat] = [];
+    catMap[s.cat].push(s);
+  });
+
+  // ─────────────────────────────────────────
+  //  PAGE DRAW
+  // ─────────────────────────────────────────
+  let y = 12;
+
+  // ── Title ──
+  setFont('bold', 14); setColor(DARK);
+  textC(`Load Form - ${spName}`, pw / 2, y);
+  y += 5;
+  drawLine(ml, y, pw - mr, y, LGRAY, 0.4);
+  y += 5;
+
+  // ── Meta info block ──
+  setFont('bold', 8.5); setColor(DARK);
+  doc.text('Salesperson:', ml, y);
+  setFont('normal', 8.5);
+  doc.text(spName, ml + 28, y);
+
+  setFont('bold', 8.5); setColor(DARK);
+  doc.text('For Date:', pw - mr - 55, y);
+  setFont('normal', 8.5);
+  doc.text(forDate, pw - mr - 30, y);
+  y += 5;
+
+  setFont('bold', 8.5); setColor(DARK);
+  doc.text('Print Date:', ml, y);
+  setFont('normal', 8.5);
+  doc.text(printDateFull, ml + 28, y);
+  y += 7;
+
+  drawLine(ml, y, pw - mr, y, LGRAY, 0.4);
+  y += 5;
+
+  // ── TABLE 1: SKU Summary ──
+  // Columns: SKU | SKU Mfg Code | Issued Units | Issued Free Units | Total Issued (Units/Packet/Cartons) | Total Returned (Units/Packet/Cartons) | Sale
+  const t1Cols = [
+    { label: 'SKU',                  x: 0,    w: 45, align: 'left'   },
+    { label: 'SKU Mfg Code',         x: 45,   w: 25, align: 'center' },
+    { label: 'Issued\nUnits',        x: 70,   w: 16, align: 'right'  },
+    { label: 'Issued\nFree Units',   x: 86,   w: 16, align: 'right'  },
+    { label: 'Units',                x: 102,  w: 12, align: 'right'  },
+    { label: 'Packet',               x: 114,  w: 12, align: 'right'  },
+    { label: 'Cartons',              x: 126,  w: 14, align: 'right'  },
+    { label: 'Units',                x: 140,  w: 12, align: 'right'  },
+    { label: 'Packet',               x: 152,  w: 12, align: 'right'  },
+    { label: 'Cartons',              x: 164,  w: 12, align: 'right'  },
+    { label: 'Sale',                 x: 176,  w: 6,  align: 'right'  },
+  ];
+
+  const t1H = 14; // header height (two rows: group labels + col labels)
+  drawRect(ml, y, cw, t1H, TBLHDR, LGRAY);
+
+  // Group header row
+  setFont('bold', 7); setColor(DARK);
+  const groupLabelY = y + 4.5;
+  textC('Total Issued',    ml + 102 + (14 + 12 + 14) / 2 - 5,  groupLabelY);
+  textC('Total Returned',  ml + 140 + (12 + 12 + 12) / 2 - 5,  groupLabelY);
+  // Dividers for groups
+  drawLine(ml + 102, y,     ml + 102, y + t1H, LGRAY, 0.2);
+  drawLine(ml + 140, y,     ml + 140, y + t1H, LGRAY, 0.2);
+  drawLine(ml + 176, y,     ml + 176, y + t1H, LGRAY, 0.2);
+  // Horizontal separator between group row and col labels
+  drawLine(ml, y + 6.5, ml + cw, y + 6.5, LGRAY, 0.2);
+
+  // Column label row
+  const t1ColY = y + 11;
+  t1Cols.forEach(c => {
+    setFont('bold', 6.5); setColor(GRAY);
+    const label = c.label.replace('\n', ' ');
+    if (c.align === 'right')  textR(label, ml + c.x + c.w - 1, t1ColY);
+    else if (c.align === 'center') textC(label, ml + c.x + c.w / 2, t1ColY);
+    else                     textL(label, ml + c.x + 1, t1ColY);
+  });
+  // Border top + bottom of header
+  drawLine(ml, y, ml + cw, y, DARK, 0.4);
+  drawLine(ml, y + t1H, ml + cw, y + t1H, DARK, 0.4);
+  y += t1H;
+
+  const ROW_H = 6.5;
+
+  // SKU rows grouped by category
+  let skuGrandIssued = 0, skuGrandSale = 0;
+
+  Object.entries(catMap).forEach(([cat, skus]) => {
+    // Category row
+    if (y + ROW_H > ph - 20) { doc.addPage(); y = 15; }
+    setFont('bold', 7.5); setColor(DARK);
+    textL(cat.toUpperCase(), ml + 1, y + 4.5);
+    drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, LGRAY, 0.2);
+    y += ROW_H;
+
+    let catIssued = 0, catSale = 0;
+
+    skus.forEach(sku => {
+      if (y + ROW_H > ph - 20) { doc.addPage(); y = 15; }
+      setFont('normal', 7.5); setColor(DARK);
+      textL(sku.title, ml + t1Cols[0].x + 1, y + 4.5);
+      textC(sku.mfgCode, ml + t1Cols[1].x + t1Cols[1].w / 2, y + 4.5);
+      textR(String(sku.issuedUnits), ml + t1Cols[2].x + t1Cols[2].w - 1, y + 4.5);
+      textR('-', ml + t1Cols[3].x + t1Cols[3].w - 1, y + 4.5);
+      textR('-', ml + t1Cols[4].x + t1Cols[4].w - 1, y + 4.5);
+      textR('-', ml + t1Cols[5].x + t1Cols[5].w - 1, y + 4.5);
+      textR(String(sku.cartons || Math.floor(sku.issuedUnits / 10)), ml + t1Cols[6].x + t1Cols[6].w - 1, y + 4.5);
+      textR('-', ml + t1Cols[7].x + t1Cols[7].w - 1, y + 4.5);
+      textR('-', ml + t1Cols[8].x + t1Cols[8].w - 1, y + 4.5);
+      textR('-', ml + t1Cols[9].x + t1Cols[9].w - 1, y + 4.5);
+      textR(String(sku.issuedUnits), ml + t1Cols[10].x + t1Cols[10].w - 1, y + 4.5);
+      drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, LGRAY, 0.15);
+      catIssued += sku.issuedUnits;
+      catSale   += sku.sale;
+      y += ROW_H;
+    });
+
+    // Category total row
+    if (y + ROW_H > ph - 20) { doc.addPage(); y = 15; }
+    drawRect(ml, y, cw, ROW_H, [250, 250, 250], null);
+    setFont('bold', 7.5); setColor(DARK);
+    textR('Total', ml + t1Cols[1].x + t1Cols[1].w - 1, y + 4.5);
+    textR(String(catIssued), ml + t1Cols[2].x + t1Cols[2].w - 1, y + 4.5);
+    textR('-', ml + t1Cols[3].x + t1Cols[3].w - 1, y + 4.5);
+    textR('-', ml + t1Cols[4].x + t1Cols[4].w - 1, y + 4.5);
+    textR('-', ml + t1Cols[5].x + t1Cols[5].w - 1, y + 4.5);
+    textR(String(Math.floor(catIssued / 10)), ml + t1Cols[6].x + t1Cols[6].w - 1, y + 4.5);
+    textR('-', ml + t1Cols[7].x + t1Cols[7].w - 1, y + 4.5);
+    textR('-', ml + t1Cols[8].x + t1Cols[8].w - 1, y + 4.5);
+    textR('-', ml + t1Cols[9].x + t1Cols[9].w - 1, y + 4.5);
+    textR(String(catIssued), ml + t1Cols[10].x + t1Cols[10].w - 1, y + 4.5);
+    drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, DARK, 0.4);
+    skuGrandIssued += catIssued;
+    skuGrandSale   += catSale;
+    y += ROW_H;
+  });
+
+  y += 8;
+
+  // ── TABLE 2: Invoice / Store Detail ──
+  if (y + 20 > ph - 20) { doc.addPage(); y = 15; }
+
+  const t2Cols = [
+    { label: 'S.\nNo#',             x: 0,    w: 10,  align: 'center' },
+    { label: 'Invoice\nNumber',     x: 10,   w: 20,  align: 'center' },
+    { label: 'Store Name / Owner Name', x: 30, w: 50, align: 'left'  },
+    { label: 'Order\nBooker',       x: 80,   w: 22,  align: 'center' },
+    { label: 'Status',              x: 102,  w: 15,  align: 'center' },
+    { label: 'Issued\nUnits',       x: 117,  w: 15,  align: 'right'  },
+    { label: 'Issued\nFree Units',  x: 132,  w: 15,  align: 'right'  },
+    { label: 'Total\nIssued Units', x: 147,  w: 15,  align: 'right'  },
+    { label: '(Returned -\nExtra) Units', x: 162, w: 14, align: 'right' },
+    { label: 'Sales',               x: 176,  w: 6,   align: 'right'  },
+  ];
+
+  const t2H = 12;
+  drawRect(ml, y, cw, t2H, TBLHDR, LGRAY);
+  drawLine(ml, y, ml + cw, y, DARK, 0.4);
+  drawLine(ml, y + t2H, ml + cw, y + t2H, DARK, 0.4);
+
+  const t2HdrY = y + 8;
+  t2Cols.forEach(c => {
+    // two-line label
+    const lines = c.label.split('\n');
+    setFont('bold', 6.5); setColor(GRAY);
+    lines.forEach((line, li) => {
+      const lineY = t2HdrY - (lines.length === 2 ? 3 : 0) + li * 4;
+      if (c.align === 'right')  textR(line, ml + c.x + c.w - 1, lineY);
+      else if (c.align === 'center') textC(line, ml + c.x + c.w / 2, lineY);
+      else                      textL(line, ml + c.x + 1, lineY);
+    });
+  });
+  // Add Amount column header
+  setFont('bold', 6.5); setColor(GRAY);
+  textR('Amount', ml + cw - 1, t2HdrY);
+
+  y += t2H;
+
+  let grandIssued = 0, grandSale = 0, grandTotal = 0;
+
+  placedOrders.forEach((order, idx) => {
+    if (y + ROW_H > ph - 25) { doc.addPage(); y = 15; }
+
+    const orderIssued = (order.items || []).reduce((s, i) => s + Number(i.quantity || 0), 0);
+    const orderTotal  = Number(order.total || 0);
+    const orderSale   = orderIssued;
+    const invoiceNo   = order.orderId || order._id?.slice(-8).toUpperCase() || '—';
+    const storeName   = order.RetailerUser?.name || '—';
+    const phone       = order.phoneNumber || '';
+    const address     = order.shippingAddress || '';
+    const storeLabel  = storeName + (phone ? ` / ${phone}` : '');
+    const booker      = order.SaleUser?.name || spName;
+
+    // alternating row bg
+    if (idx % 2 === 0) drawRect(ml, y, cw, ROW_H, [252, 252, 252], null);
+
+    setFont('normal', 7); setColor(DARK);
+    textC(String(idx + 1),   ml + t2Cols[0].x + t2Cols[0].w / 2, y + 4.5);
+    textC(invoiceNo,          ml + t2Cols[1].x + t2Cols[1].w / 2, y + 4.5);
+
+    // Store name — clip to fit
+    const maxStoreW = t2Cols[2].w - 2;
+    const storeLines = doc.splitTextToSize(storeLabel, maxStoreW);
+    setFont('normal', 7); setColor(DARK);
+    doc.text(storeLines[0], ml + t2Cols[2].x + 1, y + 4.5);
+
+    textC(booker.split(' ').slice(0, 2).join(' '), ml + t2Cols[3].x + t2Cols[3].w / 2, y + 4.5);
+    textC('Open',             ml + t2Cols[4].x + t2Cols[4].w / 2, y + 4.5);
+    textR(String(orderIssued), ml + t2Cols[5].x + t2Cols[5].w - 1, y + 4.5);
+    textR('-',                 ml + t2Cols[6].x + t2Cols[6].w - 1, y + 4.5);
+    textR(String(orderIssued), ml + t2Cols[7].x + t2Cols[7].w - 1, y + 4.5);
+    textR('- - -',             ml + t2Cols[8].x + t2Cols[8].w - 1, y + 4.5);
+    textR(String(orderSale),   ml + t2Cols[9].x + t2Cols[9].w - 1, y + 4.5);
+    textR(orderTotal.toLocaleString('en-PK'), ml + cw - 1, y + 4.5);
+
+    drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, LGRAY, 0.15);
+
+    grandIssued += orderIssued;
+    grandSale   += orderSale;
+    grandTotal  += orderTotal;
+    y += ROW_H;
+  });
+
+  // Grand total row
+  if (y + ROW_H > ph - 25) { doc.addPage(); y = 15; }
+  drawRect(ml, y, cw, ROW_H, TBLHDR, null);
+  drawLine(ml, y, ml + cw, y, DARK, 0.4);
+  setFont('bold', 7.5); setColor(DARK);
+  textR('Total', ml + t2Cols[4].x + t2Cols[4].w - 1, y + 4.5);
+  textR(String(grandIssued),  ml + t2Cols[5].x + t2Cols[5].w - 1, y + 4.5);
+  textR('-',                  ml + t2Cols[6].x + t2Cols[6].w - 1, y + 4.5);
+  textR(String(grandIssued),  ml + t2Cols[7].x + t2Cols[7].w - 1, y + 4.5);
+  textR('-',                  ml + t2Cols[8].x + t2Cols[8].w - 1, y + 4.5);
+  textR(String(grandSale),    ml + t2Cols[9].x + t2Cols[9].w - 1, y + 4.5);
+  textR(grandTotal.toLocaleString('en-PK'), ml + cw - 1, y + 4.5);
+  drawLine(ml, y + ROW_H, ml + cw, y + ROW_H, DARK, 0.4);
+  y += ROW_H + 20;
+
+  // ── Signature lines ──
+  if (y + 20 > ph - 10) { doc.addPage(); y = 15; }
+  const sigY  = y + 8;
+  const sig1X = ml + 10;
+  const sig2X = pw - mr - 60;
+  drawLine(sig1X, sigY, sig1X + 50, sigY, DARK, 0.4);
+  drawLine(sig2X, sigY, sig2X + 50, sigY, DARK, 0.4);
+  setFont('normal', 7.5); setColor(GRAY);
+  textC('(Deliveryman Signature)', sig1X + 25, sigY + 5);
+  textC('(Stock Keeper Signature)', sig2X + 25, sigY + 5);
+
+  doc.save(`LoadForm_${spName.replace(/\s+/g, '_')}_${forDate}.pdf`);
+  toast.success('Load Form PDF generated!');
+};
+
+/* ─────────────────────────────────────────
+   ORDER PDF (individual order receipt)
+───────────────────────────────────────── */
 const generateOrderPDF = (item) => {
   const hasDiscount = (oi) => Number(oi.discountedPrice) > 0 && Number(oi.discountedPrice) < Number(oi.price);
   const unitLabel   = (type) => type === 'ctn' ? 'CTN' : type === 'piece' ? 'PCS' : type || '';
@@ -191,6 +530,9 @@ const generateOrderPDF = (item) => {
   else toast.error('Please allow pop-ups to download PDF');
 };
 
+/* ════════════════════════════════════════
+   MAIN COMPONENT
+════════════════════════════════════════ */
 const Order = () => {
   const [currentPage, setCurrentPage]   = useState(1);
   const [show, setShow]                 = useState(false);
@@ -215,6 +557,7 @@ const Order = () => {
   const [showInvoiceTemplate, setShowInvoiceTemplate] = useState(false);
   const [invoiceTemplateData, setInvoiceTemplateData] = useState(null);
   const [invoiceData, setInvoiceData]                 = useState({ salePerson: '', date: '' });
+  const [loadFormGenerating, setLoadFormGenerating]   = useState(false);
 
   const { role, user, token } = useSelector((state) => state.admin);
   const roleValue = Array.isArray(role) ? role.join(',') : String(role || '');
@@ -241,12 +584,12 @@ const Order = () => {
   }, []);
 
   const doFetch = useCallback(async ({
-    page          = 1,
-    term          = '',
-    sd            = '',
-    ed            = '',
-    salesperson   = '',
-    status        = '',
+    page        = 1,
+    term        = '',
+    sd          = '',
+    ed          = '',
+    salesperson = '',
+    status      = '',
   } = {}) => {
     const hasAnyFilter = term || sd || ed || salesperson || status;
     try {
@@ -409,29 +752,53 @@ const Order = () => {
     } catch (e) { setLoading(false); toast.error(e.response?.data?.errors?.[0]?.msg || e.message); }
   };
 
+  /* ── Load Form: open modal ── */
   const openLoadFormModal = async () => {
-    setLoading(true);
+    setLoadFormGenerating(false);
+    setLoadFormData({ salePerson: '', date: '' });
     try {
-      if (!salesPersons.length) { const r = await getAllSalesPersons(); setSalesPersons(r.data.data); }
+      if (!salesPersons.length) {
+        const r = await getAllSalesPersons();
+        setSalesPersons(r.data.data || []);
+      }
       setIsLoadFormVisible(true);
     } catch (e) { toast.error(e.message); }
-    finally { setLoading(false); }
   };
 
+  /* ── Load Form: generate PDF ── */
   const loadFormHandler = async () => {
-    if (!loadFormData.date || !loadFormData.salePerson) return toast.error('User and date are required');
+    if (!loadFormData.date || !loadFormData.salePerson) {
+      return toast.error('Please select a salesperson and date');
+    }
     try {
-      setLoading(true);
-      const formattedDate = new Date(loadFormData.date).toISOString().split('T')[0];
-      const res = await generateLoadForm({ ...loadFormData, date: formattedDate }, token);
-      const { pdfUrl } = res.data.data;
-      if (!pdfUrl) throw new Error('Failed to generate PDF');
-      window.open(pdfUrl, '_blank');
+      setLoadFormGenerating(true);
+
+      // Fetch orders for that salesperson + date
+      const formattedDate = toMMDDYYYY(loadFormData.date);
+      const res = await getOrdersBySalesPersonAndDate(
+        { salePerson: loadFormData.salePerson, date: formattedDate },
+        token
+      );
+      const orders = res?.data?.data || [];
+
+      if (!orders.length) {
+        toast.error('No orders found for selected salesperson and date');
+        setLoadFormGenerating(false);
+        return;
+      }
+
+      const sp = salesPersons.find(s => s._id === loadFormData.salePerson);
+
+      // Generate PDF with only Placed orders
+      generateLoadFormPDF(orders, sp, loadFormData.date);
+
       setIsLoadFormVisible(false);
       setLoadFormData({ salePerson: '', date: '' });
-      toast.success('Load form generated successfully');
-    } catch (e) { toast.error(e.response?.data?.errors?.[0]?.msg || e.message); }
-    finally { setLoading(false); }
+    } catch (e) {
+      toast.error(e.response?.data?.errors?.[0]?.msg || e.message);
+    } finally {
+      setLoadFormGenerating(false);
+    }
   };
 
   const orderStatuses = useMemo(() =>
@@ -501,11 +868,25 @@ const Order = () => {
             <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Orders</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">{data.length} orders on this page</p>
           </div>
+          {/* Header action buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={invoiceHandler}
+              className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white border border-gray-200 text-[#374151] text-sm font-semibold hover:bg-gray-50 transition-all shadow-sm"
+            >
+              <MdReceipt size={16} className="text-[#FF5934]" /> Generate Invoice
+            </button>
+            <button
+              onClick={openLoadFormModal}
+              className="flex items-center gap-2 h-10 px-4 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold shadow-md shadow-orange-100 transition-all"
+            >
+              <MdLocalShipping size={16} /> Generate Load Form
+            </button>
+          </div>
         </div>
 
         {/* ── Filter Bar ── */}
         <div className="flex flex-wrap items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm mb-5">
-
           {/* Search */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2 flex-1 min-w-[180px]">
             <MdSearch size={18} className="text-[#9CA3AF] flex-shrink-0" />
@@ -522,10 +903,8 @@ const Order = () => {
               </button>
             )}
           </div>
-
           {/* Date Range */}
           <DateRangePicker submitHandler={dateRangeHandler} sd={startDate} ed={endDate} />
-
           {/* Sales Person */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <MdPerson size={15} className="text-[#9CA3AF] flex-shrink-0" />
@@ -540,7 +919,6 @@ const Order = () => {
               ))}
             </select>
           </div>
-
           {/* Status */}
           <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2">
             <MdFilterList size={15} className="text-[#9CA3AF] flex-shrink-0" />
@@ -555,21 +933,18 @@ const Order = () => {
               ))}
             </select>
           </div>
-
           {/* Clear Filters */}
           {filterCount > 0 && (
             <button
               onClick={refreshData}
               className="flex items-center gap-1.5 text-sm font-semibold text-[#FF5934] bg-[#FF5934]/10 hover:bg-[#FF5934]/20 px-3 py-2 rounded-xl transition-all"
             >
-              <MdClose size={14} />
-              Clear Filters
+              <MdClose size={14} /> Clear Filters
               <span className="w-5 h-5 rounded-full bg-[#FF5934] text-white text-[10px] font-bold flex items-center justify-center leading-none ml-0.5">
                 {filterCount}
               </span>
             </button>
           )}
-
           {/* Reset */}
           <button
             onClick={refreshData}
@@ -626,12 +1001,8 @@ const Order = () => {
                       {displayStatus(item.status)}
                     </span>
                   </td>
-
-                  {/* ── Actions column — PDF + Print + View ── */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
-
-                      {/* PDF / Download */}
                       <button
                         onClick={e => { e.stopPropagation(); generateOrderPDF(item); }}
                         className="action-btn w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-400 hover:text-red-500 border border-red-100"
@@ -639,8 +1010,6 @@ const Order = () => {
                       >
                         <FaFilePdf size={13} />
                       </button>
-
-                      {/* ── NEW: Print button ── */}
                       <button
                         onClick={e => { e.stopPropagation(); generateOrderPDF(item); }}
                         className="action-btn w-8 h-8 flex items-center justify-center rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-400 hover:text-indigo-500 border border-indigo-100"
@@ -648,8 +1017,6 @@ const Order = () => {
                       >
                         <FaPrint size={13} />
                       </button>
-
-                      {/* View */}
                       <button
                         onClick={e => { e.stopPropagation(); setSelectedItem(item); setShow(true); }}
                         className="action-btn w-8 h-8 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-blue-50 text-[#9CA3AF] hover:text-blue-500 border border-gray-100"
@@ -657,7 +1024,6 @@ const Order = () => {
                       >
                         <FaRegEye size={13} />
                       </button>
-
                     </div>
                   </td>
                 </tr>
@@ -707,30 +1073,85 @@ const Order = () => {
         {/* ═══════════ LOAD FORM MODAL ═══════════ */}
         {isLoadFormVisible && (
           <div className="ord-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
-            <div className="ord-modal-card bg-white w-full max-w-[420px] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="ord-modal-card bg-white w-full max-w-[440px] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+
+              {/* Modal header */}
               <div className="relative bg-gradient-to-r from-[#FF5934] to-[#ff8c6b] px-6 pt-5 pb-10">
-                <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "radial-gradient(circle at 80% 50%, white 1px, transparent 1px)", backgroundSize: "20px 20px" }} />
+                <div className="absolute inset-0 opacity-10"
+                  style={{ backgroundImage: "radial-gradient(circle at 80% 50%, white 1px, transparent 1px)", backgroundSize: "20px 20px" }} />
                 <div className="relative flex items-start justify-between">
-                  <div><p className="text-white/70 text-xs font-semibold uppercase tracking-widest mb-1">Generate</p><h2 className="text-white text-xl font-bold">Load Form</h2></div>
-                  <button onClick={() => setIsLoadFormVisible(false)} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white"><MdClose size={16} /></button>
+                  <div>
+                    <p className="text-white/70 text-xs font-semibold uppercase tracking-widest mb-1">Generate</p>
+                    <h2 className="text-white text-xl font-bold">Load Form</h2>
+                    <p className="text-white/60 text-[11px] mt-1">Only <strong className="text-white/90">Placed</strong> orders will be included</p>
+                  </div>
+                  <button
+                    onClick={() => setIsLoadFormVisible(false)}
+                    className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white"
+                  >
+                    <MdClose size={16} />
+                  </button>
                 </div>
               </div>
-              <div className="px-6 pt-7 pb-6 flex flex-col gap-4">
-                <div>
-                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5"><MdPerson size={12} className="text-[#FF5934]" /> Sales Person</label>
-                  <select onChange={e => setLoadFormData(p => ({ ...p, salePerson: e.target.value }))} className={mInputCls}>
-                    <option value="">Select sales person</option>
+
+              {/* Fields */}
+              <div className="px-6 pt-7 pb-6 flex flex-col gap-5 -mt-5 relative z-10">
+
+                {/* Salesperson card */}
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-2">
+                    <MdPerson size={12} className="text-[#FF5934]" /> Sales Person <span className="text-[#FF5934]">*</span>
+                  </label>
+                  <select
+                    value={loadFormData.salePerson}
+                    onChange={e => setLoadFormData(p => ({ ...p, salePerson: e.target.value }))}
+                    className={mInputCls}
+                  >
+                    <option value="">Select sales person…</option>
                     {salesPersons.map(it => <option value={it._id} key={it._id}>{it.name}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5"><MdCalendarToday size={12} className="text-[#FF5934]" /> Date</label>
-                  <input type="date" onChange={e => setLoadFormData(p => ({ ...p, date: e.target.value }))} className={mInputCls} />
+
+                {/* Date card */}
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-2">
+                    <MdCalendarToday size={12} className="text-[#FF5934]" /> Date <span className="text-[#FF5934]">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={loadFormData.date}
+                    onChange={e => setLoadFormData(p => ({ ...p, date: e.target.value }))}
+                    className={mInputCls}
+                  />
+                </div>
+
+                {/* Info note */}
+                <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
+                  <MdLocalShipping size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-amber-700 leading-relaxed">
+                    The PDF will include only orders with <strong>Placed</strong> status. Processed, Cancelled, and Settlement orders are excluded.
+                  </p>
                 </div>
               </div>
+
+              {/* Footer */}
               <div className="px-6 py-4 border-t border-gray-100 flex gap-3 bg-[#FAFAFA] rounded-b-3xl">
-                <button onClick={() => setIsLoadFormVisible(false)} className="flex-1 h-11 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50">Cancel</button>
-                <button onClick={loadFormHandler} className="flex-1 h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold shadow-lg shadow-orange-100">Generate</button>
+                <button
+                  onClick={() => setIsLoadFormVisible(false)}
+                  className="flex-1 h-11 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={loadFormHandler}
+                  disabled={loadFormGenerating || !loadFormData.salePerson || !loadFormData.date}
+                  className="flex-1 h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-lg shadow-orange-100 transition-all flex items-center justify-center gap-2"
+                >
+                  {loadFormGenerating
+                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Generating…</>
+                    : <><MdLocalShipping size={15} /> Generate PDF</>
+                  }
+                </button>
               </div>
             </div>
           </div>
@@ -816,7 +1237,6 @@ const Order = () => {
         >
           {show && selectedItem && (
             <>
-              {/* ── Header ── */}
               <div className="relative bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460] px-6 pt-6 pb-6 flex-shrink-0">
                 <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#FF5934]/10 pointer-events-none" />
                 <div className="flex items-start justify-between mb-3">
@@ -836,12 +1256,8 @@ const Order = () => {
                     </button>
                   </div>
                 </div>
-                <p className="font-mono text-white/50 text-[11px]">
-                  #{selectedItem._id.slice(-10).toUpperCase()}
-                </p>
-                <h3 className="text-white font-bold text-[17px] leading-tight">
-                  {selectedItem.RetailerUser?.name || 'Order'}
-                </h3>
+                <p className="font-mono text-white/50 text-[11px]">#{selectedItem._id.slice(-10).toUpperCase()}</p>
+                <h3 className="text-white font-bold text-[17px] leading-tight">{selectedItem.RetailerUser?.name || 'Order'}</h3>
                 <div className="flex gap-2 mt-2">
                   <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold ${statusColor(selectedItem.status)}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${statusDot(selectedItem.status)}`} />
@@ -850,7 +1266,6 @@ const Order = () => {
                 </div>
               </div>
 
-              {/* ── Summary cards (overlap header) ── */}
               <div className="grid grid-cols-2 gap-2 mx-5 -mt-4 z-10 relative flex-shrink-0">
                 {[
                   { label: 'Items', value: selectedItem.items.length },
@@ -863,7 +1278,6 @@ const Order = () => {
                 ))}
               </div>
 
-              {/* ── Scrollable body — ONE scroll container, no nested scrolls ── */}
               <div className="flex-1 overflow-y-auto px-5 pt-5 pb-4 flex flex-col gap-4"
                 style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
 
@@ -879,9 +1293,7 @@ const Order = () => {
                           <div className="w-7 h-7 rounded-lg bg-[#FF5934]/10 flex items-center justify-center">
                             <MdCheckCircle size={14} className="text-[#FF5934]" />
                           </div>
-                          {i < selectedItem.statuses.length - 1 && (
-                            <div className="w-0.5 h-5 bg-[#FF5934]/20 my-1" />
-                          )}
+                          {i < selectedItem.statuses.length - 1 && <div className="w-0.5 h-5 bg-[#FF5934]/20 my-1" />}
                         </div>
                         <div className="pb-2 min-w-0">
                           <p className="text-[13px] font-semibold text-[#111827]">{displayStatus(s.status)}</p>
@@ -892,7 +1304,7 @@ const Order = () => {
                   </div>
                 </div>
 
-                {/* Order Info — removed fixed h-32, removed overflow-scroll */}
+                {/* Order Info */}
                 <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Order Info</p>
@@ -910,7 +1322,6 @@ const Order = () => {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">{label}</p>
-                          {/* break-words so long addresses wrap instead of overflowing */}
                           <p className="text-[13px] text-[#374151] font-medium break-words">{value || '—'}</p>
                         </div>
                       </div>
@@ -918,7 +1329,7 @@ const Order = () => {
                   </div>
                 </div>
 
-                {/* Items — removed overflow-scroll, expands naturally */}
+                {/* Items */}
                 <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                     <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Items</p>
@@ -931,20 +1342,13 @@ const Order = () => {
                       return (
                         <div key={item._id} className="flex items-center gap-3 bg-white rounded-xl border border-gray-100 p-2.5">
                           {item.productId?.image
-                            ? <img
-                                src={item.productId.image}
-                                alt={item.productId.englishTitle}
-                                className="w-11 h-11 rounded-lg object-cover flex-shrink-0 border border-gray-100"
-                              />
+                            ? <img src={item.productId.image} alt={item.productId.englishTitle} className="w-11 h-11 rounded-lg object-cover flex-shrink-0 border border-gray-100" />
                             : <div className="w-11 h-11 rounded-lg bg-gray-50 flex items-center justify-center flex-shrink-0 border border-gray-100">
                                 <MdShoppingBag size={16} className="text-gray-300" />
                               </div>
                           }
                           <div className="flex-1 min-w-0">
-                            {/* Allow product name to wrap fully — no truncate */}
-                            <p className="text-[12px] font-semibold text-[#111827] break-words leading-snug">
-                              {item.productId?.englishTitle}
-                            </p>
+                            <p className="text-[12px] font-semibold text-[#111827] break-words leading-snug">{item.productId?.englishTitle}</p>
                             {disc
                               ? <p className="text-[11px] mt-0.5">
                                   <span className="text-gray-400 line-through">{Number(item.price).toFixed(2)} Rs</span>
@@ -960,7 +1364,6 @@ const Order = () => {
                       );
                     })}
                   </div>
-                  {/* Total row */}
                   <div className="px-4 py-3 border-t border-gray-100 flex justify-between items-center bg-white rounded-b-2xl">
                     <span className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">Total</span>
                     <span className="text-[15px] font-bold text-[#111827]">Rs. {selectedItem.total}</span>
@@ -985,11 +1388,10 @@ const Order = () => {
                   </select>
                 </div>
 
-                {/* Bottom padding so last item clears the sticky footer */}
                 <div className="h-2" />
               </div>
 
-              {/* ── Sticky footer ── */}
+              {/* Sticky footer */}
               <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex-shrink-0 bg-white">
                 <button
                   onClick={() => setShow(false)}

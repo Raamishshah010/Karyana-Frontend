@@ -49,17 +49,17 @@ const normaliseEntry = (item, idx) => {
   let rawDr = 0;
   let rawCr = 0;
 
-  if (item.dr != null || item.cr != null) {
-    // Already split
-    rawDr = parseFloat(item.dr || 0);
-    rawCr = parseFloat(item.cr || 0);
-  } else if (item.debit != null || item.credit != null) {
+ if (item.dr != null || item.cr != null) {
+  // API has dr/cr swapped relative to our convention — swap them
+  rawDr = parseFloat(item.cr || 0);   // was: item.dr
+  rawCr = parseFloat(item.dr || 0);   // was: item.cr
+} else if (item.debit != null || item.credit != null) {
     rawDr = parseFloat(item.debit  || 0);
     rawCr = parseFloat(item.credit || 0);
   } else if (item.amount != null) {
     // Determine direction from type field
     const t = (item.type || '').toUpperCase();
-    const isCredit = t === 'PAYMENT' || t === 'CREDIT' || t === 'RETURN';
+  const isCredit = t === 'PAYMENT' || t === 'CREDIT' || t === 'RETURN';
     if (isCredit) rawCr = parseFloat(item.amount || 0);
     else          rawDr = parseFloat(item.amount || 0);
   }
@@ -714,9 +714,12 @@ const ReportsCustomerLedger = () => {
                             <td className="px-3 py-2.5 max-w-[160px]">
                               <p className="text-[13px] text-[#111827] font-medium truncate">{row.details}</p>
                               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold mt-0.5 ${
-                                row.type === 'PAYMENT'  ? 'bg-blue-50 text-blue-600'    :
+                                
+                                row.type === 'PURCHASE' ? 'bg-blue-50 text-blue-600'    :
+row.type === 'PAYMENT'  ? 'bg-orange-50 text-[#FF5934]' :
                                 row.type === 'RETURN'   ? 'bg-amber-50 text-amber-600'  :
-                                row.type === 'PURCHASE' ? 'bg-orange-50 text-[#FF5934]' :
+                                
+                                
                                 row.type === 'CREDIT'   ? 'bg-purple-50 text-purple-600':
                                                           'bg-gray-100 text-gray-500'
                               }`}>{row.type}</span>

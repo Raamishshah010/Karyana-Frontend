@@ -909,7 +909,7 @@ const ReportsDebit = () => {
                                   {/* <td className="px-4 py-3">
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold ${typeBadge(row.type)}`}>{row.type}</span>
                                   </td> */}
-                                  <td className="px-4 py-3 text-center">
+                                  <td className="px-4 py-3 text-center -translate-x-12">
                                     <span className="text-[13px] font-bold text-[#FF5934]">Rs. {fmt(row.amount)}</span>
                                   </td>
                                   <td className="px-4 py-3">
