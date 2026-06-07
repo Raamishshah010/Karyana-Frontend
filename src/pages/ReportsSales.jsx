@@ -21,14 +21,12 @@ const fmtInt = (n) => {
 };
 const formatDate = (d) => { if (!d) return ''; try { return new Date(d).toISOString().slice(0,10); } catch { return ''; } };
 
-/*
-  Per-item quantity logic:
-  - item.type === 'piece' (or 'Piece') → add item.quantity to pcs total
-  - item.type === 'ctn'   (or 'Ctn')   → add item.quantity to ctn total
-    But if type is 'ctn' and cortanSize is known, the quantity already
-    represents cartons, so just add directly.
-  - Remaining pcs that fill a full ctn → roll up into ctns
-*/
+/* Total Qty as decimal: e.g. 3 CTN + 24 Pcs → 3.24 */
+const calcTotalQty = (ctns, pcs) => {
+  if (pcs > 0) return parseFloat(`${ctns}.${String(pcs).padStart(2, '0')}`);
+  return ctns;
+};
+
 const aggregateItems = (items) => {
   let totalCtn = 0;
   let totalPcs = 0;
@@ -41,7 +39,6 @@ const aggregateItems = (items) => {
     if (type === 'ctn') {
       totalCtn += qty;
     } else {
-      // piece — convert to ctn+pcs using cortanSize
       const ctnsFromPcs = Math.floor(qty / cortanSize);
       const remainPcs   = Math.round(qty % cortanSize);
       totalCtn += ctnsFromPcs;
@@ -49,8 +46,6 @@ const aggregateItems = (items) => {
     }
   });
 
-  // Roll over accumulated pcs into ctns if any cortanSize group fills up
-  // (simple pass: use cortanSize of first item as reference)
   const refCortanSize = parseFloat((items || [])[0]?.productId?.cortanSize) || 1;
   if (totalPcs >= refCortanSize) {
     totalCtn += Math.floor(totalPcs / refCortanSize);
@@ -95,8 +90,8 @@ const ReportsSales = () => {
 
       /* Delivered only */
       let filtered = allOrders.filter(
-  o => ['Delivered', 'Completed'].includes(o.status)
-);
+        o => ['Delivered', 'Completed'].includes(o.status)
+      );
 
       /* Date filter */
       if (sd || ed) {
@@ -121,14 +116,13 @@ const ReportsSales = () => {
         filtered = filtered.filter(o => (o.city?._id || o.city || o.cityID) === city);
       }
 
-      /* ── MERGE: one row per retailer, summing CTN & Pcs separately ── */
+      /* ── MERGE: one row per retailer ── */
       const retailerMap = {};
 
       filtered.forEach(order => {
         const retailerId = order.RetailerUser?._id || order.retailerId || order._id;
         const key        = String(retailerId);
 
-        /* Aggregate this order's items by type */
         const { ctns: orderCtns, pcs: orderPcs } = aggregateItems(order.items || []);
 
         if (!retailerMap[key]) {
@@ -148,16 +142,11 @@ const ReportsSales = () => {
         retailerMap[key].totalAmount += parseFloat(order.total || 0);
       });
 
-      /* Final pcs → ctn rollup per retailer (in case pcs accumulated across orders) */
-      const rows = Object.values(retailerMap).map(r => {
-        // We don't have a single cortanSize per retailer easily,
-        // so we just surface the raw accumulated ctns + pcs
-        return {
-          ...r,
-          ctns: r.totalCtns,
-          pcs:  r.totalPcs,
-        };
-      });
+      const rows = Object.values(retailerMap).map(r => ({
+        ...r,
+        ctns: r.totalCtns,
+        pcs:  r.totalPcs,
+      }));
 
       setReportData(rows);
       setGenerated(true);
@@ -195,6 +184,7 @@ const ReportsSales = () => {
     else                         { start = ''; end = ''; }
     setStartDate(start); setEndDate(end); setDatePreset(preset);
   };
+
   const getPresetLabel = () => {
     if (datePreset==='custom' && startDate && endDate) return `${startDate} → ${endDate}`;
     if (datePreset==='custom' && startDate) return `From ${startDate}`;
@@ -211,6 +201,7 @@ const ReportsSales = () => {
     if (startDate && endDate && startDate > endDate) { toast.error('"From" must be before "To"'); return; }
     fetchReport({ sd:startDate, ed:endDate, sps:selectedSPs, city:selectedCity });
   };
+
   const handleReset = () => {
     setStartDate(''); setEndDate(''); setSelectedSPs([]); setSelectedCity('');
     setSearchCustomer(''); setSpSearch(''); setDatePreset('all'); setCurrentPage(1);
@@ -250,15 +241,18 @@ const ReportsSales = () => {
       'Salesperson': r.salesperson,
       'CTN':         r.ctns,
       'Pcs':         r.pcs,
+      'Total Qty':   calcTotalQty(r.ctns, r.pcs),
       'Total (Rs)':  parseFloat(r.totalAmount || 0),
     }));
     rows.push({
       'A/C No.': 'GRAND TOTAL', 'Customer': '', 'Salesperson': '',
-      'CTN': stats.totalCtns, 'Pcs': stats.totalPcs,
+      'CTN': stats.totalCtns,
+      'Pcs': stats.totalPcs,
+      'Total Qty': calcTotalQty(stats.totalCtns, stats.totalPcs),
       'Total (Rs)': stats.totalAmt,
     });
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [12,45,25,10,10,18].map(w => ({ wch: w }));
+    ws['!cols'] = [12, 45, 25, 10, 10, 12, 18].map(w => ({ wch: w }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sale Summary');
     XLSX.writeFile(wb, `Sale_Summary_${startDate&&endDate ? `${startDate}_to_${endDate}` : 'all'}.xlsx`);
@@ -293,9 +287,9 @@ const ReportsSales = () => {
         .rs-stat:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,0.08); }
         .rs-sp-cb { accent-color:#FF5934; }
         .total-row td { background:#FFF5F3; border-top:2px solid #FFD7CE; }
-        /* Type badges */
         .badge-ctn  { background:#EFF6FF; color:#3B82F6; font-size:9px; font-weight:700; padding:1px 5px; border-radius:5px; }
         .badge-pcs  { background:#F0FDF4; color:#16A34A; font-size:9px; font-weight:700; padding:1px 5px; border-radius:5px; }
+        .badge-total { background:#FFF5F3; color:#FF5934; font-size:9px; font-weight:700; padding:1px 5px; border-radius:5px; }
       `}</style>
 
       <div className="rs-page">
@@ -529,11 +523,11 @@ const ReportsSales = () => {
             {/* Stat cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
               {[
-                { icon: MdStorefront, label: 'Customers',    value: stats.count.toLocaleString(),                                        color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
-                { icon: MdGroup,      label: 'Salespersons', value: stats.uniqueSP.toLocaleString(),                                     color: 'text-blue-500',    bg: 'bg-blue-50'      },
+                { icon: MdStorefront, label: 'Customers',    value: stats.count.toLocaleString(),                                                                              color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
+                { icon: MdGroup,      label: 'Salespersons', value: stats.uniqueSP.toLocaleString(),                                                                           color: 'text-blue-500',    bg: 'bg-blue-50'      },
                 { icon: MdTrendingUp, label: 'Total CTN + Pcs',
-                  value: `${fmtInt(stats.totalCtns)} Ctn${stats.totalPcs > 0 ? ` ${stats.totalPcs} Pcs` : ''}`,                          color: 'text-emerald-600', bg: 'bg-emerald-50'   },
-                { icon: MdBarChart,   label: 'Total Amount', value: `Rs. ${fmt(stats.totalAmt)}`,                                        color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
+                  value: `${fmtInt(stats.totalCtns)} Ctn${stats.totalPcs > 0 ? ` ${stats.totalPcs} Pcs` : ''}`,                                                                color: 'text-emerald-600', bg: 'bg-emerald-50'   },
+                { icon: MdBarChart,   label: 'Total Amount', value: `Rs. ${fmt(stats.totalAmt)}`,                                                                              color: 'text-[#FF5934]',   bg: 'bg-[#FF5934]/10' },
               ].map(({ icon: Icon, label, value, color, bg }) => (
                 <div key={label} className="rs-stat bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 flex items-center gap-4">
                   <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center flex-shrink-0`}>
@@ -586,24 +580,30 @@ const ReportsSales = () => {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-[#FAFAFA] border-b border-gray-100">
-                          <th className="text-left   text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-10">#</th>
-                          <th className="text-left   text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[110px]">A/C No.</th>
-                          <th className="text-left   text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Customer</th>
-                          <th className="text-left   text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Salesperson</th>
-                          <th className="text-right  text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[90px]">
+                          <th className="text-left  text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-10">#</th>
+                          <th className="text-left  text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[110px]">A/C No.</th>
+                          <th className="text-left  text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Customer</th>
+                          <th className="text-left  text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">Salesperson</th>
+                          <th className="text-right text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[90px]">
                             <span className="badge-ctn">CTN</span>
                           </th>
-                          <th className="text-right  text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[80px]">
+                          <th className="text-right text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[80px]">
                             <span className="badge-pcs">Pcs</span>
                           </th>
-                          <th className="text-right  text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[150px]">Total (Rs.)</th>
+                          {/* ── NEW: Total Qty column ── */}
+                          <th className="text-right text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[110px]">
+                            <span className="badge-total">Total Qty</span>
+                          </th>
+                          <th className="text-right text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 w-[150px]">Total (Rs.)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
                         {paginated.map((row, i) => {
-                          const rowNum = (currentPage-1)*ROWS_PER_PAGE + i + 1;
-                          const negAmt = row.totalAmount < 0;
-                          const negCtn = row.ctns < 0;
+                          const rowNum  = (currentPage-1)*ROWS_PER_PAGE + i + 1;
+                          const negAmt  = row.totalAmount < 0;
+                          const negCtn  = row.ctns < 0;
+                          const totalQty = calcTotalQty(row.ctns, row.pcs);
+
                           return (
                             <tr key={row.retailerId || i} className="table-row">
                               {/* # */}
@@ -641,7 +641,13 @@ const ReportsSales = () => {
                                   {row.pcs > 0 ? row.pcs : <span className="text-[#D1D5DB]">—</span>}
                                 </span>
                               </td>
-                              {/* Total */}
+                              {/* ── Total Qty ── */}
+                              <td className="px-4 py-3 text-right">
+                                <span className="text-[13px] font-bold text-[#FF5934]">
+                                  {totalQty}
+                                </span>
+                              </td>
+                              {/* Total Amount */}
                               <td className="px-4 py-3 text-right">
                                 <span className={`text-[13px] font-bold ${negAmt ? 'text-red-500' : 'text-[#111827]'}`}>
                                   {negAmt ? '(' : ''}Rs.&nbsp;{fmt(Math.abs(row.totalAmount))}{negAmt ? ')' : ''}
@@ -656,14 +662,23 @@ const ReportsSales = () => {
                           <td className="px-4 py-3" colSpan={4}>
                             <span className="text-[12px] font-bold text-[#9CA3AF] uppercase tracking-widest">Grand Total</span>
                           </td>
+                          {/* CTN total */}
                           <td className="px-4 py-3 text-right">
                             <span className="text-[14px] font-bold text-[#FF5934]">{fmtInt(stats.totalCtns)}</span>
                           </td>
+                          {/* Pcs total */}
                           <td className="px-4 py-3 text-right">
                             <span className="text-[14px] font-bold text-[#FF5934]">
                               {stats.totalPcs > 0 ? stats.totalPcs : <span className="text-[#D1D5DB]">—</span>}
                             </span>
                           </td>
+                          {/* Total Qty grand total */}
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[14px] font-bold text-[#FF5934]">
+                              {calcTotalQty(stats.totalCtns, stats.totalPcs)}
+                            </span>
+                          </td>
+                          {/* Amount total */}
                           <td className="px-4 py-3 text-right">
                             <span className="text-[14px] font-bold text-[#FF5934]">Rs.&nbsp;{fmt(stats.totalAmt)}</span>
                           </td>

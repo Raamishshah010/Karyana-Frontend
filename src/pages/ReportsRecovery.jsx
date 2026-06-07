@@ -5,7 +5,7 @@ import {
   MdSearch, MdClose, MdRefresh, MdPerson, MdCalendarToday,
   MdFilterList, MdBarChart, MdCheckCircle, MdDownload,
   MdStorefront, MdAttachMoney, MdGroup, MdExpandMore, MdDateRange,
-  MdTrendingUp, MdFileDownload,
+  MdTrendingUp, MdFileDownload, MdLocationOn,
 } from 'react-icons/md';
 import { AiOutlineCheck, AiOutlineClose } from 'react-icons/ai';
 import { FaRegEye } from 'react-icons/fa6';
@@ -82,11 +82,13 @@ const ReportsDebit = () => {
   const [datePreset, setDatePreset]             = useState('all');
 
   /* dropdown open state */
-  const [retDropOpen, setRetDropOpen]   = useState(false);
-  const [retSearch, setRetSearch]       = useState('');
-  const [spDropOpen, setSpDropOpen]     = useState(false);
-  const [spSearch, setSpSearch]         = useState('');
-  const [dateDropOpen, setDateDropOpen] = useState(false);
+  const [retDropOpen, setRetDropOpen]     = useState(false);
+  const [retSearch, setRetSearch]         = useState('');
+  const [spDropOpen, setSpDropOpen]       = useState(false);
+  const [spSearch, setSpSearch]           = useState('');
+  const [cityDropOpen, setCityDropOpen]   = useState(false);  // ← NEW
+  const [citySearch, setCitySearch]       = useState('');     // ← NEW
+  const [dateDropOpen, setDateDropOpen]   = useState(false);
 
   /* pagination */
   const [currentPage, setCurrentPage]       = useState(1);
@@ -106,6 +108,7 @@ const ReportsDebit = () => {
         setRetDropOpen(false);
         setSpDropOpen(false);
         setDateDropOpen(false);
+        setCityDropOpen(false); // ← NEW
       }
     };
     document.addEventListener('mousedown', handler);
@@ -131,7 +134,9 @@ const ReportsDebit = () => {
       } else if (city) {
         targetRetailers = retailers.filter(r => {
           const cid = typeof r.city === 'object' ? r.city?._id : r.city;
-          return cid === city;
+          // Also support matching by name string
+          const cname = typeof r.city === 'object' ? r.city?.name : '';
+          return cid === city || cname === city;
         });
       } else if (sp) {
         targetRetailers = retailers.filter(r => {
@@ -208,7 +213,7 @@ const ReportsDebit = () => {
               image:       ledger.image || null,
               type:        (ledger.type || 'DEBIT').toUpperCase(),
             });
-            return; // don't also put it in debit rows
+            return;
           }
 
           /* ── DEBIT rows (approved / non-recovery) ── */
@@ -331,7 +336,7 @@ const ReportsDebit = () => {
     setStartDate(''); setEndDate('');
     setSelectedRetailer(''); setSelectedSP(''); setSelectedCity('');
     setSearchTerm(''); setStatusFilter(''); setTypeFilter('');
-    setRetSearch(''); setSpSearch('');
+    setRetSearch(''); setSpSearch(''); setCitySearch('');
     setDatePreset('all'); setCurrentPage(1); setRecoveryPage(1);
     fetchReport({});
   };
@@ -368,14 +373,14 @@ const ReportsDebit = () => {
 
   /* ── Summary stats ── */
   const stats = useMemo(() => ({
-    totalAmount: filtered.reduce((s, r) => s + r.amount, 0),
-    approved:    filtered.filter(r => r.status === 'Approved').length,
-    pending:     filtered.filter(r => r.status === 'Pending').length,
-    rejected:    filtered.filter(r => r.status === 'Rejected').length,
-    count:       filtered.length,
-    types:       [...new Set(reportData.map(r => r.type))].sort(),
-    recoveryTotal: recoveryData.reduce((s, r) => s + r.amount, 0),
-    recoveryCount: recoveryData.length,
+    totalAmount:    filtered.reduce((s, r) => s + r.amount, 0),
+    approved:       filtered.filter(r => r.status === 'Approved').length,
+    pending:        filtered.filter(r => r.status === 'Pending').length,
+    rejected:       filtered.filter(r => r.status === 'Rejected').length,
+    count:          filtered.length,
+    types:          [...new Set(reportData.map(r => r.type))].sort(),
+    recoveryTotal:  recoveryData.reduce((s, r) => s + r.amount, 0),
+    recoveryCount:  recoveryData.length,
   }), [filtered, reportData, recoveryData]);
 
   /* ── Pagination ── */
@@ -422,7 +427,6 @@ const ReportsDebit = () => {
       if (res?.success) toast.success(res?.msg || 'Approved and moved to Ledger');
       else toast.info(res?.msg || 'Approval processed');
       setActionStatuses(prev => ({ ...prev, [row.id]: 'approved' }));
-      /* optimistically remove from recoveryData */
       setRecoveryData(prev => prev.filter(r => r.id !== row.id));
     } catch (err) {
       setActionStatuses(prev => ({ ...prev, [row.id]: undefined }));
@@ -439,7 +443,6 @@ const ReportsDebit = () => {
       if (res?.success) toast.success(res?.msg || 'Entry rejected');
       else toast.info(res?.msg || 'Rejection processed');
       setActionStatuses(prev => ({ ...prev, [row.id]: 'rejected' }));
-      /* keep in list but mark rejected — matches LedgerSales behaviour */
       setRecoveryData(prev => prev.map(r => r.id === row.id ? { ...r, isRejected: true } : r));
     } catch (err) {
       setActionStatuses(prev => ({ ...prev, [row.id]: undefined }));
@@ -454,15 +457,32 @@ const ReportsDebit = () => {
   };
 
   /* ── Dropdown filter lists ── */
-  const filteredRetList = retailers.filter(r =>
+  const filteredRetList  = retailers.filter(r =>
     (r.shopName || r.name || '').toLowerCase().includes(retSearch.toLowerCase())
   );
-  const filteredSPList = salesPersons.filter(s =>
+  const filteredSPList   = salesPersons.filter(s =>
     (s.name || '').toLowerCase().includes(spSearch.toLowerCase())
   );
-  const selectedRetObj = retailers.find(r => r._id === selectedRetailer);
-  const selectedSPObj  = salesPersons.find(s => s._id === selectedSP);
-  const activeFilterCount = [selectedRetailer, selectedSP, selectedCity, startDate || endDate, datePreset !== 'all'].filter(Boolean).length;
+  // ── NEW: city list filtered by search ──
+  const filteredCityList = cities.filter(c =>
+    (c.name || c.cityName || c).toString().toLowerCase().includes(citySearch.toLowerCase())
+  );
+
+  const selectedRetObj  = retailers.find(r => r._id === selectedRetailer);
+  const selectedSPObj   = salesPersons.find(s => s._id === selectedSP);
+  // ── NEW: resolve selected city object ──
+  const selectedCityObj = cities.find(c => (c._id || c) === selectedCity);
+  const selectedCityName = selectedCityObj
+    ? (selectedCityObj.name || selectedCityObj.cityName || selectedCity)
+    : selectedCity;
+
+  const activeFilterCount = [
+    selectedRetailer,
+    selectedSP,
+    selectedCity,          // ← now tracked
+    startDate || endDate,
+    datePreset !== 'all',
+  ].filter(Boolean).length;
 
   /* ── Badges ── */
   const statusBadge = (s) => {
@@ -522,7 +542,7 @@ const ReportsDebit = () => {
             <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Customer Recovery Report</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">
               {generated
-                ? `${stats.count} debit entries · ${stats.recoveryCount} recovery entries · ${presetLabel()}${selectedRetObj ? ` · ${selectedRetObj.shopName || selectedRetObj.name}` : ''}`
+                ? `${stats.count} debit entries · ${stats.recoveryCount} recovery entries · ${presetLabel()}${selectedRetObj ? ` · ${selectedRetObj.shopName || selectedRetObj.name}` : ''}${selectedCityName ? ` · ${selectedCityName}` : ''}`
                 : 'Select filters and generate report'}
             </p>
           </div>
@@ -547,14 +567,14 @@ const ReportsDebit = () => {
 
           <div className="flex flex-wrap gap-4 items-end">
 
-            {/* Date preset */}
+            {/* ── Date preset ── */}
             <div className="flex-1 min-w-[200px] rr-dropdown">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                 <MdCalendarToday size={12} className="text-[#FF5934]" /> Date Range
               </label>
               <div
                 className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                onClick={() => setDateDropOpen(p => !p)}
+                onClick={() => { setDateDropOpen(p => !p); setRetDropOpen(false); setSpDropOpen(false); setCityDropOpen(false); }}
               >
                 <span className="text-[13px] text-[#111827] font-medium flex-1">{presetLabel()}</span>
                 <MdExpandMore size={18} className={`text-[#9CA3AF] transition-transform ${dateDropOpen ? 'rotate-180' : ''}`} />
@@ -572,7 +592,7 @@ const ReportsDebit = () => {
               )}
             </div>
 
-            {/* Custom date inputs */}
+            {/* ── Custom date inputs ── */}
             {datePreset === 'custom' && (
               <>
                 <div className="flex-1 min-w-[140px]">
@@ -590,14 +610,103 @@ const ReportsDebit = () => {
               </>
             )}
 
-            {/* Retailer picker */}
+            {/* ── Location / City picker ── NEW ── */}
+            <div className="flex-1 min-w-[180px] rr-dropdown">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
+                <MdLocationOn size={12} className="text-[#FF5934]" /> Location
+              </label>
+              <div
+                className={`flex items-center gap-2 bg-[#F9FAFB] border rounded-xl px-3 py-2.5 cursor-pointer transition-all
+                  ${cityDropOpen ? 'border-[#FF5934] shadow-sm shadow-orange-100' : 'border-gray-200 hover:border-[#FF5934]'}`}
+                onClick={() => { setCityDropOpen(p => !p); setRetDropOpen(false); setSpDropOpen(false); setDateDropOpen(false); }}
+              >
+                {selectedCityName ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className="w-6 h-6 rounded-full bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0">
+                      <MdLocationOn size={12} className="text-[#FF5934]" />
+                    </div>
+                    <span className="text-[13px] text-[#111827] font-medium truncate">{selectedCityName}</span>
+                  </div>
+                ) : (
+                  <span className="text-[13px] text-[#9CA3AF] flex-1">All locations</span>
+                )}
+                <MdExpandMore size={18} className={`text-[#9CA3AF] flex-shrink-0 transition-transform ${cityDropOpen ? 'rotate-180' : ''}`} />
+              </div>
+
+              {cityDropOpen && (
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden" style={{ top:'100%' }}>
+                  {/* Search inside dropdown */}
+                  <div className="p-2 border-b border-gray-100">
+                    <div className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-1.5">
+                      <MdSearch size={14} className="text-[#9CA3AF]" />
+                      <input
+                        autoFocus
+                        value={citySearch}
+                        onChange={e => setCitySearch(e.target.value)}
+                        placeholder="Search location…"
+                        className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#9CA3AF] w-full"
+                      />
+                      {citySearch && (
+                        <button onClick={() => setCitySearch('')} className="text-[#9CA3AF] hover:text-[#FF5934]">
+                          <MdClose size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="max-h-52 overflow-y-auto rr-no-scroll">
+                    {/* All locations option */}
+                    <div
+                      onClick={() => { setSelectedCity(''); setCityDropOpen(false); setCitySearch(''); }}
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 ${!selectedCity ? 'bg-orange-50' : ''}`}
+                    >
+                      <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                        <MdLocationOn size={14} className="text-gray-400" />
+                      </div>
+                      <p className="text-[13px] font-medium text-[#374151] flex-1">All Locations</p>
+                      {!selectedCity && <MdCheckCircle size={15} className="text-[#FF5934]" />}
+                    </div>
+
+                    {/* City options */}
+                    {filteredCityList.length > 0 ? filteredCityList.map((city, idx) => {
+                      const cityId   = city._id || city;
+                      const cityName = city.name || city.cityName || city;
+                      const isActive = selectedCity === cityId || selectedCity === cityName;
+                      return (
+                        <div
+                          key={cityId || idx}
+                          onClick={() => {
+                            setSelectedCity(city._id || city);
+                            setCityDropOpen(false);
+                            setCitySearch('');
+                          }}
+                          className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-orange-50 transition-colors border-b border-gray-50 last:border-0 ${isActive ? 'bg-orange-50' : ''}`}
+                        >
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-[#FF5934]/10' : 'bg-gray-100'}`}>
+                            <MdLocationOn size={14} className={isActive ? 'text-[#FF5934]' : 'text-gray-400'} />
+                          </div>
+                          <p className={`text-[13px] flex-1 truncate ${isActive ? 'font-semibold text-[#111827]' : 'font-medium text-[#374151]'}`}>
+                            {cityName}
+                          </p>
+                          {isActive && <MdCheckCircle size={15} className="text-[#FF5934] flex-shrink-0" />}
+                        </div>
+                      );
+                    }) : (
+                      <div className="py-6 text-center text-[13px] text-[#9CA3AF]">No locations found</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Retailer picker ── */}
             <div className="flex-1 min-w-[200px] rr-dropdown">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                 <MdStorefront size={12} className="text-[#FF5934]" /> Retailer
               </label>
               <div
                 className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                onClick={() => { setRetDropOpen(p => !p); setSpDropOpen(false); }}
+                onClick={() => { setRetDropOpen(p => !p); setSpDropOpen(false); setCityDropOpen(false); }}
               >
                 {selectedRetObj ? (
                   <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -652,14 +761,14 @@ const ReportsDebit = () => {
               )}
             </div>
 
-            {/* Salesperson picker */}
+            {/* ── Salesperson picker ── */}
             <div className="flex-1 min-w-[200px] rr-dropdown">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
                 <MdPerson size={12} className="text-[#FF5934]" /> Salesperson
               </label>
               <div
                 className="flex items-center gap-2 bg-[#F9FAFB] border border-gray-200 rounded-xl px-3 py-2.5 cursor-pointer hover:border-[#FF5934] transition-all"
-                onClick={() => { setSpDropOpen(p => !p); setRetDropOpen(false); }}
+                onClick={() => { setSpDropOpen(p => !p); setRetDropOpen(false); setCityDropOpen(false); }}
               >
                 {selectedSPObj ? (
                   <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -714,7 +823,7 @@ const ReportsDebit = () => {
               )}
             </div>
 
-            {/* Status filter (debit tab only) */}
+            {/* ── Status filter (debit tab only) ── */}
             {activeTab === 'debit' && (
               <div className="flex-1 min-w-[140px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
@@ -733,7 +842,7 @@ const ReportsDebit = () => {
               </div>
             )}
 
-            {/* Type filter */}
+            {/* ── Type filter ── */}
             {activeTab === 'debit' && stats.types.length > 1 && (
               <div className="flex-1 min-w-[140px]">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
@@ -750,7 +859,7 @@ const ReportsDebit = () => {
               </div>
             )}
 
-            {/* Buttons */}
+            {/* ── Buttons ── */}
             <div className="flex gap-2 flex-shrink-0">
               <button onClick={handleReset}
                 className="h-10 px-4 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
@@ -765,14 +874,22 @@ const ReportsDebit = () => {
             </div>
           </div>
 
-          {/* Active filter chips */}
-          {(selectedRetObj || selectedSPObj || datePreset !== 'all') && (
+          {/* ── Active filter chips ── */}
+          {(selectedRetObj || selectedSPObj || selectedCityName || datePreset !== 'all') && (
             <div className="mt-4 flex flex-wrap gap-2">
               {datePreset !== 'all' && (
                 <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5">
                   <MdDateRange size={12} className="text-blue-500" />
                   <span className="text-[12px] font-semibold text-blue-600">{presetLabel()}</span>
                   <button onClick={() => { setDatePreset('all'); setStartDate(''); setEndDate(''); }} className="text-blue-400 hover:text-blue-600 ml-1"><MdClose size={13} /></button>
+                </div>
+              )}
+              {/* ── City chip ── NEW ── */}
+              {selectedCityName && (
+                <div className="flex items-center gap-2 bg-violet-50 border border-violet-100 rounded-xl px-3 py-1.5">
+                  <MdLocationOn size={12} className="text-violet-500" />
+                  <span className="text-[12px] font-semibold text-violet-600">{selectedCityName}</span>
+                  <button onClick={() => { setSelectedCity(''); setCitySearch(''); }} className="text-violet-400 hover:text-violet-600 ml-1"><MdClose size={13} /></button>
                 </div>
               )}
               {selectedRetObj && (
@@ -793,7 +910,7 @@ const ReportsDebit = () => {
           )}
         </div>
 
-        {/* Loading */}
+        {/* ── Loading ── */}
         {loading && (
           <div className="bg-white border border-gray-100 rounded-2xl shadow-sm py-20 flex flex-col items-center gap-3">
             <div className="w-10 h-10 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
@@ -801,7 +918,7 @@ const ReportsDebit = () => {
           </div>
         )}
 
-        {/* Results */}
+        {/* ── Results ── */}
         {!loading && generated && (
           <>
             {/* Stat cards */}
@@ -906,9 +1023,6 @@ const ReportsDebit = () => {
                                       <span className="text-[13px] text-[#374151] font-medium">{row.salesPerson}</span>
                                     </div>
                                   </td>
-                                  {/* <td className="px-4 py-3">
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold ${typeBadge(row.type)}`}>{row.type}</span>
-                                  </td> */}
                                   <td className="px-4 py-3 text-center -translate-x-12">
                                     <span className="text-[13px] font-bold text-[#FF5934]">Rs. {fmt(row.amount)}</span>
                                   </td>
@@ -979,11 +1093,11 @@ const ReportsDebit = () => {
                           </thead>
                           <tbody className="divide-y divide-gray-50">
                             {recoveryPaginated.map((row, i) => {
-                              const n       = (recoveryPage - 1) * ROWS_PER_PAGE + i + 1;
-                              const status  = actionStatuses[row.id];
-                              const isRej   = row.isRejected === true || status === 'rejected';
-                              const isApp   = status === 'approved';
-                              const isLoad  = status === 'loading';
+                              const n      = (recoveryPage - 1) * ROWS_PER_PAGE + i + 1;
+                              const status = actionStatuses[row.id];
+                              const isRej  = row.isRejected === true || status === 'rejected';
+                              const isApp  = status === 'approved';
+                              const isLoad = status === 'loading';
 
                               return (
                                 <tr key={row._id || i} className="table-row">
@@ -1013,7 +1127,6 @@ const ReportsDebit = () => {
                                   <td className="px-4 py-3">
                                     <span className="text-[13px] font-semibold text-[#111827]">Rs. {fmt(row.balance)}</span>
                                   </td>
-                                  {/* Action — mirrors LedgerSales recovery tab exactly */}
                                   <td className="px-4 py-3">
                                     <div className="flex items-center gap-1.5">
                                       {isRej ? (

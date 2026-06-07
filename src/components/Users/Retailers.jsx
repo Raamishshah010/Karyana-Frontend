@@ -420,8 +420,8 @@ const Retailers = () => {
         toast.success("Retailer updated successfully!");
       } else {
         const response = await createRetialer(formData, token);
-        if (response.data?.msg === "success") toast.success("Retailer added successfully!");
-        else throw new Error(response.data?.msg || "Failed to add retailer");
+        if (response.data?.msg === "success") toast.success("Customer added successfully!");
+        else throw new Error(response.data?.msg || "Failed to add Customer");
       }
       getRetailers(currentPage, limit).then((res) => {
         setData(normalizeRetailersList(res.data.data));
@@ -521,7 +521,7 @@ const Retailers = () => {
               className="flex items-center gap-2 bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-md shadow-orange-100 transition-all duration-200"
             >
               <MdPersonAdd size={18} />
-              Add Retailer
+              Add Customer
             </button>
           </div>
         </div>
@@ -747,7 +747,7 @@ const Retailers = () => {
                       {editInitialValues.id ? 'Editing Profile' : 'New Profile'}
                     </p>
                     <h2 className="text-white text-xl font-bold">
-                      {editInitialValues.id ? 'Edit Retailer' : 'Add Retailer'}
+                      {editInitialValues.id ? 'Edit Customer' : 'Add Customer'}
                     </h2>
                   </div>
                   <button onClick={() => { setIsFormVisible(false); setEditInitialValues(EMPTY_FORM); }}
@@ -821,7 +821,7 @@ const Retailers = () => {
                               className={inputClsErr(errors.shopAddress2, touched.shopAddress2)} />
                           </FieldGroup>
                           <div className="col-span-2">
-                            <FieldGroup icon={MdLocationCity} label="City">
+                            <FieldGroup icon={MdLocationCity} label="Sites">
                               <select name="cityID" value={values.cityID} onChange={handleChange}
                                 className={inputClsErr(errors.cityID, touched.cityID)}>
                                 <option value="">Select Site</option>
@@ -880,7 +880,7 @@ const Retailers = () => {
                       </button>
                       <button type="submit"
                         className="flex-1 h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold shadow-lg shadow-orange-100 transition-all duration-200 flex items-center justify-center gap-2">
-                        {editInitialValues.id ? <><MdEdit size={16} /> Save Changes</> : <><MdPersonAdd size={16} /> Add Retailer</>}
+                        {editInitialValues.id ? <><MdEdit size={16} /> Save Changes</> : <><MdPersonAdd size={16} /> Add Customer</>}
                       </button>
                     </div>
                   </Form>
