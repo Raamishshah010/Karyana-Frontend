@@ -24,7 +24,7 @@ import {
    silently filtered out. Adjust this list to match your actual
    order statuses if needed.
 ───────────────────────────────────────────────────────────── */
-const ALLOWED_STATUSES = ['Completed',  'Delivered', 'Final'];
+const ALLOWED_STATUSES = ['Completed',  'Delivered'];
 const LIMIT = 10;
 const FETCH_ALL_LIMIT = 1000;
 

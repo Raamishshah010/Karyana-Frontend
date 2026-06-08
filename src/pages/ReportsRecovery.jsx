@@ -613,7 +613,7 @@ const ReportsDebit = () => {
             {/* ── Location / City picker ── NEW ── */}
             <div className="flex-1 min-w-[180px] rr-dropdown">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#6B7280] uppercase tracking-widest mb-1.5">
-                <MdLocationOn size={12} className="text-[#FF5934]" /> Location
+                <MdLocationOn size={12} className="text-[#FF5934]" /> Site
               </label>
               <div
                 className={`flex items-center gap-2 bg-[#F9FAFB] border rounded-xl px-3 py-2.5 cursor-pointer transition-all
@@ -628,7 +628,7 @@ const ReportsDebit = () => {
                     <span className="text-[13px] text-[#111827] font-medium truncate">{selectedCityName}</span>
                   </div>
                 ) : (
-                  <span className="text-[13px] text-[#9CA3AF] flex-1">All locations</span>
+                  <span className="text-[13px] text-[#9CA3AF] flex-1">All Sites</span>
                 )}
                 <MdExpandMore size={18} className={`text-[#9CA3AF] flex-shrink-0 transition-transform ${cityDropOpen ? 'rotate-180' : ''}`} />
               </div>
@@ -663,7 +663,7 @@ const ReportsDebit = () => {
                       <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
                         <MdLocationOn size={14} className="text-gray-400" />
                       </div>
-                      <p className="text-[13px] font-medium text-[#374151] flex-1">All Locations</p>
+                      <p className="text-[13px] font-medium text-[#374151] flex-1">All Sites</p>
                       {!selectedCity && <MdCheckCircle size={15} className="text-[#FF5934]" />}
                     </div>
 

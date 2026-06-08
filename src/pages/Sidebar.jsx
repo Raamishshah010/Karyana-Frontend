@@ -372,6 +372,7 @@ const Sidebar = () => {
               </NavGroup>
 
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
+              <NavItem to="/Ledgers/Purchase" icon={MdPointOfSale} label="Accounts"    collapsed={collapsed} />
               <NavItem to="/coupon" icon={RiCoupon3Line} label="Coupon"    collapsed={collapsed} />
               <NavItem to="/Cities" icon={MdLocationOn}  label="Sites" collapsed={collapsed} />
               <NavItem to="/target" icon={FaBullseye}    label="Target"    collapsed={collapsed} />

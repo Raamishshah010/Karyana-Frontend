@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 
 const Ledger = () => {
   const navItems = [
-    { name: "Sales", path: "/Leders/LedgerSales" },
+    // { name: "Sales", path: "/Leders/LedgerSales" },
     { name: "Purchase", path: "/Ledgers/Purchase" },
     { name: "Bank", path: "/Ledgers/Bank" },
   ];
