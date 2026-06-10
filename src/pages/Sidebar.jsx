@@ -3,7 +3,7 @@ import { CiLogout } from 'react-icons/ci';
 import { SlDiamond } from "react-icons/sl";
 import { FaBook } from "react-icons/fa";
 import { FaRegUser } from "react-icons/fa";
-import { MdCalendarMonth } from 'react-icons/md';
+import { MdAccountBalance, MdBusiness, MdCalendarMonth } from 'react-icons/md';
 import { RiCoupon3Line } from 'react-icons/ri';
 import { FaBullseye } from 'react-icons/fa';
 import {
@@ -371,8 +371,19 @@ const Sidebar = () => {
                 <SubNavItem to="/Reports/TargetVsAchieve"      icon={FaBullseye}    label="Target vs Achievement"      />
               </NavGroup>
 
+              <NavGroup icon={MdShoppingCart} label="Purchase" groupId="purchase" {...groupProps}>
+  <SubNavItem to="/Ledgers/Supplier"        icon={MdBusiness}          label="Supplier"           />
+  <SubNavItem to="/Ledgers/Purchases"        icon={MdShoppingCart}      label="Purchases"          />
+  <SubNavItem to="/Purchase/Invoices"         icon={MdReceipt}           label="Purchase Invoices"  />
+  <SubNavItem to="/Purchase/Payments"         icon={MdPayment}           label="Payments"           />
+</NavGroup>
+
+<NavGroup icon={MdAccountBalance} label="Accounts" groupId="accounts" {...groupProps}>
+  <SubNavItem to="/Ledgers/Bank" icon={MdAccountBalance} label="Banks" />
+</NavGroup>
+
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
-              <NavItem to="/Ledgers/Purchase" icon={MdPointOfSale} label="Accounts"    collapsed={collapsed} />
+              {/* <NavItem to="/Ledgers/Purchase" icon={MdPointOfSale} label="Accounts"    collapsed={collapsed} /> */}
               <NavItem to="/coupon" icon={RiCoupon3Line} label="Coupon"    collapsed={collapsed} />
               <NavItem to="/Cities" icon={MdLocationOn}  label="Sites" collapsed={collapsed} />
               <NavItem to="/target" icon={FaBullseye}    label="Target"    collapsed={collapsed} />

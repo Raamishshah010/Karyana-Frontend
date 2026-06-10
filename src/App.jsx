@@ -63,6 +63,8 @@ import ReportsRecovery from './pages/ReportsRecovery.jsx';
 import ReportsTargetVsAchieve from './pages/ReportsTargetVsAchieve.jsx';
 import ReportsCustomerLedger from './pages/ReportsCustomerLedger.jsx';
 import ProductAndInventory from './pages/ProductAndInventory.jsx';
+import Supplier from './pages/Supplier.jsx';
+import Purchases from './pages/Purchases.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -180,6 +182,11 @@ const App = () => {
               <Route path="/Reports/TargetVsAchieve" element={<ReportsTargetVsAchieve />} />
               <Route path="/Reports/ProductAndInventory" element={<ProductAndInventory />} />
               <Route path="/Reports/CustomerLedger" element={<ReportsCustomerLedger />} />
+
+
+
+              <Route path="/Ledgers/Supplier" element={<Supplier />} />
+              <Route path="/Ledgers/Purchases" element={<Purchases />} />
             </Routes>
           </div>
         </div>

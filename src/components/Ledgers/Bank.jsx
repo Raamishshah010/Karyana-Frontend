@@ -194,6 +194,8 @@ const Bank = () => {
         { _id: 3, name: "United Bank Limited", image: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSeA5W9lazd9LYJmJUMHFZl7raZyvuIFCj0Yg&s" },
         { _id: 4, name: "MCB Bank", image: "https://seeklogo.com/images/M/mcb-bank-logo-34F6A134AD-seeklogo.com.png" },
         { _id: 5, name: "Allied Bank", image: "https://example.com/images/allied-bank.png" },
+        { _id: 6, name: "Easy Paisa", image: "https://crystalpng.com/wp-content/uploads/2024/10/Easypaisa-logo.png" },
+        { _id: 7, name: "Jazz Cash", image: "https://crystalpng.com/wp-content/uploads/2024/12/new-Jazzcash-logo.png" },
     ];
 
     const validationSchema = Yup.object().shape({

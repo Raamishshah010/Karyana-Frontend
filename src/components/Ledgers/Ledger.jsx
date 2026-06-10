@@ -10,7 +10,7 @@ const Ledger = () => {
 
   return (
     <div className="w-full">
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-4 py-3 inline-flex gap-2">
+      {/* <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-4 py-3 inline-flex gap-2">
 
         {navItems.map((item) => (
           <NavLink
@@ -29,7 +29,7 @@ const Ledger = () => {
           </NavLink>
         ))}
 
-      </div>
+      </div> */}
     </div>
   );
 };
