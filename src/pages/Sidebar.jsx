@@ -374,7 +374,7 @@ const Sidebar = () => {
               <NavGroup icon={MdShoppingCart} label="Purchase" groupId="purchase" {...groupProps}>
   <SubNavItem to="/Ledgers/Supplier"        icon={MdBusiness}          label="Supplier"           />
   <SubNavItem to="/Ledgers/Purchases"        icon={MdShoppingCart}      label="Purchases"          />
-  <SubNavItem to="/Purchase/Invoices"         icon={MdReceipt}           label="Purchase Invoices"  />
+  <SubNavItem to="/Purchase/Credit-Note"         icon={MdReceipt}           label="Credit Note"  />
   <SubNavItem to="/Purchase/Payments"         icon={MdPayment}           label="Payments"           />
 </NavGroup>
 
