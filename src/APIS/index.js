@@ -1,6 +1,78 @@
 import axios from "axios";
 import { SERVER_URL } from "../utils";
 
+
+export const createExpense = async (data, token) => {
+  let config = {
+    method: "post",
+    url: SERVER_URL + "/expenses",
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const getAllExpenses = async ({ page = 1, limit = 25 } = {}) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + `/expenses?page=${page}&limit=${limit}`,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+export const updateExpense = async (id, data, token) => {
+  let config = {
+    method: "put",
+    url: SERVER_URL + "/expenses/" + id,
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const deleteExpense = async (id, token) => {
+  let config = {
+    method: "delete",
+    url: SERVER_URL + "/expenses/" + id,
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+export const searchExpenses = async (params) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + `/expenses/search?${params}`,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+export const getNominalAccounts = async () => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + "/expenses/nominals",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
 export const uploadFile = async (data) => {
   let config = {
     method: "post",
@@ -1934,6 +2006,9 @@ export const getTargetHistory = async () => {
   };
   return await axios.request(config);
 };
+
+
+
 
 // export const getTargetsByMonth = async (month, year) => {
 //   let config = {

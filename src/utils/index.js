@@ -8,9 +8,14 @@
 // export const SERVER_URL = "https://server-karyana-dev.vercel.app/api";
 // export const SERVER_URL = "http://54.153.208.108/api";
 // export const SERVER_URL = "http://52.65.114.218/api";
-export const SERVER_URL = "https://primelinkdistribution.com/api";
-// export const SERVER_URL = "https://www.primelinkdistribution.com/api";
 
+
+// DEPLOYMENT API
+
+export const SERVER_URL = "https://karyana-server-xi.vercel.app/api";
+
+// REAL URL
+// export const SERVER_URL = "https://primelinkdistribution.com/api";
 
 export const calculateRating = (reviews = [], key = "rating") => {
   const res = 
