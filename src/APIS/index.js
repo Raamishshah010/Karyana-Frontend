@@ -2,6 +2,58 @@ import axios from "axios";
 import { SERVER_URL } from "../utils";
 
 
+// ==================== NOMINAL ACCOUNT APIs ====================
+
+export const getAllNominalAccounts = async (params = {}) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + "/nominals",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    params, // sends type, nature, isActive, page, limit as query strings
+  };
+  return await axios.request(config);
+};
+
+export const createNominalAccount = async (data, token) => {
+  let config = {
+    method: "post",
+    url: SERVER_URL + "/nominals",
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const updateNominalAccount = async (id, data, token) => {
+  let config = {
+    method: "put",
+    url: SERVER_URL + "/nominals/" + id,
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const deleteNominalAccount = async (id, token) => {
+  let config = {
+    method: "delete",
+    url: SERVER_URL + "/nominals/" + id,
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
 export const createExpense = async (data, token) => {
   let config = {
     method: "post",
@@ -65,7 +117,7 @@ export const searchExpenses = async (params) => {
 export const getNominalAccounts = async () => {
   let config = {
     method: "get",
-    url: SERVER_URL + "/expenses/nominals",
+    url: SERVER_URL + "/nominals/dropdown",
     headers: {
       "Content-Type": "application/json",
     },

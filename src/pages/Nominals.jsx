@@ -4,9 +4,9 @@ import * as yup from 'yup';
 import { toast } from 'react-toastify';
 import { GrFormNext, GrFormPrevious } from 'react-icons/gr';
 import {
-  MdAdd, MdClose, MdEdit, MdDelete, MdRefresh, MdReceipt,
-  MdAccountBalance, MdCalendarToday, MdExpandMore, MdSearch,
-  MdAttachMoney, MdArticle, MdNumbers, MdFilterList,
+  MdAdd, MdClose, MdEdit, MdDelete, MdRefresh, MdArticle,
+  MdExpandMore, MdFilterList, MdNumbers, MdToggleOn, MdToggleOff,
+  MdTrendingUp, MdTrendingDown, MdSwapVert,
 } from 'react-icons/md';
 import { useSelector } from 'react-redux';
 import { checkAuthError } from '../utils';
@@ -15,26 +15,27 @@ import { Spinner } from '../components/common/spinner';
 import EscapeClose from '../components/EscapeClose';
 
 import {
-  getAllBanks,
-  createExpense,
-  getAllExpenses,
-  updateExpense,
-  deleteExpense,
-  searchExpenses,
-  getNominalAccounts,
+  getAllNominalAccounts,
+  createNominalAccount,
+  updateNominalAccount,
+  deleteNominalAccount,
 } from '../APIS';
 
 const LIMIT = 25;
 
-const DATE_RANGE_OPTIONS = [
-  { value: 'all',        label: 'All Dates' },
-  { value: 'today',      label: 'Today' },
-  { value: 'yesterday',  label: 'Yesterday' },
-  { value: 'this_week',  label: 'This Week' },
-  { value: 'last_week',  label: 'Last Week' },
-  { value: 'this_month', label: 'This Month' },
-  { value: 'last_month', label: 'Last Month' },
-  { value: 'custom',     label: 'Custom Range' },
+const TYPE_OPTIONS = [
+  { value: 'INCOME',  label: 'Income' },
+  { value: 'EXPENSE', label: 'Expense' },
+];
+
+const NATURE_OPTIONS = [
+  { value: 'DEBIT',  label: 'Debit' },
+  { value: 'CREDIT', label: 'Credit' },
+];
+
+const STATUS_OPTIONS = [
+  { value: 'true',  label: 'Active' },
+  { value: 'false', label: 'Inactive' },
 ];
 
 const inputCls =
@@ -64,9 +65,7 @@ const FilterSelect = ({ label, value, onChange, options, placeholder = 'Select' 
       >
         <option value="">{placeholder}</option>
         {options.map(o => (
-          <option key={o.value ?? o._id} value={o.value ?? o._id}>
-            {o.label ?? o.bankName ?? o}
-          </option>
+          <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
       <MdExpandMore size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none" />
@@ -74,115 +73,118 @@ const FilterSelect = ({ label, value, onChange, options, placeholder = 'Select' 
   </div>
 );
 
-const Expenses = () => {
+const TypeBadge = ({ type }) => {
+  const isIncome = type === 'INCOME';
+  return (
+    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+      isIncome ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-[#FF5934]'
+    }`}>
+      {isIncome ? <MdTrendingUp size={13} /> : <MdTrendingDown size={13} />}
+      {isIncome ? 'Income' : 'Expense'}
+    </span>
+  );
+};
+
+const NatureBadge = ({ nature }) => (
+  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-[#F9FAFB] text-[#6B7280] border border-gray-200">
+    <MdSwapVert size={13} className="text-[#9CA3AF]" />
+    {nature === 'DEBIT' ? 'Debit' : 'Credit'}
+  </span>
+);
+
+const Nominals = () => {
   const token = useSelector(s => s.admin.token);
 
   const [data, setData]                 = useState([]);
-  const [banks, setBanks]               = useState([]);
-  const [nominals, setNominals]         = useState([]);
   const [loading, setLoading]           = useState(true);
   const [submitting, setSubmitting]     = useState(false);
   const [currentPage, setCurrentPage]   = useState(1);
   const [totalPages, setTotalPages]     = useState(1);
   const [totalEntries, setTotalEntries] = useState(0);
 
-  const [filterBank, setFilterBank]           = useState('');
-  const [filterNominal, setFilterNominal]     = useState('');
-  const [filterDateRange, setFilterDateRange] = useState('all');
-  const [filterStart, setFilterStart]         = useState('');
-  const [filterEnd, setFilterEnd]             = useState('');
+  const [filterType, setFilterType]     = useState('');
+  const [filterNature, setFilterNature] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
 
   const [selected, setSelected]   = useState([]);
   const [selectAll, setSelectAll] = useState(false);
 
-  const [showModal, setShowModal]           = useState(false);
-  const [showDetail, setShowDetail]         = useState(null);
-  const [editingExpense, setEditingExpense] = useState(null);
+  const [showModal, setShowModal]   = useState(false);
+  const [showDetail, setShowDetail] = useState(null);
+  const [editingAccount, setEditingAccount] = useState(null);
 
-  const emptyForm = { bankId: '', nominalAccount: '', refNo: '', details: '', amount: '', date: '' };
+  const emptyForm = { code: '', name: '', type: '', nature: '', isActive: true };
   const [formState, setFormState] = useState(emptyForm);
 
-  const validations = yup.object().shape({
-    bankId:         yup.string().required('Bank is required'),
-    nominalAccount: yup.string().required('Nominal account is required'),
-    details:        yup.string().required('Details are required'),
-    amount:         yup.number().typeError('Must be a number').positive('Must be greater than 0').required('Amount is required'),
-    date:           yup.string().required('Date is required'),
-    refNo:          yup.string(),
+  const createValidations = yup.object().shape({
+    code:   yup.string().required('Code is required'),
+    name:   yup.string().required('Name is required'),
+    type:   yup.string().oneOf(['INCOME', 'EXPENSE']).required('Type is required'),
+    nature: yup.string().oneOf(['DEBIT', 'CREDIT']).required('Nature is required'),
   });
 
-  const fetchExpenses = useCallback(async (page = 1) => {
+  const updateValidations = yup.object().shape({
+    code:   yup.string().required('Code is required'),
+    name:   yup.string().required('Name is required'),
+    type:   yup.string().oneOf(['INCOME', 'EXPENSE']).required('Type is required'),
+    nature: yup.string().oneOf(['DEBIT', 'CREDIT']).required('Nature is required'),
+  });
+
+  const fetchNominals = useCallback(async (page = 1) => {
     try {
       setLoading(true);
-      const hasFilter = filterBank || filterNominal || (filterDateRange && filterDateRange !== 'all');
-      let res;
-      if (hasFilter) {
-        const params = new URLSearchParams({
-          ...(filterBank      && { bankId: filterBank }),
-          ...(filterNominal   && { nominalAccount: filterNominal }),
-          ...(filterDateRange !== 'all' && { dateRange: filterDateRange }),
-          ...(filterDateRange === 'custom' && filterStart && { startDate: filterStart }),
-          ...(filterDateRange === 'custom' && filterEnd   && { endDate: filterEnd }),
-          page,
-          limit: LIMIT,
-        });
-        res = await searchExpenses(params.toString());
-      } else {
-        res = await getAllExpenses({ page, limit: LIMIT });
-      }
-      setData(res.data.data);
-      setTotalPages(res.data.pagination?.totalPages ?? 1);
-      setTotalEntries(res.data.pagination?.total ?? res.data.data.length);
+
+      const params = { page, limit: LIMIT };
+      if (filterType)   params.type   = filterType;
+      if (filterNature) params.nature = filterNature;
+      if (filterStatus !== '') params.isActive = filterStatus === 'true'; // ← string to boolean
+
+      const res = await getAllNominalAccounts(params);
+      const list = Array.isArray(res.data?.data) ? res.data.data : Array.isArray(res.data) ? res.data : [];
+      setData(list);
+      setTotalPages(res.data?.pagination?.totalPages ?? 1);
+      setTotalEntries(res.data?.pagination?.total ?? list.length);
     } catch (err) {
       checkAuthError(err);
       toast.error(err.response?.data?.msg || err.message);
     } finally {
       setLoading(false);
     }
-  }, [filterBank, filterNominal, filterDateRange, filterStart, filterEnd]);
+  }, [filterType, filterNature, filterStatus]);
+  useEffect(() => { fetchNominals(currentPage); }, [currentPage, fetchNominals]);
 
-  useEffect(() => {
-    getAllBanks()
-      .then(r => {
-        // handle both { data: { data: [] } } and { data: [] }
-        const list = Array.isArray(r.data?.data) ? r.data.data : Array.isArray(r.data) ? r.data : [];
-        setBanks(list);
-      })
-      .catch(() => {});
+  const applyFilters = () => { setCurrentPage(1); fetchNominals(1); };
 
-    getNominalAccounts()
-  .then(r => setNominals(r.data.data ?? []))
-  .catch(() => {});
-  }, []);
-
-  useEffect(() => { fetchExpenses(currentPage); }, [currentPage, fetchExpenses]);
-
-  const applyFilters = () => { setCurrentPage(1); fetchExpenses(1); };
-
-  const clearFilters = () => {
-    setFilterBank('');
-    setFilterNominal('');
-    setFilterDateRange('all');
-    setFilterStart('');
-    setFilterEnd('');
-    setCurrentPage(1);
-  };
+const clearFilters = () => {
+  setFilterType('');
+  setFilterNature('');
+  setFilterStatus('');
+  setCurrentPage(1);
+  // fetch directly with no filters
+  getAllNominalAccounts({ page: 1, limit: LIMIT })
+    .then(res => {
+      const list = Array.isArray(res.data?.data) ? res.data.data : Array.isArray(res.data) ? res.data : [];
+      setData(list);
+      setTotalPages(res.data?.pagination?.totalPages ?? 1);
+      setTotalEntries(res.data?.pagination?.total ?? list.length);
+    })
+    .catch(err => toast.error(err.response?.data?.msg || err.message));
+};
 
   const openAdd = () => {
-    setEditingExpense(null);
+    setEditingAccount(null);
     setFormState(emptyForm);
     setShowModal(true);
   };
 
-  const openEdit = (expense) => {
-    setEditingExpense(expense);
+  const openEdit = (account) => {
+    setEditingAccount(account);
     setFormState({
-      bankId:         expense.bank?.id || '',
-      nominalAccount: expense.nominalAccount || '',
-      refNo:          expense.refNo || '',
-      details:        expense.details || '',
-      amount:         expense.amount || '',
-      date:           expense.date || '',
+      code:     account.code || '',
+      name:     account.name || '',
+      type:     account.type || '',
+      nature:   account.nature || '',
+      isActive: account.isActive ?? true,
     });
     setShowModal(true);
     setShowDetail(null);
@@ -191,16 +193,16 @@ const Expenses = () => {
   const handleSubmit = async (values) => {
     try {
       setSubmitting(true);
-      if (editingExpense) {
-        await updateExpense(editingExpense.id, values, token);
-        toast.success('Expense updated successfully.');
+      if (editingAccount) {
+        await updateNominalAccount(editingAccount._id || editingAccount.id, values, token);
+        toast.success('Nominal account updated successfully.');
       } else {
-        await createExpense(values, token);
-        toast.success('Expense payment done successfully.');
+        await createNominalAccount(values, token);
+        toast.success('Nominal account created successfully.');
       }
       setShowModal(false);
       setFormState(emptyForm);
-      fetchExpenses(currentPage);
+      fetchNominals(currentPage);
     } catch (err) {
       checkAuthError(err);
       toast.error(err.response?.data?.msg || err.message);
@@ -210,13 +212,13 @@ const Expenses = () => {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this expense?')) return;
+    if (!window.confirm('Are you sure you want to delete this nominal account?')) return;
     try {
       setLoading(true);
-      await deleteExpense(id, token);
-      toast.success('Expense deleted.');
+      await deleteNominalAccount(id, token);
+      toast.success('Nominal account deleted.');
       setShowDetail(null);
-      fetchExpenses(currentPage);
+      fetchNominals(currentPage);
     } catch (err) {
       checkAuthError(err);
       toast.error(err.response?.data?.msg || err.message);
@@ -230,11 +232,8 @@ const Expenses = () => {
 
   const toggleAll = () => {
     if (selectAll) { setSelected([]); setSelectAll(false); }
-    else { setSelected(data.map(d => d.id)); setSelectAll(true); }
+    else { setSelected(data.map(d => d._id || d.id)); setSelectAll(true); }
   };
-
-  const fmtAmount = (n) =>
-    Number(n).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   if (loading && !data.length) return <Loader />;
 
@@ -242,34 +241,34 @@ const Expenses = () => {
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
-        .exp-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
-        .exp-row { transition: background 0.15s, box-shadow 0.15s; }
-        .exp-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
-        .exp-action { transition: background 0.15s, color 0.15s, transform 0.1s; }
-        .exp-action:hover { transform: scale(1.1); }
-        @keyframes expIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }
-        @keyframes expOv { from { opacity:0; } to { opacity:1; } }
-        .exp-overlay { animation: expOv 0.2s ease; }
-        .exp-modal   { animation: expIn 0.25s cubic-bezier(0.34,1.2,0.64,1); }
-        .exp-scroll::-webkit-scrollbar { display:none; } .exp-scroll { scrollbar-width:none; }
-        .exp-cb { accent-color: #FF5934; width:15px; height:15px; cursor:pointer; }
-        .exp-select-wrap { position:relative; }
-        .exp-select-wrap select { -webkit-appearance:none; appearance:none; }
+        .nom-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
+        .nom-row { transition: background 0.15s, box-shadow 0.15s; }
+        .nom-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
+        .nom-action { transition: background 0.15s, color 0.15s, transform 0.1s; }
+        .nom-action:hover { transform: scale(1.1); }
+        @keyframes nomIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }
+        @keyframes nomOv { from { opacity:0; } to { opacity:1; } }
+        .nom-overlay { animation: nomOv 0.2s ease; }
+        .nom-modal   { animation: nomIn 0.25s cubic-bezier(0.34,1.2,0.64,1); }
+        .nom-scroll::-webkit-scrollbar { display:none; } .nom-scroll { scrollbar-width:none; }
+        .nom-cb { accent-color: #FF5934; width:15px; height:15px; cursor:pointer; }
+        .nom-select-wrap { position:relative; }
+        .nom-select-wrap select { -webkit-appearance:none; appearance:none; }
       `}</style>
 
-      <div className="exp-page">
+      <div className="nom-page">
 
         {/* ── Page Header ── */}
         <div className="flex items-center justify-between mt-6 mb-5">
           <div>
-            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Bank Payments</h1>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Nominal Accounts</h1>
             <p className="text-sm text-[#9CA3AF] mt-0.5">
               Showing {data.length} of {totalEntries} entries
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => fetchExpenses(currentPage)}
+              onClick={() => fetchNominals(currentPage)}
               className="flex items-center gap-1.5 text-sm text-[#6B7280] hover:text-[#FF5934] px-3 py-2.5 rounded-xl hover:bg-orange-50 border border-gray-200 transition-all"
             >
               <MdRefresh size={16} />
@@ -288,51 +287,28 @@ const Expenses = () => {
           <div className="flex flex-wrap items-end gap-4">
 
             <FilterSelect
-              label="Bank"
-              value={filterBank}
-              onChange={setFilterBank}
-              options={banks.map(b => ({ value: b._id, label: b.bankName }))}
-              placeholder="All Banks"
+              label="Type"
+              value={filterType}
+              onChange={setFilterType}
+              options={TYPE_OPTIONS}
+              placeholder="All Types"
             />
 
             <FilterSelect
-  label="Nominal Account"
-  value={filterNominal}
-  onChange={setFilterNominal}
-  options={nominals.map(n => ({ value: n.name, label: `${n.code} — ${n.name}` }))}  // ← new
-  placeholder="All Nominals"
-/>
-
-            <FilterSelect
-              label="Date Range"
-              value={filterDateRange}
-              onChange={setFilterDateRange}
-              options={DATE_RANGE_OPTIONS}
-              placeholder="All Dates"
+              label="Nature"
+              value={filterNature}
+              onChange={setFilterNature}
+              options={NATURE_OPTIONS}
+              placeholder="All Natures"
             />
 
-            {filterDateRange === 'custom' && (
-              <>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">From</span>
-                  <input
-                    type="date"
-                    value={filterStart}
-                    onChange={e => setFilterStart(e.target.value)}
-                    className={inputCls + ' min-w-[140px]'}
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest">To</span>
-                  <input
-                    type="date"
-                    value={filterEnd}
-                    onChange={e => setFilterEnd(e.target.value)}
-                    className={inputCls + ' min-w-[140px]'}
-                  />
-                </div>
-              </>
-            )}
+            <FilterSelect
+              label="Status"
+              value={filterStatus}
+              onChange={setFilterStatus}
+              options={STATUS_OPTIONS}
+              placeholder="All Statuses"
+            />
 
             <div className="flex items-end gap-2 ml-auto">
               <button
@@ -374,9 +350,9 @@ const Expenses = () => {
               <thead>
                 <tr className="border-b border-gray-100 bg-[#FAFAFA]">
                   <th className="px-4 py-3 w-10">
-                    <input type="checkbox" className="exp-cb" checked={selectAll} onChange={toggleAll} />
+                    <input type="checkbox" className="nom-cb" checked={selectAll} onChange={toggleAll} />
                   </th>
-                  {['V. No.', 'Date', 'Bank', 'Nominal Account', 'Ref. No.', 'Details', 'Amount', 'Action'].map(h => (
+                  {['Code', 'Name', 'Type', 'Nature', 'Status', 'Action'].map(h => (
                     <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3 whitespace-nowrap">
                       {h}
                     </th>
@@ -386,65 +362,69 @@ const Expenses = () => {
               <tbody className="divide-y divide-gray-50">
                 {!loading && data.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-16 text-center">
+                    <td colSpan={7} className="py-16 text-center">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                          <MdReceipt size={24} className="text-gray-300" />
+                          <MdArticle size={24} className="text-gray-300" />
                         </div>
-                        <p className="text-[#9CA3AF] text-sm font-medium">No expenses found</p>
+                        <p className="text-[#9CA3AF] text-sm font-medium">No nominal accounts found</p>
                         <button onClick={clearFilters} className="text-[#FF5934] text-xs hover:underline">
                           Clear filters
                         </button>
                       </div>
                     </td>
                   </tr>
-                ) : data.map((expense) => (
+                ) : data.map((account) => {
+                  const id = account._id || account.id;
+                  return (
                   <tr
-                    key={expense.id}
-                    className="exp-row cursor-pointer"
-                    onClick={() => setShowDetail(expense)}
+                    key={id}
+                    className="nom-row cursor-pointer"
+                    onClick={() => setShowDetail(account)}
                   >
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <input
                         type="checkbox"
-                        className="exp-cb"
-                        checked={selected.includes(expense.id)}
-                        onChange={() => toggleRow(expense.id)}
+                        className="nom-cb"
+                        checked={selected.includes(id)}
+                        onChange={() => toggleRow(id)}
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[#FF5934] font-bold text-[13px]">{expense.voucherNo}</span>
+                      <span className="text-[#FF5934] font-bold text-[13px] font-mono">{account.code}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[13px] text-[#374151]">{expense.date}</span>
+                      <span className="text-[13px] font-medium text-[#111827]">{account.name}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[13px] font-medium text-[#111827]">{expense.bank?.name || '—'}</span>
+                      <TypeBadge type={account.type} />
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[13px] text-[#374151]">{expense.nominalAccount}</span>
+                      <NatureBadge nature={account.nature} />
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[12px] font-mono text-[#6B7280]">{expense.refNo || '—'}</span>
-                    </td>
-                    <td className="px-4 py-3 max-w-[200px]">
-                      <p className="text-[13px] text-[#374151] truncate">{expense.details}</p>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="text-[13px] font-semibold text-[#111827]">{fmtAmount(expense.amount)}</span>
+                      {account.isActive ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600">
+                          <MdToggleOn size={16} /> Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-gray-400">
+                          <MdToggleOff size={16} /> Inactive
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => openEdit(expense)}
-                          className="exp-action flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-blue-50 text-[#9CA3AF] hover:text-blue-500 border border-gray-100 text-xs font-medium"
+                          onClick={() => openEdit(account)}
+                          className="nom-action flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-blue-50 text-[#9CA3AF] hover:text-blue-500 border border-gray-100 text-xs font-medium"
                           title="Edit"
                         >
                           <MdEdit size={13} /> Edit
                         </button>
                         <button
-                          onClick={() => handleDelete(expense.id)}
-                          className="exp-action flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-red-50 text-[#9CA3AF] hover:text-red-400 border border-gray-100 text-xs font-medium"
+                          onClick={() => handleDelete(id)}
+                          className="nom-action flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-red-50 text-[#9CA3AF] hover:text-red-400 border border-gray-100 text-xs font-medium"
                           title="Delete"
                         >
                           <MdDelete size={13} />
@@ -452,7 +432,8 @@ const Expenses = () => {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -492,8 +473,8 @@ const Expenses = () => {
             ADD / EDIT MODAL
         ══════════════════════════════════════ */}
         {showModal && (
-          <div className="exp-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
-            <div className="exp-modal bg-white w-full max-w-[480px] max-h-[94vh] overflow-hidden rounded-3xl shadow-2xl flex flex-col">
+          <div className="nom-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+            <div className="nom-modal bg-white w-full max-w-[480px] max-h-[94vh] overflow-hidden rounded-3xl shadow-2xl flex flex-col">
 
               <div className="relative bg-gradient-to-r from-[#FF5934] to-[#ff8c6b] px-6 pt-5 pb-10 overflow-hidden">
                 <div
@@ -503,10 +484,10 @@ const Expenses = () => {
                 <div className="relative flex items-start justify-between">
                   <div>
                     <p className="text-white/70 text-xs font-semibold uppercase tracking-widest mb-1">
-                      {editingExpense ? 'Editing Expense' : 'New Expense'}
+                      {editingAccount ? 'Editing Account' : 'New Account'}
                     </p>
                     <h2 className="text-white text-xl font-bold">
-                      {editingExpense ? 'Edit Payment' : 'Add New Payment'}
+                      {editingAccount ? 'Edit Nominal Account' : 'Add Nominal Account'}
                     </h2>
                   </div>
                   <button
@@ -520,110 +501,98 @@ const Expenses = () => {
 
               <Formik
                 initialValues={formState}
-                validationSchema={validations}
+                validationSchema={editingAccount ? updateValidations : createValidations}
                 onSubmit={handleSubmit}
                 enableReinitialize
               >
                 {({ errors, touched, setFieldValue, values }) => (
-                  <Form className="exp-scroll overflow-y-auto flex-1 flex flex-col">
+                  <Form className="nom-scroll overflow-y-auto flex-1 flex flex-col">
                     <div className="px-6 pt-7 pb-6 flex flex-col gap-4 -mt-5">
                       <div className="bg-white rounded-2xl border border-gray-100 shadow-md p-5 flex flex-col gap-4">
 
-                        {/* Bank */}
-                        <FieldGroup icon={MdAccountBalance} label="Bank">
-                          <div className="exp-select-wrap">
-                            <select
-                              value={values.bankId}
-                              onChange={e => setFieldValue('bankId', e.target.value)}
-                              className={selectCls + (errors.bankId && touched.bankId ? ' border-red-300' : '')}
-                            >
-                              <option value="">Select bank…</option>
-                              {banks.map(b => (
-                                <option key={b._id} value={b._id}>{b.bankName}</option>
-                              ))}
-                            </select>
-                            <MdExpandMore size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none" />
-                          </div>
-                          {errors.bankId && touched.bankId && (
-                            <p className="text-red-400 text-[11px] mt-1">{errors.bankId}</p>
-                          )}
-                        </FieldGroup>
-
-                        {/* Nominal Account */}
-                        {/* Nominal Account */}
-<FieldGroup icon={MdArticle} label="Nominal Account">
-  <div className="exp-select-wrap relative">
-    <select
-      value={values.nominalAccount}
-      onChange={e => setFieldValue('nominalAccount', e.target.value)}
-      className={selectCls + (errors.nominalAccount && touched.nominalAccount ? ' border-red-300' : '')}
-    >
-      <option value="">Select nominal account…</option>
-      {nominals.map(n => (
-        <option key={n._id} value={n.name}>
-          {n.code} — {n.name}
-        </option>
-      ))}
-    </select>
-    <MdExpandMore size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none" />
-  </div>
-  {errors.nominalAccount && touched.nominalAccount && (
-    <p className="text-red-400 text-[11px] mt-1">{errors.nominalAccount}</p>
-  )}
-</FieldGroup>
-
-                        {/* Ref No + Date */}
+                        {/* Code + Name */}
                         <div className="grid grid-cols-2 gap-3">
-                          <FieldGroup icon={MdNumbers} label="Ref. No.">
+                          <FieldGroup icon={MdNumbers} label="Code">
                             <input
-                              value={values.refNo}
-                              onChange={e => setFieldValue('refNo', e.target.value)}
-                              placeholder="Optional"
-                              className={inputCls}
+                              value={values.code}
+                              onChange={e => setFieldValue('code', e.target.value)}
+                              placeholder="e.g. 4001"
+                              className={inputCls + (errors.code && touched.code ? ' border-red-300' : '')}
                             />
+                            {errors.code && touched.code && (
+                              <p className="text-red-400 text-[11px] mt-1">{errors.code}</p>
+                            )}
                           </FieldGroup>
-                          <FieldGroup icon={MdCalendarToday} label="Date">
+                          <FieldGroup icon={MdArticle} label="Name">
                             <input
-                              type="date"
-                              value={values.date}
-                              onChange={e => setFieldValue('date', e.target.value)}
-                              className={inputCls + (errors.date && touched.date ? ' border-red-300' : '')}
+                              value={values.name}
+                              onChange={e => setFieldValue('name', e.target.value)}
+                              placeholder="e.g. Fuel & Travel"
+                              className={inputCls + (errors.name && touched.name ? ' border-red-300' : '')}
                             />
-                            {errors.date && touched.date && (
-                              <p className="text-red-400 text-[11px] mt-1">{errors.date}</p>
+                            {errors.name && touched.name && (
+                              <p className="text-red-400 text-[11px] mt-1">{errors.name}</p>
                             )}
                           </FieldGroup>
                         </div>
 
-                        {/* Details */}
-                        <FieldGroup icon={MdArticle} label="Details">
-                          <textarea
-                            value={values.details}
-                            onChange={e => setFieldValue('details', e.target.value)}
-                            placeholder="Payment description…"
-                            rows={3}
-                            className={inputCls + ' resize-none ' + (errors.details && touched.details ? ' border-red-300' : '')}
-                          />
-                          {errors.details && touched.details && (
-                            <p className="text-red-400 text-[11px] mt-1">{errors.details}</p>
+                        {/* Type */}
+                        <FieldGroup icon={MdTrendingUp} label="Type">
+                          <div className="nom-select-wrap">
+                            <select
+                              value={values.type}
+                              onChange={e => setFieldValue('type', e.target.value)}
+                              className={selectCls + (errors.type && touched.type ? ' border-red-300' : '')}
+                            >
+                              <option value="">Select type…</option>
+                              {TYPE_OPTIONS.map(o => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
+                            </select>
+                            <MdExpandMore size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none" />
+                          </div>
+                          {errors.type && touched.type && (
+                            <p className="text-red-400 text-[11px] mt-1">{errors.type}</p>
                           )}
                         </FieldGroup>
 
-                        {/* Amount */}
-                        <FieldGroup icon={MdAttachMoney} label="Amount (PKR)">
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={values.amount}
-                            onChange={e => setFieldValue('amount', e.target.value)}
-                            placeholder="0.00"
-                            className={inputCls + (errors.amount && touched.amount ? ' border-red-300' : '')}
-                          />
-                          {errors.amount && touched.amount && (
-                            <p className="text-red-400 text-[11px] mt-1">{errors.amount}</p>
+                        {/* Nature */}
+                        <FieldGroup icon={MdSwapVert} label="Nature">
+                          <div className="nom-select-wrap">
+                            <select
+                              value={values.nature}
+                              onChange={e => setFieldValue('nature', e.target.value)}
+                              className={selectCls + (errors.nature && touched.nature ? ' border-red-300' : '')}
+                            >
+                              <option value="">Select nature…</option>
+                              {NATURE_OPTIONS.map(o => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
+                            </select>
+                            <MdExpandMore size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none" />
+                          </div>
+                          {errors.nature && touched.nature && (
+                            <p className="text-red-400 text-[11px] mt-1">{errors.nature}</p>
                           )}
                         </FieldGroup>
+
+                        {/* Status (edit only) */}
+                        {editingAccount && (
+                          <FieldGroup icon={MdToggleOn} label="Status">
+                            <button
+                              type="button"
+                              onClick={() => setFieldValue('isActive', !values.isActive)}
+                              className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-semibold transition-all w-full justify-center ${
+                                values.isActive
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
+                                  : 'bg-gray-50 border-gray-200 text-gray-400'
+                              }`}
+                            >
+                              {values.isActive ? <MdToggleOn size={18} /> : <MdToggleOff size={18} />}
+                              {values.isActive ? 'Active' : 'Inactive'}
+                            </button>
+                          </FieldGroup>
+                        )}
 
                       </div>
                     </div>
@@ -644,9 +613,9 @@ const Expenses = () => {
                       >
                         {submitting
                           ? <><Spinner /> Saving…</>
-                          : editingExpense
+                          : editingAccount
                             ? <><MdEdit size={16} /> Save Changes</>
-                            : <><MdAdd size={16} /> Add Payment</>
+                            : <><MdAdd size={16} /> Add Account</>
                         }
                       </button>
                     </div>
@@ -663,11 +632,11 @@ const Expenses = () => {
         ══════════════════════════════════════ */}
         {showDetail && (
           <div
-            className="exp-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
+            className="nom-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
             onClick={() => setShowDetail(null)}
           >
             <div
-              className="exp-modal bg-white w-full max-w-[420px] rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+              className="nom-modal bg-white w-full max-w-[420px] rounded-3xl shadow-2xl overflow-hidden flex flex-col"
               onClick={e => e.stopPropagation()}
             >
               {/* Hero */}
@@ -675,7 +644,7 @@ const Expenses = () => {
                 <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-[#FF5934]/10" />
                 <div className="absolute -bottom-6 -left-6 w-32 h-32 rounded-full bg-white/5" />
                 <div className="relative flex items-start justify-between mb-4">
-                  <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Payment Details</span>
+                  <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest">Account Details</span>
                   <button
                     onClick={() => setShowDetail(null)}
                     className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70 hover:text-white transition-colors"
@@ -684,17 +653,20 @@ const Expenses = () => {
                   </button>
                 </div>
                 <div className="relative">
-                  <p className="text-white/50 text-xs mb-1">Voucher #{showDetail.voucherNo}</p>
-                  <h3 className="text-white text-xl font-bold leading-tight">{showDetail.nominalAccount}</h3>
-                  <p className="text-[#FF5934] text-2xl font-bold mt-2">PKR {fmtAmount(showDetail.amount)}</p>
+                  <p className="text-white/50 text-xs mb-1 font-mono">Code #{showDetail.code}</p>
+                  <h3 className="text-white text-xl font-bold leading-tight">{showDetail.name}</h3>
+                  <div className="flex items-center gap-2 mt-3">
+                    <TypeBadge type={showDetail.type} />
+                    <NatureBadge nature={showDetail.nature} />
+                  </div>
                 </div>
               </div>
 
               {/* Stats strip */}
               <div className="-mt-5 mx-5 grid grid-cols-2 gap-2 z-10 relative">
                 {[
-                  { label: 'Bank', value: showDetail.bank?.name || '—' },
-                  { label: 'Date', value: showDetail.date },
+                  { label: 'Type',   value: showDetail.type === 'INCOME' ? 'Income' : 'Expense' },
+                  { label: 'Status', value: showDetail.isActive ? 'Active' : 'Inactive' },
                 ].map(({ label, value }) => (
                   <div key={label} className="bg-white rounded-2xl border border-gray-100 shadow-md px-3 py-3 text-center">
                     <p className="text-[13px] font-bold text-[#FF5934] truncate">{value}</p>
@@ -704,13 +676,11 @@ const Expenses = () => {
               </div>
 
               {/* Info rows */}
-              <div className="exp-scroll overflow-y-auto px-5 pt-5 pb-4 flex flex-col gap-3">
+              <div className="nom-scroll overflow-y-auto px-5 pt-5 pb-4 flex flex-col gap-3">
                 {[
-                  { icon: MdNumbers,        label: 'Ref. No.',        value: showDetail.refNo || '—',              mono: true },
-                  { icon: MdArticle,        label: 'Nominal Account', value: showDetail.nominalAccount },
-                  { icon: MdArticle,        label: 'Details',         value: showDetail.details },
-                  { icon: MdAccountBalance, label: 'Bank Account',    value: showDetail.bank?.accountTitle || '—' },
-                  { icon: MdAttachMoney,    label: 'Amount',          value: `PKR ${fmtAmount(showDetail.amount)}` },
+                  { icon: MdNumbers, label: 'Code',   value: showDetail.code, mono: true },
+                  { icon: MdArticle, label: 'Name',   value: showDetail.name },
+                  { icon: MdSwapVert, label: 'Nature', value: showDetail.nature === 'DEBIT' ? 'Debit' : 'Credit' },
                 ].map(({ icon: Icon, label, value, mono }) => (
                   <div key={label} className="flex items-start gap-3 bg-[#F9FAFB] rounded-2xl px-4 py-3 border border-gray-100">
                     <div className="w-8 h-8 rounded-xl bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -732,7 +702,7 @@ const Expenses = () => {
                   onClick={() => openEdit(showDetail)}
                   className="flex-1 h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-orange-100"
                 >
-                  <MdEdit size={15} /> Edit Payment
+                  <MdEdit size={15} /> Edit Account
                 </button>
                 <button
                   onClick={() => setShowDetail(null)}
@@ -741,7 +711,7 @@ const Expenses = () => {
                   Close
                 </button>
                 <button
-                  onClick={() => handleDelete(showDetail.id)}
+                  onClick={() => handleDelete(showDetail._id || showDetail.id)}
                   className="w-11 h-11 rounded-xl bg-red-50 hover:bg-red-100 text-red-400 hover:text-red-500 flex items-center justify-center transition-colors border border-red-100"
                   title="Delete"
                 >
@@ -759,4 +729,4 @@ const Expenses = () => {
   );
 };
 
-export default Expenses;
+export default Nominals;

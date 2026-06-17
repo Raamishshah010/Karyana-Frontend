@@ -66,6 +66,7 @@ import ProductAndInventory from './pages/ProductAndInventory.jsx';
 import Supplier from './pages/Supplier.jsx';
 import Purchases from './pages/Purchases.jsx';
 import Expenses from './pages/Expenses.jsx';
+import Nominals from './pages/Nominals.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -189,6 +190,7 @@ const App = () => {
               <Route path="/Ledgers/Supplier" element={<Supplier />} />
               <Route path="/Ledgers/Purchases" element={<Purchases />} />
               <Route path="/Ledgers/Expenses" element={<Expenses />} />
+              <Route path="/Ledgers/Nominals" element={<Nominals />} />
             </Routes>
           </div>
         </div>

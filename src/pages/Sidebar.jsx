@@ -615,10 +615,15 @@ const Sidebar = () => {
                   label="Banks"
                 />
                 <SubNavItem
-                  to="/Ledgers/Expenses"
-                  icon={MdReceipt}
-                  label="Expenses"
-                />
+  to="/Ledgers/Expenses"
+  icon={MdReceipt}
+  label="Expenses"
+/>
+<SubNavItem
+  to="/Ledgers/Nominals"
+  icon={MdListAlt}
+  label="Nominal Accounts"
+/>
               </NavGroup>
 
               <SectionLabel collapsed={collapsed}>Operations</SectionLabel>
