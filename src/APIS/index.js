@@ -2026,16 +2026,10 @@ export const getTrackingHistoryBySalesId = async (salesPersonID, days = 7) => {
   return await axios.request(config);
 };
 
-export const getAllProducts = async () => {
-  let config = {
-    method: "get",
-    url: SERVER_URL + "/product/get-all",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  };
-  return await axios.request(config);
-};
+export const getAllProducts = () =>
+  axios.get(SERVER_URL + '/product/pagination?page=1&limit=10000');
+
+
 
 export const getTargetHistoryBySalespersonId = async (salesId) => {
   let config = {

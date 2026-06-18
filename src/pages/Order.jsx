@@ -2,8 +2,10 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   generateLoadForm, getAllSalesPersons,
   getCoordinatorOrders, getOrders,
-  getWarhouseManagerOrders, updateOrderStatus, getOrdersBySalesPersonAndDate
+  getWarhouseManagerOrders, updateOrderStatus, getOrdersBySalesPersonAndDate,getAllCities
 } from "../APIS";
+import AddOrderModal from '../components/AddOrderModal';
+
 import { Loader } from '../components/common/loader';
 import { GrFormNext, GrFormPrevious } from "react-icons/gr";
 import { FaRegEye, FaTrash, FaFilePdf, FaPrint } from "react-icons/fa6";
@@ -19,6 +21,7 @@ import {
   MdPerson, MdStore, MdCalendarToday, MdLocationOn,
   MdPhone, MdShoppingBag, MdCheckCircle,
   MdOutlineInventory2, MdFilterList, MdClose, MdSearch, MdRefresh,
+  MdAdd,
 } from "react-icons/md";
 
 const ORDER_STATUSES = ['Placed', 'Processed', 'Cancelled', 'Satelment'];
@@ -550,7 +553,8 @@ const Order = () => {
   const [data, setData]                 = useState([]);
   const [totalPages, setTotalPages]     = useState(0);
   const [loading, setLoading]           = useState(false);
-
+const [showAddOrder, setShowAddOrder] = useState(false);
+const [cities, setCities] = useState([]);
   const [searchTerm, setSearchTerm]                   = useState('');
   const [startDate, setStartDate]                     = useState('');
   const [endDate, setEndDate]                         = useState('');
@@ -590,6 +594,8 @@ const Order = () => {
     getAllSalesPersons()
       .then(res => setSalesPersons(res.data.data || []))
       .catch(() => {});
+
+      getAllCities().then(r => setCities(r.data?.data || [])).catch(() => {});
   }, []);
 
   const doFetch = useCallback(async ({
@@ -891,6 +897,13 @@ const Order = () => {
             >
               <MdLocalShipping size={16} /> Generate Load Form
             </button>
+
+            <button
+  onClick={() => setShowAddOrder(true)}
+  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white border border-gray-200 text-[#374151] text-sm font-semibold hover:bg-gray-50 transition-all shadow-sm"
+>
+  <MdAdd size={16} className="text-[#FF5934]" /> Add Order
+</button>
           </div>
         </div>
 
@@ -1415,6 +1428,15 @@ const Order = () => {
 
         {show && <div className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px]" onClick={() => setShow(false)} />}
       </div>
+
+      {showAddOrder && (
+  <AddOrderModal
+    onClose={() => setShowAddOrder(false)}
+    onSuccess={() => doFetch({ page: currentPage })}
+    cities={cities}
+    salesPersons={salesPersons}
+  />
+)}
     </>
   );
 };
