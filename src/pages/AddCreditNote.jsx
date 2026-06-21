@@ -6,20 +6,13 @@ import {
   MdShoppingBag,
 } from 'react-icons/md';
 import { Spinner } from '../components/common/spinner';
-import { getAllRetailers, getAllSalesPersons, getAllCities, updateProduct, updateOrderStatus } from '../APIS';
+import { getAllRetailers, getAllSalesPersons, getAllCities, updateProduct, createCreditNote } from '../APIS';
 import { useSelector } from 'react-redux';
 import { SERVER_URL } from '../utils';
 import axios from 'axios';
 
 const ACCENT = '#FF5934';
 
-const createOrder = async (data, token) =>
-  axios.request({
-    method: 'post',
-    url: SERVER_URL + '/order/add',
-    headers: { 'x-auth-token': token, 'Content-Type': 'application/json' },
-    data: JSON.stringify(data),
-  });
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const addDays = (iso, days) => {
@@ -436,70 +429,69 @@ const increaseStock = async (returnedRows, freshProducts) => {
   );
 };
   /* ── submit ── */
-  const handleSubmit = async () => {
-    if (!validate()) return;
-    try {
-      setSubmitting(true);
+const handleSubmit = async () => {
+  if (!validate()) return;
+  try {
+    setSubmitting(true);
 
-      // Reload fresh product list for accurate current stock
-      const freshProducts = await reloadProducts();
+    const freshProducts = await reloadProducts();
 
-      const payload = {
-        RetailerUser: form.RetailerUser,
-        SaleUser: form.SaleUser,
-        shippingAddress: form.shippingAddress,
-        phoneNumber: form.phoneNumber,
-        city: form.city,
-        paymentType: form.paymentType,
-        ...(form.couponCode && { couponCode: form.couponCode }),
-        items: activeRows.map((r) => {
-          const gross = r.qty * r.rate;
-          const discAmt =
-            r.discType === 'percent'
-              ? gross * (r.discPercent / 100)
-              : r.discAmount;
-          const net = Math.max(gross - discAmt, 0);
-          const effectivePrice = r.qty ? net / r.qty : r.rate;
-          return {
-            productId: r.product.productId,
-            quantity: Number(r.qty),
-            price: Number(r.rate),
-            type: r.unit,
-            ...(discAmt > 0 && {
-              discountedPrice: Number(effectivePrice.toFixed(2)),
-            }),
-          };
-        }),
-      };
+    const payload = {
+      RetailerUser:    form.RetailerUser,
+      SaleUser:        form.SaleUser,
+      shippingAddress: form.shippingAddress,
+      phoneNumber:     form.phoneNumber,
+      city:            form.city,
+      paymentType:     form.paymentType,
+      date:            form.date,
+      termDays:        form.termDays,
+      dueDate:         form.dueDate,
+      ...(form.couponCode && { coupon: form.couponCode }),
+      items: activeRows.map((r) => {
+        const gross   = r.qty * r.rate;
+        const discAmt = r.discType === 'percent'
+          ? gross * (r.discPercent / 100)
+          : r.discAmount;
+        const net            = Math.max(gross - discAmt, 0);
+        const effectivePrice = r.qty ? net / r.qty : r.rate;
+        return {
+          productId:    r.product.productId,
+          quantity:     Number(r.qty),
+          price:        Number(r.rate),
+          type:         r.unit,
+          description:  r.description,
+          discPercent:  r.discPercent,
+          discAmount:   discAmt,
+          grossAmount:  gross,
+          netAmount:    net,
+          ...(discAmt > 0 && {
+            discountedPrice: Number(effectivePrice.toFixed(2)),
+          }),
+        };
+      }),
+    };
 
-      // 1. Create the order (will be Placed by backend)
-      const orderRes = await createOrder(payload, token);
-      const orderId = orderRes.data?.data?._id || orderRes.data?._id;
+    // 1. Create the credit note directly
+    await createCreditNote(payload, token);
 
-      // 2. Immediately push status to Cancelled
-      if (orderId) {
-        await updateOrderStatus({ id: orderId, status: 'Cancelled' });
-      }
+    // 2. INCREASE stock (items are being returned)
+    await increaseStock(activeRows, freshProducts);
 
-      // 3. INCREASE stock (items are being returned)
-      await increaseStock(activeRows, freshProducts);
-
-      toast.success('Credit note created successfully!');
-      navigate('/Sales/Invoices');
-    } catch (err) {
-      console.error('Credit note error:', err);
-      const msg =
-        err.response?.data?.errors?.[0]?.msg ||
-        err.response?.data?.error ||
-        err.response?.data?.msg ||
-        err.message ||
-        'Failed to create credit note';
-      toast.error(msg);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
+    toast.success('Credit note created successfully!');
+    navigate('/Sales/Invoices');
+  } catch (err) {
+    console.error('Credit note error:', err);
+    const msg =
+      err.response?.data?.errors?.[0]?.msg ||
+      err.response?.data?.error            ||
+      err.response?.data?.msg              ||
+      err.message                          ||
+      'Failed to create credit note';
+    toast.error(msg);
+  } finally {
+    setSubmitting(false);
+  }
+};
   return (
     <div className="min-h-screen bg-gray-50">
       {/* ── Top bar ── */}

@@ -1,6 +1,31 @@
 import axios from "axios";
 import { SERVER_URL } from "../utils";
 
+// ==================== CREDIT NOTES APIs ====================
+export const createCreditNote = async (data, token) => {
+  let config = {
+    method: "post",
+    url: SERVER_URL + "/credit-note/",
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const getAllCreditNotes = async (page = 1, limit = 10, params = {}) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + "/credit-note",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    params: { page, limit, ...params },
+  };
+  return await axios.request(config);
+};
 
 // ==================== NOMINAL ACCOUNT APIs ====================
 

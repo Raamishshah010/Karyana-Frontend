@@ -462,6 +462,11 @@ const Sidebar = () => {
                   icon={MdPayment}
                   label="Payments"
                 />
+                <SubNavItem
+                  to="/Returns"
+                  icon={MdPayment}
+                  label="Credit Notes"
+                />
               </NavGroup>
 
               <NavGroup
