@@ -23,6 +23,7 @@ import {
   MdOutlineInventory2, MdFilterList, MdClose, MdSearch, MdRefresh,
   MdAdd,
 } from "react-icons/md";
+import { Link } from 'react-router-dom';
 
 const ORDER_STATUSES = ['Placed', 'Processed', 'Cancelled', 'Satelment'];
 const LIMIT = 10;
@@ -553,7 +554,7 @@ const Order = () => {
   const [data, setData]                 = useState([]);
   const [totalPages, setTotalPages]     = useState(0);
   const [loading, setLoading]           = useState(false);
-const [showAddOrder, setShowAddOrder] = useState(false);
+
 const [cities, setCities] = useState([]);
   const [searchTerm, setSearchTerm]                   = useState('');
   const [startDate, setStartDate]                     = useState('');
@@ -898,12 +899,12 @@ const [cities, setCities] = useState([]);
               <MdLocalShipping size={16} /> Generate Load Form
             </button>
 
-            <button
-  onClick={() => setShowAddOrder(true)}
+            <Link to="/Add-Orders"
+ 
   className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white border border-gray-200 text-[#374151] text-sm font-semibold hover:bg-gray-50 transition-all shadow-sm"
 >
   <MdAdd size={16} className="text-[#FF5934]" /> Add Order
-</button>
+</Link>
           </div>
         </div>
 
@@ -1429,14 +1430,7 @@ const [cities, setCities] = useState([]);
         {show && <div className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px]" onClick={() => setShow(false)} />}
       </div>
 
-      {showAddOrder && (
-  <AddOrderModal
-    onClose={() => setShowAddOrder(false)}
-    onSuccess={() => doFetch({ page: currentPage })}
-    cities={cities}
-    salesPersons={salesPersons}
-  />
-)}
+      
     </>
   );
 };

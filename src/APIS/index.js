@@ -913,6 +913,10 @@ export const updateProduct = async (data, token) => {
     data: JSON.stringify(data),
   };
 
+  console.log(localStorage.getItem('token'));
+console.log(localStorage.getItem('authToken'));
+console.log(Object.keys(localStorage));
+
   return await axios.request(config);
 };
 export const deleteProduct = async (id, token) => {

@@ -67,6 +67,11 @@ import Supplier from './pages/Supplier.jsx';
 import Purchases from './pages/Purchases.jsx';
 import Expenses from './pages/Expenses.jsx';
 import Nominals from './pages/Nominals.jsx';
+import AddOrderPage from './components/AddOrderModal.jsx';
+import AddInvoice from './pages/AddInvoice.jsx';
+import AddCreditNote from './pages/AddCreditNote.jsx';
+import AddPurchase from './pages/AddPurchase.jsx';
+import AddPurchaseNote from './pages/AddPurchaseNote.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -191,6 +196,16 @@ const App = () => {
               <Route path="/Ledgers/Purchases" element={<Purchases />} />
               <Route path="/Ledgers/Expenses" element={<Expenses />} />
               <Route path="/Ledgers/Nominals" element={<Nominals />} />
+              <Route path="/Ledgers/Nominals" element={<Nominals />} />
+
+
+              <Route path="/Add-Orders" element={<AddOrderPage />} />
+              <Route path="/Add-Invoice" element={<AddInvoice />} />
+              <Route path="/Add-Credit-Note" element={<AddCreditNote />} />
+              <Route path="/Add-Purchase" element={<AddPurchase />} />
+              <Route path="/Add-Purchase-Note" element={<AddPurchaseNote />} />
+
+
             </Routes>
           </div>
         </div>

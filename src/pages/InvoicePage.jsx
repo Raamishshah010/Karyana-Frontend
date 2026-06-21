@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   getAllSalesPersons, getCoordinatorOrders, getOrders, getWarhouseManagerOrders
 } from "../APIS";
@@ -15,7 +16,7 @@ import { useSelector } from 'react-redux';
 import {
   MdSearch, MdClose, MdRefresh, MdPerson, MdStore,
   MdCalendarToday, MdLocationOn, MdPhone, MdShoppingBag,
-  MdCheckCircle, MdOutlineInventory2, MdFilterList,
+  MdCheckCircle, MdOutlineInventory2, MdFilterList, MdAdd,
 } from "react-icons/md";
 
 /* ─────────────────────────────────────────────────────────────
@@ -343,6 +344,7 @@ const generateExcel = (order) => {
    MAIN COMPONENT
 ───────────────────────────────────────────────────────────── */
 const SalesInvoices = () => {
+  const navigate = useNavigate();
   const [currentPage, setCurrentPage]       = useState(1);
   const [show, setShow]                     = useState(false);
   const [selectedItem, setSelectedItem]     = useState(null);
@@ -474,12 +476,28 @@ const SalesInvoices = () => {
               Completed orders · {allRows.length} total · page {currentPage} of {totalPages}
             </p>
           </div>
-          <button
-            onClick={doFetch}
-            className="flex items-center gap-2 text-sm font-semibold text-[#6B7280] bg-white border border-gray-200 hover:border-[#FF5934] hover:text-[#FF5934] px-4 py-2 rounded-xl transition-all"
-          >
-            <MdRefresh size={16} /> Refresh
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={doFetch}
+              className="flex items-center gap-2 text-sm font-semibold text-[#6B7280] bg-white border border-gray-200 hover:border-[#FF5934] hover:text-[#FF5934] px-4 py-2 rounded-xl transition-all"
+            >
+              <MdRefresh size={16} /> Refresh
+            </button>
+            <button
+              onClick={() => navigate('/Add-Invoice')}
+              className="flex items-center gap-2 text-sm font-bold text-white px-4 py-2 rounded-xl transition-all"
+              style={{ background: '#FF5934', boxShadow: '0 4px 14px rgba(255,89,52,0.35)' }}
+            >
+              <MdAdd size={16} /> Add Invoice
+            </button>
+            <button
+              onClick={() => navigate('/Add-Credit-Note')}
+              className="flex items-center gap-2 text-sm font-bold text-white px-4 py-2 rounded-xl transition-all"
+              style={{ background: '#FF5934', boxShadow: '0 4px 14px rgba(255,89,52,0.35)' }}
+            >
+              <MdAdd size={16} /> Add Credit Note
+            </button>
+          </div>
         </div>
 
         {/* ── Filters Bar ── */}

@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import {
   MdArrowBack, MdAdd, MdDelete, MdSearch, MdExpandMore,
-  MdShoppingBag, MdCheckBox, MdCheckBoxOutlineBlank, MdClose,
+  MdShoppingBag,
 } from 'react-icons/md';
 import { Spinner } from '../components/common/spinner';
-import { getAllRetailers, getAllSalesPersons, getAllCities } from '../APIS';
+import { getAllRetailers, getAllSalesPersons, getAllCities, updateProduct, updateOrderStatus } from '../APIS';
 import { useSelector } from 'react-redux';
 import { SERVER_URL } from '../utils';
 import axios from 'axios';
@@ -27,9 +27,9 @@ const addDays = (iso, days) => {
   d.setDate(d.getDate() + Number(days || 0));
   return d.toISOString().slice(0, 10);
 };
-const fmt = (n) => (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (n) =>
+  (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/* ─── shared field styles ─── */
 const inputCls =
   'w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-[13px] text-gray-800 outline-none transition-all placeholder:text-gray-300 focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10';
 const selectCls = inputCls + ' pr-8 appearance-none cursor-pointer';
@@ -37,7 +37,7 @@ const cellInputCls =
   'w-full bg-transparent text-[13.5px] text-gray-800 outline-none text-right px-1.5 py-3 rounded focus:bg-[#FF5934]/5 focus:ring-1 focus:ring-[#FF5934]/30';
 
 /* ════════════════════════════════════════
-   PRODUCT PICKER CELL — search dropdown inline in table cell
+   PRODUCT PICKER CELL
 ════════════════════════════════════════ */
 const ProductPickerCell = ({ products, loading, value, onPick }) => {
   const [open, setOpen] = useState(false);
@@ -46,7 +46,9 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    const fn = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const fn = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
     document.addEventListener('mousedown', fn);
     return () => document.removeEventListener('mousedown', fn);
   }, []);
@@ -54,31 +56,45 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
   const filtered = useMemo(() => {
     if (!search.trim()) return products.slice(0, 50);
     const q = search.toLowerCase();
-    return products.filter(p =>
-      p.englishTitle?.toLowerCase().includes(q) ||
-      p.sku?.toLowerCase().includes(q) ||
-      p.productId?.toLowerCase().includes(q)
-    ).slice(0, 50);
+    return products
+      .filter(
+        (p) =>
+          p.englishTitle?.toLowerCase().includes(q) ||
+          p.sku?.toLowerCase().includes(q) ||
+          p.productId?.toLowerCase().includes(q)
+      )
+      .slice(0, 50);
   }, [search, products]);
 
   return (
     <div ref={wrapRef} className="relative">
       <div
-        onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 30); }}
+        onClick={() => {
+          setOpen(true);
+          setTimeout(() => inputRef.current?.focus(), 30);
+        }}
         className="flex items-center gap-2 cursor-pointer px-2.5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors min-h-[48px]"
       >
-        {value
-          ? (
-            <>
-              {value.productImage
-                ? <img src={value.productImage} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0 border border-gray-100" />
-                : <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center flex-shrink-0"><MdShoppingBag size={13} className="text-gray-300" /></div>
-              }
-              <span className="text-[13.5px] text-gray-800 font-medium truncate">{value.productName}</span>
-            </>
-          )
-          : <span className="text-[13.5px] text-gray-300">Select product…</span>
-        }
+        {value ? (
+          <>
+            {value.productImage ? (
+              <img
+                src={value.productImage}
+                alt=""
+                className="w-8 h-8 rounded object-cover flex-shrink-0 border border-gray-100"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                <MdShoppingBag size={13} className="text-gray-300" />
+              </div>
+            )}
+            <span className="text-[13.5px] text-gray-800 font-medium truncate">
+              {value.productName}
+            </span>
+          </>
+        ) : (
+          <span className="text-[13.5px] text-gray-300">Select product…</span>
+        )}
         <MdExpandMore size={14} className="text-gray-300 ml-auto flex-shrink-0" />
       </div>
 
@@ -92,33 +108,52 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
             <input
               ref={inputRef}
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by name or SKU…"
               className="bg-transparent outline-none text-[13px] w-full placeholder:text-gray-400"
             />
           </div>
           <div className="overflow-y-auto flex-1">
             {loading ? (
-              <div className="flex items-center justify-center gap-2 py-8 text-gray-400 text-sm"><Spinner /> Loading…</div>
+              <div className="flex items-center justify-center gap-2 py-8 text-gray-400 text-sm">
+                <Spinner /> Loading…
+              </div>
             ) : filtered.length === 0 ? (
               <div className="py-8 text-center text-gray-400 text-sm">No products found</div>
-            ) : filtered.map(p => (
-              <button
-                key={p._id}
-                type="button"
-                onClick={() => { onPick(p); setOpen(false); setSearch(''); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
-              >
-                {p.image
-                  ? <img src={p.image} alt="" className="w-7 h-7 rounded object-cover flex-shrink-0 border border-gray-100" />
-                  : <div className="w-7 h-7 rounded bg-gray-100 flex items-center justify-center flex-shrink-0"><MdShoppingBag size={11} className="text-gray-300" /></div>
-                }
-                <div className="min-w-0 flex-1">
-                  <p className="text-[12.5px] font-semibold text-gray-800 truncate">{p.englishTitle}</p>
-                  <p className="text-[10.5px] text-gray-400">Rs. {p.price?.toLocaleString()} · Stock: {p.stock ?? '—'}</p>
-                </div>
-              </button>
-            ))}
+            ) : (
+              filtered.map((p) => (
+                <button
+                  key={p._id}
+                  type="button"
+                  onClick={() => {
+                    onPick(p);
+                    setOpen(false);
+                    setSearch('');
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
+                >
+                  {p.image ? (
+                    <img
+                      src={p.image}
+                      alt=""
+                      className="w-7 h-7 rounded object-cover flex-shrink-0 border border-gray-100"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                      <MdShoppingBag size={11} className="text-gray-300" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12.5px] font-semibold text-gray-800 truncate">
+                      {p.englishTitle}
+                    </p>
+                    <p className="text-[10.5px] text-gray-400">
+                      Rs. {p.price?.toLocaleString()} · Stock: {p.stock ?? '—'}
+                    </p>
+                  </div>
+                </button>
+              ))
+            )}
           </div>
         </div>
       )}
@@ -127,11 +162,14 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
 };
 
 /* ════════════════════════════════════════
-   LINE ITEM ROW (table row)
+   LINE ITEM ROW
 ════════════════════════════════════════ */
 const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemove, canRemove }) => {
   const grossAmount = row.qty * row.rate;
-  const discountAmt = row.discType === 'percent' ? grossAmount * (row.discPercent / 100) : row.discAmount;
+  const discountAmt =
+    row.discType === 'percent'
+      ? grossAmount * (row.discPercent / 100)
+      : row.discAmount;
   const net = Math.max(grossAmount - discountAmt, 0);
 
   return (
@@ -147,7 +185,7 @@ const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemo
       <td className="py-1.5 px-2 align-middle" style={{ minWidth: 140 }}>
         <input
           value={row.description}
-          onChange={e => onChange(idx, 'description', e.target.value)}
+          onChange={(e) => onChange(idx, 'description', e.target.value)}
           placeholder="Optional note…"
           className="w-full bg-transparent text-[13.5px] text-gray-600 outline-none px-1.5 py-3 rounded focus:bg-gray-50"
         />
@@ -155,7 +193,7 @@ const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemo
       <td className="py-1.5 px-2 align-middle" style={{ minWidth: 80 }}>
         <select
           value={row.unit}
-          onChange={e => onChange(idx, 'unit', e.target.value)}
+          onChange={(e) => onChange(idx, 'unit', e.target.value)}
           className="w-full bg-transparent text-[13.5px] text-gray-700 outline-none cursor-pointer px-1.5 py-3 rounded focus:bg-gray-50"
         >
           <option value="piece">PCS</option>
@@ -164,33 +202,51 @@ const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemo
       </td>
       <td className="py-1.5 px-1 align-middle" style={{ width: 70 }}>
         <input
-          type="number" min="1" value={row.qty}
-          onChange={e => onChange(idx, 'qty', Number(e.target.value))}
+          type="number"
+          min="1"
+          value={row.qty}
+          onChange={(e) => onChange(idx, 'qty', Number(e.target.value))}
           className={cellInputCls}
         />
       </td>
       <td className="py-1.5 px-1 align-middle" style={{ width: 90 }}>
         <input
-          type="number" min="0" step="0.01" value={row.rate}
-          onChange={e => onChange(idx, 'rate', Number(e.target.value))}
+          type="number"
+          min="0"
+          step="0.01"
+          value={row.rate}
+          onChange={(e) => onChange(idx, 'rate', Number(e.target.value))}
           className={cellInputCls}
         />
       </td>
-      <td className="py-1.5 px-2 align-middle text-right text-[13.5px] text-gray-700" style={{ width: 90 }}>
+      <td
+        className="py-1.5 px-2 align-middle text-right text-[13.5px] text-gray-700"
+        style={{ width: 90 }}
+      >
         {fmt(grossAmount)}
       </td>
       <td className="py-1.5 px-1 align-middle" style={{ width: 70 }}>
         <input
-          type="number" min="0" max="100" step="0.1" value={row.discPercent}
-          onChange={e => onChange(idx, 'discPercent', Number(e.target.value))}
+          type="number"
+          min="0"
+          max="100"
+          step="0.1"
+          value={row.discPercent}
+          onChange={(e) => onChange(idx, 'discPercent', Number(e.target.value))}
           disabled={row.discType !== 'percent'}
           className={cellInputCls + ' disabled:opacity-30'}
         />
       </td>
-      <td className="py-1.5 px-2 align-middle text-right text-[13.5px] text-gray-700" style={{ width: 90 }}>
+      <td
+        className="py-1.5 px-2 align-middle text-right text-[13.5px] text-gray-700"
+        style={{ width: 90 }}
+      >
         {fmt(discountAmt)}
       </td>
-      <td className="py-1.5 px-2 align-middle text-right text-[14px] font-bold" style={{ width: 100, color: ACCENT }}>
+      <td
+        className="py-1.5 px-2 align-middle text-right text-[14px] font-bold"
+        style={{ width: 100, color: ACCENT }}
+      >
         {fmt(net)}
       </td>
       <td className="py-1.5 px-2 align-middle text-center" style={{ width: 40 }}>
@@ -208,16 +264,22 @@ const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemo
 };
 
 const emptyRow = () => ({
-  product: null, description: '', unit: 'piece', qty: 1, rate: 0,
-  discType: 'percent', discPercent: 0, discAmount: 0,
+  product: null,
+  description: '',
+  unit: 'piece',
+  qty: 1,
+  rate: 0,
+  discType: 'percent',
+  discPercent: 0,
+  discAmount: 0,
 });
 
 /* ════════════════════════════════════════
    MAIN PAGE
 ════════════════════════════════════════ */
-const AddOrderPage = () => {
+const AddInvoice = () => {
   const navigate = useNavigate();
-  const token = useSelector(s => s.admin.token);
+  const token = useSelector((s) => s.admin.token);
 
   const [retailers, setRetailers]             = useState([]);
   const [products, setProducts]               = useState([]);
@@ -229,50 +291,74 @@ const AddOrderPage = () => {
   const [errors, setErrors]                   = useState({});
 
   const [form, setForm] = useState({
-    RetailerUser: '', SaleUser: '', city: '', phoneNumber: '',
-    shippingAddress: '', paymentType: 'cod', couponCode: '',
-    date: todayISO(), termDays: 0, dueDate: todayISO(),
+    RetailerUser: '',
+    SaleUser: '',
+    city: '',
+    phoneNumber: '',
+    shippingAddress: '',
+    paymentType: 'cod',
+    couponCode: '',
+    date: todayISO(),
+    termDays: 0,
+    dueDate: todayISO(),
   });
-  const sf = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const sf = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   const [rows, setRows] = useState([emptyRow()]);
 
   /* ── load data ── */
+  const reloadProducts = () => {
+    setLoadingProducts(true);
+    return axios
+      .get(SERVER_URL + '/product/', { headers: { 'x-auth-token': token } })
+      .then((r) => {
+        const list = Array.isArray(r.data?.data)
+          ? r.data.data
+          : Array.isArray(r.data)
+          ? r.data
+          : [];
+        setProducts(list);
+        return list; // return for use in decrementStock
+      })
+      .catch((e) => {
+        console.error('Products:', e);
+        toast.error('Failed to load products');
+        return [];
+      })
+      .finally(() => setLoadingProducts(false));
+  };
+
   useEffect(() => {
     getAllRetailers()
-      .then(r => setRetailers(r.data?.data || r.data || []))
-      .catch(e => console.error('Retailers:', e));
+      .then((r) => setRetailers(r.data?.data || r.data || []))
+      .catch((e) => console.error('Retailers:', e));
 
-    setLoadingProducts(true);
-    axios.get(SERVER_URL + '/product/', { headers: { 'x-auth-token': token } })
-      .then(r => setProducts(Array.isArray(r.data?.data) ? r.data.data : (r.data?.data || [])))
-      .catch(e => { console.error('Products:', e); toast.error('Failed to load products'); })
-      .finally(() => setLoadingProducts(false));
+    reloadProducts();
 
     setLoadingSP(true);
     getAllSalesPersons()
-      .then(r => setSalesPersons(r.data?.data || []))
-      .catch(e => console.error('SP:', e))
+      .then((r) => setSalesPersons(r.data?.data || []))
+      .catch((e) => console.error('SP:', e))
       .finally(() => setLoadingSP(false));
 
     getAllCities()
-      .then(r => {
+      .then((r) => {
         const list = r.data?.data || r.data || [];
-        console.log('Cities loaded:', list);
         setCities(Array.isArray(list) ? list : []);
       })
-      .catch(e => console.error('Cities:', e));
+      .catch((e) => console.error('Cities:', e));
   }, []);
 
-  /* ── auto-fill phone + address + city + sales person when retailer chosen ── */
+  /* ── auto-fill when retailer chosen ── */
   useEffect(() => {
     if (!form.RetailerUser) return;
-    const r = retailers.find(r => r._id === form.RetailerUser);
+    const r = retailers.find((r) => r._id === form.RetailerUser);
     if (!r) return;
-
-    const address = [r.shopAddress1, r.shopAddress2].filter(Boolean).filter(a => a !== 'N/A').join(', ');
-
-    setForm(p => ({
+    const address = [r.shopAddress1, r.shopAddress2]
+      .filter(Boolean)
+      .filter((a) => a !== 'N/A')
+      .join(', ');
+    setForm((p) => ({
       ...p,
       phoneNumber: r.phoneNumber || p.phoneNumber,
       shippingAddress: address || p.shippingAddress,
@@ -286,29 +372,40 @@ const AddOrderPage = () => {
     sf('dueDate', addDays(form.date, form.termDays));
   }, [form.date, form.termDays]);
 
-  const selectedRetailer = retailers.find(r => r._id === form.RetailerUser);
+  const selectedRetailer = retailers.find((r) => r._id === form.RetailerUser);
 
   /* ── row helpers ── */
   const pickProduct = (idx, p) => {
-    setRows(prev => prev.map((row, i) => i === idx
-      ? { ...row, product: { productId: p._id, productName: p.englishTitle, productImage: p.image, stock: p.stock, cortanSize: p.cortanSize || 1 }, rate: p.price || 0 }
-      : row
-    ));
-    // auto-append a fresh row if this was the last one
-    setRows(prev => {
+    setRows((prev) => {
+      const updated = prev.map((row, i) =>
+        i === idx
+          ? {
+              ...row,
+              product: {
+                productId: p._id,
+                productName: p.englishTitle,
+                productImage: p.image,
+                stock: p.stock,
+                cortanSize: p.cortanSize || 1,
+              },
+              rate: p.price || 0,
+            }
+          : row
+      );
+      // auto-append a fresh row if this was the last one
       const isLast = idx === prev.length - 1;
-      return isLast ? [...prev, emptyRow()] : prev;
+      return isLast ? [...updated, emptyRow()] : updated;
     });
   };
 
   const changeRow = (idx, key, val) =>
-    setRows(prev => prev.map((row, i) => i === idx ? { ...row, [key]: val } : row));
+    setRows((prev) => prev.map((row, i) => (i === idx ? { ...row, [key]: val } : row)));
 
   const removeRow = (idx) =>
-    setRows(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
+    setRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
 
   /* ── totals ── */
-  const activeRows = rows.filter(r => r.product);
+  const activeRows = rows.filter((r) => r.product);
   const subTotal = activeRows.reduce((s, r) => s + r.qty * r.rate, 0);
   const totalDiscount = activeRows.reduce((s, r) => {
     const gross = r.qty * r.rate;
@@ -325,47 +422,111 @@ const AddOrderPage = () => {
     if (!form.phoneNumber)     e.phoneNumber     = 'Phone number is required';
     if (!form.shippingAddress) e.shippingAddress = 'Shipping address is required';
     if (!activeRows.length)    e.items           = 'Add at least one product';
+
+    activeRows.forEach((r, idx) => {
+      const unitsOrdered =
+        r.unit === 'ctn' ? r.qty * (r.product?.cortanSize || 1) : r.qty;
+      const liveStock =
+        products.find((p) => p._id === r.product?.productId)?.stock ??
+        r.product?.stock;
+      if (liveStock != null && unitsOrdered > liveStock) {
+        e[`stock_${idx}`] = `Only ${liveStock} in stock for "${r.product?.productName}"`;
+      }
+    });
+
     setErrors(e);
     return !Object.keys(e).length;
   };
 
-  /* ── submit ── */
-  const handleSubmit = async () => {
-    if (!validate()) return;
-    try {
-      setSubmitting(true);
-      const payload = {
-        RetailerUser: form.RetailerUser,
-        SaleUser: form.SaleUser,
-        shippingAddress: form.shippingAddress,
-        phoneNumber: form.phoneNumber,
-        city: form.city,
-        paymentType: form.paymentType,
-        ...(form.couponCode && { couponCode: form.couponCode }),
-        items: activeRows.map(r => {
-          const gross = r.qty * r.rate;
-          const discAmt = r.discType === 'percent' ? gross * (r.discPercent / 100) : r.discAmount;
-          const net = Math.max(gross - discAmt, 0);
-          const effectivePrice = r.qty ? net / r.qty : r.rate;
-          return {
-            productId: r.product.productId,
-            quantity: Number(r.qty),
-            price: Number(r.rate),
-            type: r.unit,
-            ...(discAmt > 0 && { discountedPrice: Number(effectivePrice.toFixed(2)) }),
-          };
-        }),
-      };
-      await createOrder(payload, token);
-      toast.success('Order created successfully.');
-      navigate('/Order');
-    } catch (err) {
-      toast.error(err.response?.data?.errors || err.response?.data?.error || err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  /* ── decrement stock ── */
+const decrementStock = async (orderedRows, freshProducts) => {
+  const productList = freshProducts?.length ? freshProducts : products;
 
+  await Promise.allSettled(
+    orderedRows.map(async (r) => {
+      const unitsToDeduct =
+        r.unit === 'ctn' ? r.qty * (r.product.cortanSize || 1) : r.qty;
+
+      const matched = productList.find((p) => p._id === r.product.productId);
+      if (!matched) return;
+
+      const newStock = Math.max((matched.stock ?? 0) - unitsToDeduct, 0);
+
+      return updateProduct(
+        {
+          ...matched,
+          id:         matched._id,
+          stock:      newStock,
+          brandID:    matched.brand?._id    || matched.brand,
+          categoryID: matched.category?._id || matched.category,
+          cityID:     matched.cityID?._id   || matched.cityID,
+        },
+        token
+      );
+    })
+  );
+};
+
+  /* ── submit ── */
+const handleSubmit = async () => {
+  if (!validate()) return;
+  try {
+    setSubmitting(true);
+
+    const freshProducts = await reloadProducts();
+
+    const payload = {
+      RetailerUser: form.RetailerUser,
+      SaleUser: form.SaleUser,
+      shippingAddress: form.shippingAddress,
+      phoneNumber: form.phoneNumber,
+      city: form.city,
+      paymentType: form.paymentType,
+      ...(form.couponCode && { couponCode: form.couponCode }),
+      items: activeRows.map((r) => {
+        const gross = r.qty * r.rate;
+        const discAmt = r.discType === 'percent'
+          ? gross * (r.discPercent / 100)
+          : r.discAmount;
+        const net = Math.max(gross - discAmt, 0);
+        const effectivePrice = r.qty ? net / r.qty : r.rate;
+        return {
+          productId: r.product.productId,
+          quantity: Number(r.qty),
+          price: Number(r.rate),
+          type: r.unit,
+          ...(discAmt > 0 && { discountedPrice: Number(effectivePrice.toFixed(2)) }),
+        };
+      }),
+    };
+
+    // 1. Create order
+    const orderRes = await createOrder(payload, token);
+    const orderId = orderRes.data?.data?._id || orderRes.data?._id;
+
+    // 2. Push status to Completed
+    if (orderId) {
+      await updateOrderStatus({ id: orderId, status: 'Completed' });
+    }
+
+    // 3. Update stock
+    await decrementStock(activeRows, freshProducts);
+
+    toast.success('Invoice created successfully!');
+    navigate('/Sales/Invoices');
+  } catch (err) {
+    console.error('Order creation error:', err);
+    const msg =
+      err.response?.data?.errors?.[0]?.msg ||
+      err.response?.data?.error ||
+      err.response?.data?.msg ||
+      err.message ||
+      'Failed to create invoice';
+    toast.error(msg);
+  } finally {
+    setSubmitting(false);
+  }
+};
   return (
     <div className="min-h-screen bg-gray-50">
       {/* ── Top bar ── */}
@@ -380,7 +541,7 @@ const AddOrderPage = () => {
             </button>
             <div>
               <p className="text-[11px] text-gray-400 font-medium">Sales / Orders</p>
-              <h1 className="text-lg font-bold text-gray-900 leading-tight">Add Order</h1>
+              <h1 className="text-lg font-bold text-gray-900 leading-tight">Add Invoice</h1>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -396,7 +557,7 @@ const AddOrderPage = () => {
               className="h-10 px-6 rounded-xl text-white text-sm font-bold flex items-center gap-2 transition-all disabled:opacity-60"
               style={{ background: ACCENT, boxShadow: `0 4px 14px ${ACCENT}55` }}
             >
-              {submitting ? <><Spinner /> Saving…</> : <><MdAdd size={16} /> Save Order</>}
+              {submitting ? <><Spinner /> Saving…</> : <><MdAdd size={16} /> Save Invoice</>}
             </button>
           </div>
         </div>
@@ -413,36 +574,47 @@ const AddOrderPage = () => {
 
             {/* Customer */}
             <div className="col-span-12 md:col-span-4">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">Customer <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                Customer <span style={{ color: ACCENT }}>*</span>
+              </p>
               <div className="relative">
                 <select
                   value={form.RetailerUser}
-                  onChange={e => sf('RetailerUser', e.target.value)}
+                  onChange={(e) => sf('RetailerUser', e.target.value)}
                   className={selectCls + (errors.RetailerUser ? ' border-red-300' : '')}
                 >
                   <option value="">Select…</option>
-                  {retailers.map(r => <option key={r._id} value={r._id}>{r.name}</option>)}
+                  {retailers.map((r) => (
+                    <option key={r._id} value={r._id}>{r.name}</option>
+                  ))}
                 </select>
                 <MdExpandMore size={15} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               </div>
-              {errors.RetailerUser && <p className="text-red-400 text-[11px] mt-1">{errors.RetailerUser}</p>}
+              {errors.RetailerUser && (
+                <p className="text-red-400 text-[11px] mt-1">{errors.RetailerUser}</p>
+              )}
             </div>
 
             {/* Sales person */}
             <div className="col-span-12 md:col-span-4">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">Sales Person <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                Sales Person <span style={{ color: ACCENT }}>*</span>
+              </p>
               <div className="relative">
                 <select
                   value={form.SaleUser}
-                  onChange={e => sf('SaleUser', e.target.value)}
+                  onChange={(e) => sf('SaleUser', e.target.value)}
                   disabled={loadingSP}
                   className={selectCls + (errors.SaleUser ? ' border-red-300' : '')}
                 >
                   <option value="">{loadingSP ? 'Loading…' : 'Select…'}</option>
-                  {salesPersons.map(sp => <option key={sp._id} value={sp._id}>{sp.name}</option>)}
-                  {selectedRetailer?.salesPersonID
-                    && !salesPersons.some(sp => sp._id === selectedRetailer.salesPersonID._id)
-                    && (
+                  {salesPersons.map((sp) => (
+                    <option key={sp._id} value={sp._id}>{sp.name}</option>
+                  ))}
+                  {selectedRetailer?.salesPersonID &&
+                    !salesPersons.some(
+                      (sp) => sp._id === selectedRetailer.salesPersonID._id
+                    ) && (
                       <option value={selectedRetailer.salesPersonID._id}>
                         {selectedRetailer.salesPersonID.name}
                       </option>
@@ -450,20 +622,26 @@ const AddOrderPage = () => {
                 </select>
                 <MdExpandMore size={15} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               </div>
-              {errors.SaleUser && <p className="text-red-400 text-[11px] mt-1">{errors.SaleUser}</p>}
+              {errors.SaleUser && (
+                <p className="text-red-400 text-[11px] mt-1">{errors.SaleUser}</p>
+              )}
             </div>
 
             {/* City */}
             <div className="col-span-12 md:col-span-4">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">City / Site <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                City / Site <span style={{ color: ACCENT }}>*</span>
+              </p>
               <div className="relative">
                 <select
                   value={form.city}
-                  onChange={e => sf('city', e.target.value)}
+                  onChange={(e) => sf('city', e.target.value)}
                   className={selectCls + (errors.city ? ' border-red-300' : '')}
                 >
                   <option value="">Select…</option>
-                  {cities.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
+                  {cities.map((c) => (
+                    <option key={c._id} value={c._id}>{c.name}</option>
+                  ))}
                 </select>
                 <MdExpandMore size={15} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               </div>
@@ -472,36 +650,46 @@ const AddOrderPage = () => {
 
             {/* Phone */}
             <div className="col-span-12 md:col-span-4">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">Phone Number <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                Phone Number <span style={{ color: ACCENT }}>*</span>
+              </p>
               <input
                 value={form.phoneNumber}
-                onChange={e => sf('phoneNumber', e.target.value)}
+                onChange={(e) => sf('phoneNumber', e.target.value)}
                 placeholder="03XX-XXXXXXX"
                 className={inputCls + (errors.phoneNumber ? ' border-red-300' : '')}
               />
-              {errors.phoneNumber && <p className="text-red-400 text-[11px] mt-1">{errors.phoneNumber}</p>}
+              {errors.phoneNumber && (
+                <p className="text-red-400 text-[11px] mt-1">{errors.phoneNumber}</p>
+              )}
             </div>
 
             {/* Address */}
             <div className="col-span-12 md:col-span-8 row-span-2">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">Shipping Address <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                Shipping Address <span style={{ color: ACCENT }}>*</span>
+              </p>
               <textarea
                 value={form.shippingAddress}
-                onChange={e => sf('shippingAddress', e.target.value)}
+                onChange={(e) => sf('shippingAddress', e.target.value)}
                 placeholder="Full delivery address…"
                 rows={3}
                 className={inputCls + ' resize-none ' + (errors.shippingAddress ? 'border-red-300' : '')}
               />
-              {errors.shippingAddress && <p className="text-red-400 text-[11px] mt-1">{errors.shippingAddress}</p>}
+              {errors.shippingAddress && (
+                <p className="text-red-400 text-[11px] mt-1">{errors.shippingAddress}</p>
+              )}
             </div>
 
             {/* Date */}
             <div className="col-span-6 md:col-span-2">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">Date <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                Date <span style={{ color: ACCENT }}>*</span>
+              </p>
               <input
                 type="date"
                 value={form.date}
-                onChange={e => sf('date', e.target.value)}
+                onChange={(e) => sf('date', e.target.value)}
                 className={inputCls}
               />
             </div>
@@ -510,25 +698,28 @@ const AddOrderPage = () => {
             <div className="col-span-6 md:col-span-2">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Term Days</p>
               <input
-                type="number" min="0"
+                type="number"
+                min="0"
                 value={form.termDays}
-                onChange={e => sf('termDays', Number(e.target.value))}
+                onChange={(e) => sf('termDays', Number(e.target.value))}
                 className={inputCls}
               />
             </div>
 
             {/* Due Date */}
             <div className="col-span-12 md:col-span-2">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">Due Date <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                Due Date <span style={{ color: ACCENT }}>*</span>
+              </p>
               <input
                 type="date"
                 value={form.dueDate}
-                onChange={e => sf('dueDate', e.target.value)}
+                onChange={(e) => sf('dueDate', e.target.value)}
                 className={inputCls}
               />
             </div>
 
-            {/* Credit limit (readonly display) */}
+            {/* Credit limit */}
             <div className="col-span-6 md:col-span-2">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Credit Limit</p>
               <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-[13px] text-gray-400">
@@ -536,7 +727,7 @@ const AddOrderPage = () => {
               </div>
             </div>
 
-            {/* Balance (readonly display) */}
+            {/* Balance */}
             <div className="col-span-6 md:col-span-2">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Balance</p>
               <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-[13px] text-gray-400">
@@ -546,17 +737,23 @@ const AddOrderPage = () => {
 
             {/* Payment type */}
             <div className="col-span-12 md:col-span-4">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">Payment Type <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                Payment Type <span style={{ color: ACCENT }}>*</span>
+              </p>
               <div className="grid grid-cols-2 gap-2">
-                {[{ v: 'cod', l: 'Cash on Delivery' }, { v: 'bank_transfer', l: 'Bank Transfer' }].map(opt => (
+                {[
+                  { v: 'cod', l: 'Cash on Delivery' },
+                  { v: 'bank_transfer', l: 'Bank Transfer' },
+                ].map((opt) => (
                   <button
                     key={opt.v}
                     type="button"
                     onClick={() => sf('paymentType', opt.v)}
                     className="h-9 rounded-lg border text-[12px] font-semibold transition-all"
-                    style={form.paymentType === opt.v
-                      ? { background: ACCENT, borderColor: ACCENT, color: '#fff' }
-                      : { background: '#fff', borderColor: '#e5e7eb', color: '#4b5563' }
+                    style={
+                      form.paymentType === opt.v
+                        ? { background: ACCENT, borderColor: ACCENT, color: '#fff' }
+                        : { background: '#fff', borderColor: '#e5e7eb', color: '#4b5563' }
                     }
                   >
                     {opt.l}
@@ -568,21 +765,42 @@ const AddOrderPage = () => {
           </div>
         </div>
 
-        {/* ── Products Details (table) ── */}
+        {/* ── Products Details ── */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/70 flex items-center justify-between">
             <p className="text-[12.5px] font-bold text-gray-700">Products Details</p>
-            {loadingProducts && <span className="text-[11px] text-gray-400 flex items-center gap-1.5"><Spinner /> loading catalogue…</span>}
+            {loadingProducts && (
+              <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
+                <Spinner /> loading catalogue…
+              </span>
+            )}
           </div>
 
-          {errors.items && <p className="text-red-400 text-[11px] px-5 pt-3">{errors.items}</p>}
+          {errors.items && (
+            <p className="text-red-400 text-[11px] px-5 pt-3">{errors.items}</p>
+          )}
+          {Object.keys(errors)
+            .filter((k) => k.startsWith('stock_'))
+            .map((k) => (
+              <p key={k} className="text-red-400 text-[11px] px-5 pt-1">
+                ⚠ {errors[k]}
+              </p>
+            ))}
 
           <div className="overflow-x-auto">
             <table className="w-full border-collapse" style={{ minWidth: 960 }}>
               <thead>
                 <tr style={{ background: ACCENT }}>
-                  {['Product', 'Description', 'Unit', 'Qty', 'Rate', 'Amount', 'Disc %', 'Discount', 'Net'].map((h, i) => (
-                    <th key={h} className={`text-[10.5px] font-bold text-white uppercase tracking-wide px-2 py-3.5 ${i >= 3 ? 'text-right' : 'text-left'}`}>
+                  {[
+                    'Product', 'Description', 'Unit', 'Qty', 'Rate',
+                    'Amount', 'Disc %', 'Discount', 'Net',
+                  ].map((h, i) => (
+                    <th
+                      key={h}
+                      className={`text-[10.5px] font-bold text-white uppercase tracking-wide px-2 py-3.5 ${
+                        i >= 3 ? 'text-right' : 'text-left'
+                      }`}
+                    >
                       {h}
                     </th>
                   ))}
@@ -606,15 +824,23 @@ const AddOrderPage = () => {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-gray-100">
-                  <td colSpan={3} className="px-2 py-2.5 text-[12px] font-bold text-gray-500">Total</td>
+                  <td colSpan={3} className="px-2 py-2.5 text-[12px] font-bold text-gray-500">
+                    Total
+                  </td>
                   <td className="px-1 py-2.5 text-right text-[12px] font-bold text-gray-700">
                     {activeRows.reduce((s, r) => s + Number(r.qty), 0)}
                   </td>
                   <td></td>
-                  <td className="px-2 py-2.5 text-right text-[12px] font-bold text-gray-700">{fmt(subTotal)}</td>
+                  <td className="px-2 py-2.5 text-right text-[12px] font-bold text-gray-700">
+                    {fmt(subTotal)}
+                  </td>
                   <td></td>
-                  <td className="px-2 py-2.5 text-right text-[12px] font-bold text-gray-700">{fmt(totalDiscount)}</td>
-                  <td className="px-2 py-2.5 text-right text-[13px] font-bold" style={{ color: ACCENT }}>{fmt(grandTotal)}</td>
+                  <td className="px-2 py-2.5 text-right text-[12px] font-bold text-gray-700">
+                    {fmt(totalDiscount)}
+                  </td>
+                  <td className="px-2 py-2.5 text-right text-[13px] font-bold" style={{ color: ACCENT }}>
+                    {fmt(grandTotal)}
+                  </td>
                   <td></td>
                 </tr>
               </tfoot>
@@ -624,7 +850,7 @@ const AddOrderPage = () => {
           <div className="px-5 py-3 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => setRows(prev => [...prev, emptyRow()])}
+              onClick={() => setRows((prev) => [...prev, emptyRow()])}
               className="flex items-center gap-1.5 text-[12.5px] font-semibold transition-colors"
               style={{ color: ACCENT }}
             >
@@ -640,7 +866,7 @@ const AddOrderPage = () => {
               <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Coupon Code</p>
               <input
                 value={form.couponCode}
-                onChange={e => sf('couponCode', e.target.value.toUpperCase())}
+                onChange={(e) => sf('couponCode', e.target.value.toUpperCase())}
                 placeholder="e.g. SAVE10"
                 className={inputCls + ' font-mono tracking-wider max-w-xs'}
               />
@@ -659,15 +885,20 @@ const AddOrderPage = () => {
                   <span className="font-semibold text-gray-700">- Rs. {fmt(totalDiscount)}</span>
                 </div>
               </div>
-              <div className="flex items-center justify-between px-5 py-4" style={{ background: ACCENT }}>
-                <span className="text-[12px] font-bold uppercase tracking-wide text-white/80">Total</span>
+              <div
+                className="flex items-center justify-between px-5 py-4"
+                style={{ background: ACCENT }}
+              >
+                <span className="text-[12px] font-bold uppercase tracking-wide text-white/80">
+                  Total
+                </span>
                 <span className="text-xl font-bold text-white">Rs. {fmt(grandTotal)}</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Bottom actions (mirrors top, for long pages) */}
+        {/* Bottom actions */}
         <div className="flex items-center justify-end gap-3 pb-6">
           <button
             onClick={() => navigate(-1)}
@@ -681,7 +912,7 @@ const AddOrderPage = () => {
             className="h-11 px-7 rounded-xl text-white text-sm font-bold flex items-center gap-2 transition-all disabled:opacity-60"
             style={{ background: ACCENT, boxShadow: `0 4px 14px ${ACCENT}55` }}
           >
-            {submitting ? <><Spinner /> Saving…</> : <><MdAdd size={16} /> Save Order</>}
+            {submitting ? <><Spinner /> Saving…</> : <><MdAdd size={16} /> Save Invoice</>}
           </button>
         </div>
 
@@ -690,4 +921,4 @@ const AddOrderPage = () => {
   );
 };
 
-export default AddOrderPage;
+export default AddInvoice;
