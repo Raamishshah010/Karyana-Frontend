@@ -1,17 +1,18 @@
-
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  getAllPurchases, addPurchaseLedger, getAllCities, getDatas, updateProduct,
+  getAllPurchases, addPurchaseLedger, createPurchaseCreditNote,
+  getAllCities, getDatas, updateProduct,
 } from '../APIS';
 import { toast } from 'react-toastify';
+import { useSelector } from 'react-redux';
 import { Loader } from "../components/common/loader";
 import { FaPlus, FaTrash } from 'react-icons/fa';
 import { Form, Formik, FieldArray, Field } from "formik";
 import * as yup from "yup";
 import GroupedSelect from '../components/common/GroupedSelect';
 import {
-  MdClose, MdLocalShipping, MdWarehouse, MdArrowBack,
+  MdClose, MdWarehouse, MdArrowBack, MdAssignmentReturn,
 } from "react-icons/md";
 
 const inputCls = "bg-[#F9FAFB] border border-gray-200 focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-3 py-2.5 rounded-xl w-full outline-none text-sm text-[#111827] transition-all placeholder:text-gray-300";
@@ -99,11 +100,7 @@ const safeFetchCities = async () => {
   catch (err) { console.warn('Cities fetch failed:', err?.message); return []; }
 };
 
-// ── Get current stock from product object (handles any field name) ──
-const getProductStock = (product) =>
-  Number(product?.stock ?? product?.quantity ?? product?.currentStock ?? 0);
-
-// ── Update stock for all purchased items ──
+// ── Update stock for all purchased items (DECREASE — regular purchase) ──
 const updateStocksAfterPurchase = async (items, products) => {
   const session = JSON.parse(sessionStorage.getItem('karyana-admin') || '{}');
   const token   = session.token;
@@ -117,9 +114,6 @@ const updateStocksAfterPurchase = async (items, products) => {
     items.map((item) => {
       const product = products.find((p) => p._id === item.product);
       if (!product) return Promise.resolve();
-
-      // 🔍 DEBUG — remove after fixing
-      console.log('PRODUCT OBJECT:', JSON.stringify(product, null, 2));
 
       const newStock = Math.max((product.stock ?? 0) - (Number(item.quantity) || 0), 0);
 
@@ -138,8 +132,47 @@ const updateStocksAfterPurchase = async (items, products) => {
   );
 };
 
+// ── Update stock for all returned items (INCREASE — credit note) ──
+const updateStocksAfterCreditNote = async (items, products) => {
+  const session = JSON.parse(sessionStorage.getItem('karyana-admin') || '{}');
+  const token   = session.token;
+
+  if (!token) {
+    toast.warn('Credit note saved, but stock could not be updated — session token missing.');
+    return;
+  }
+
+  await Promise.allSettled(
+    items.map((item) => {
+      const product = products.find((p) => p._id === item.product);
+      if (!product) return Promise.resolve();
+
+      const newStock = (product.stock ?? 0) + (Number(item.quantity) || 0);
+
+      return updateProduct(
+        {
+          ...product,
+          id:         product._id,
+          stock:      newStock,
+          brandID:    product.brand?._id    || product.brandID?._id    || product.brand    || product.brandID,
+          categoryID: product.category?._id || product.categoryID?._id || product.category || product.categoryID,
+          cityID:     product.city?._id     || product.cityID?._id     || product.city     || product.cityID,
+        },
+        token,
+      );
+    })
+  );
+};
+
 const AddPurchaseNote = () => {
   const navigate = useNavigate();
+  const token = useSelector((s) => s.admin?.token);
+
+  // ── mode toggle: 'purchase' | 'credit' ──
+  // const [mode, setMode] = useState('purchase');
+  // const isCreditNote = mode === 'credit';
+
+  const isCreditNote = true;
 
   const [pageLoading, setPageLoading]         = useState(true);
   const [submitting, setSubmitting]           = useState(false);
@@ -239,42 +272,85 @@ const AddPurchaseNote = () => {
         return;
       }
 
-      const payload = {
-        billNo:           values.billNo,
-        biltyNumber:      values.biltyNumber,
-        vehicleNumber:    values.vehicleNumber,
-        transportDetails: values.transportDetails,
-        date:             values.date,
-        termDays:         values.termDays ? Number(values.termDays) : undefined,
-        dueDate:          values.dueDate,
-        freightAmount:    Number(values.freightAmount || 0),
-        details:          values.details,
-        items: values.items.map(item => {
+      if (isCreditNote) {
+        // ── CREDIT NOTE PATH ──
+        const computedItems = values.items.map(item => {
           const line = calculateLineTotals(item);
           return {
             product:          item.product,
             quantity:         Number(item.quantity)         || 0,
             purchaseRate:     Number(item.purchaseRate)     || 0,
             purchaseDiscount: Number(item.purchaseDiscount) || 0,
-            salesRate:        Number(item.purchaseRate)     || 0,
-            salesDiscount:    Number(item.purchaseDiscount) || 0,
             amount:           line.amount,
+            discountAmount:   line.discountAmount,
           };
-        }),
-      };
+        });
 
-      const res = await addPurchaseLedger(values.supplier, payload);
+        const payload = {
+          supplier:          values.supplier,
+          address:           values.address,
+          billNo:            values.billNo,
+          vehicleNumber:     values.vehicleNumber,
+          biltyNumber:       values.biltyNumber,
+          transportDetails:  values.transportDetails,
+          freightAmount:     Number(values.freightAmount || 0),
+          details:           values.details,
+          date:              values.date,
+          termDays:          values.termDays ? Number(values.termDays) : undefined,
+          dueDate:           values.dueDate,
+          location:          values.location,
+          items:             computedItems,
+        };
 
-      if (res?.success) {
-  await updateStocksAfterPurchase(values.items, products); // no token arg needed anymore
-  toast.success('Purchase added successfully');
-  resetForm();
-  navigate('/Ledgers/Purchases');
-} else {
-        toast.error(res?.msg || 'Failed to add purchase note');
+        const res = await createPurchaseCreditNote(payload, token);
+
+        if (res?.data?.success) {
+          await updateStocksAfterCreditNote(values.items, products);
+          toast.success('Purchase credit note added successfully');
+          resetForm();
+          navigate('/Ledgers/Purchases');
+        } else {
+          toast.error(res?.data?.msg || 'Failed to add purchase credit note');
+        }
+      } else {
+        // ── REGULAR PURCHASE PATH ──
+        const payload = {
+          billNo:           values.billNo,
+          biltyNumber:      values.biltyNumber,
+          vehicleNumber:    values.vehicleNumber,
+          transportDetails: values.transportDetails,
+          date:             values.date,
+          termDays:         values.termDays ? Number(values.termDays) : undefined,
+          dueDate:          values.dueDate,
+          freightAmount:    Number(values.freightAmount || 0),
+          details:          values.details,
+          items: values.items.map(item => {
+            const line = calculateLineTotals(item);
+            return {
+              product:          item.product,
+              quantity:         Number(item.quantity)         || 0,
+              purchaseRate:     Number(item.purchaseRate)     || 0,
+              purchaseDiscount: Number(item.purchaseDiscount) || 0,
+              salesRate:        Number(item.purchaseRate)     || 0,
+              salesDiscount:    Number(item.purchaseDiscount) || 0,
+              amount:           line.amount,
+            };
+          }),
+        };
+
+        const res = await addPurchaseLedger(values.supplier, payload);
+
+        if (res?.success) {
+          await updateStocksAfterPurchase(values.items, products);
+          toast.success('Purchase added successfully');
+          resetForm();
+          navigate('/Ledgers/Purchases');
+        } else {
+          toast.error(res?.msg || 'Failed to add purchase note');
+        }
       }
     } catch (err) {
-      toast.error(err.response?.data?.msg || err.message || 'Failed to add purchase note');
+      toast.error(err.response?.data?.msg || err.message || 'Failed to save');
     } finally {
       setSubmitting(false);
     }
@@ -303,32 +379,64 @@ const AddPurchaseNote = () => {
       <div className="ap-page px-3 sm:px-0 pb-10">
 
         {/* ── Page Header ── */}
-        <div className="flex items-center gap-3 mt-6 mb-6">
-          <button
-            type="button"
-            onClick={() => navigate('/Ledgers/Purchases')}
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] transition-all shadow-sm flex-shrink-0"
-            aria-label="Go back"
-          >
-            <MdArrowBack size={18} />
-          </button>
-          <div>
-            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Add Purchase Note</h1>
-            <p className="text-sm text-[#9CA3AF] mt-0.5">Fill in the details to record a new purchase note </p>
+        <div className="flex items-center justify-between gap-3 mt-6 mb-6 flex-wrap">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate('/Ledgers/Purchases')}
+              className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] transition-all shadow-sm flex-shrink-0"
+              aria-label="Go back"
+            >
+              <MdArrowBack size={18} />
+            </button>
+            <div>
+              <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">
+                {isCreditNote ? 'Add Purchase Credit Note' : 'Add Purchase Note'}
+              </h1>
+              <p className="text-sm text-[#9CA3AF] mt-0.5">
+                {isCreditNote
+                  ? 'Record goods being returned to the supplier'
+                  : 'Fill in the details to record a new purchase note'}
+              </p>
+            </div>
           </div>
+
+          {/* ── Mode Toggle ── */}
+          {/* ── Mode Toggle ── */}
+{/* <div className="flex bg-gray-100 rounded-xl p-1 gap-1">
+  <button
+    type="button"
+    onClick={() => setMode('purchase')}
+    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${
+      mode === 'purchase' ? 'bg-white text-[#FF5934] shadow-sm' : 'text-gray-500 hover:text-gray-700'
+    }`}
+  >
+    <MdLocalShipping size={14} /> Purchase
+  </button>
+  <button
+    type="button"
+    onClick={() => setMode('credit')}
+    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${
+      mode === 'credit' ? 'bg-white text-[#FF5934] shadow-sm' : 'text-gray-500 hover:text-gray-700'
+    }`}
+  >
+    <MdAssignmentReturn size={14} /> Credit Note
+  </button>
+</div> */}
         </div>
 
         <Formik
           initialValues={INITIAL_PURCHASE_FORM}
           validationSchema={schema}
           onSubmit={handleSubmit}
+          enableReinitialize
         >
           {({ values, handleChange, errors, touched, setFieldValue }) => (
             <Form className="flex flex-col gap-5">
 
               {/* ── Purchase Info Card ── */}
               <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 sm:p-6">
-                <p className="sec-label">Purchase Info</p>
+                <p className="sec-label">{isCreditNote ? 'Credit Note Info' : 'Purchase Info'}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
                   {/* Supplier */}
@@ -507,7 +615,7 @@ const AddPurchaseNote = () => {
 
               {/* ── Products Card ── */}
               <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 sm:p-6">
-                <p className="sec-label">Products</p>
+                <p className="sec-label">{isCreditNote ? 'Returned Products' : 'Products'}</p>
 
                 {!values.location && (
                   <div className="flex items-center gap-2.5 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-4">
@@ -683,7 +791,9 @@ const AddPurchaseNote = () => {
                 >
                   {submitting
                     ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving…</>
-                    : <><MdLocalShipping size={16} /> Save Purchase</>}
+                    : isCreditNote
+                      ? <><MdAssignmentReturn size={16} /> Save Credit Note</>
+                      : <><MdLocalShipping size={16} /> Save Purchase</>}
                 </button>
               </div>
 

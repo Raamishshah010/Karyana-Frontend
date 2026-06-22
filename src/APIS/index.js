@@ -1,7 +1,92 @@
 import axios from "axios";
 import { SERVER_URL } from "../utils";
 
-// ==================== CREDIT NOTES APIs ====================
+
+// ==================== PAYMENT APIs ====================
+
+export const createPayment = async (data, token) => {
+  let config = {
+    method: "post",
+    url: SERVER_URL + "/payments",
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const getAllPayments = async ({ page = 1, limit = 25 } = {}) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + `/payments?page=${page}&limit=${limit}`,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+export const getPaymentById = async (id) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + "/payments/" + id,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+export const getPaymentsBySupplier = async (supplierId, page = 1, limit = 25) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + `/payments/supplier/${supplierId}?page=${page}&limit=${limit}`,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+export const updatePayment = async (id, data, token) => {
+  let config = {
+    method: "put",
+    url: SERVER_URL + "/payments/" + id,
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const deletePayment = async (id, token) => {
+  let config = {
+    method: "delete",
+    url: SERVER_URL + "/payments/" + id,
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+export const searchPayments = async (params) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + `/payments/search?${params}`,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+// ==================== SALE CREDIT NOTES APIs ====================
 export const createCreditNote = async (data, token) => {
   let config = {
     method: "post",
@@ -26,6 +111,71 @@ export const getAllCreditNotes = async (page = 1, limit = 10, params = {}) => {
   };
   return await axios.request(config);
 };
+
+
+// ==================== PURCHASE CREDIT NOTES APIs ====================
+
+export const createPurchaseCreditNote = async (data, token) => {
+  let config = {
+    method: "post",
+    url: SERVER_URL + "/purchase-credit-note/",
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const getAllPurchaseCreditNotes = async (page = 1, limit = 10, params = {}) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + "/purchase-credit-note/",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    params: { page, limit, ...params },
+  };
+  return await axios.request(config);
+};
+
+export const getPurchaseCreditNoteById = async (id) => {
+  let config = {
+    method: "get",
+    url: SERVER_URL + "/purchase-credit-note/" + id,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
+export const updatePurchaseCreditNote = async (id, data, token) => {
+  let config = {
+    method: "put",
+    url: SERVER_URL + "/purchase-credit-note/" + id,
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+    data: JSON.stringify(data),
+  };
+  return await axios.request(config);
+};
+
+export const deletePurchaseCreditNote = async (id, token) => {
+  let config = {
+    method: "delete",
+    url: SERVER_URL + "/purchase-credit-note/" + id,
+    headers: {
+      "x-auth-token": token,
+      "Content-Type": "application/json",
+    },
+  };
+  return await axios.request(config);
+};
+
 
 // ==================== NOMINAL ACCOUNT APIs ====================
 

@@ -73,6 +73,9 @@ import AddCreditNote from './pages/AddCreditNote.jsx';
 import AddPurchase from './pages/AddPurchase.jsx';
 import AddPurchaseNote from './pages/AddPurchaseNote.jsx';
 import Returns from './pages/Returns.jsx';
+import PurchaseCreditNote from './pages/PurchaseCreditNote.jsx';
+import AddPayments from './pages/AddPayments.jsx';
+import Payments from './pages/Payments.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -206,7 +209,10 @@ const App = () => {
               <Route path="/Add-Purchase" element={<AddPurchase />} />
               <Route path="/Add-Purchase-Note" element={<AddPurchaseNote />} />
               <Route path="/Returns" element={<Returns />} />
+              <Route path="/Purchase/Credit-Note" element={<PurchaseCreditNote />} />
 
+              <Route path="/Purchase/Payments" element={<Payments />} />
+              <Route path="/Add-Payments" element={<AddPayments />} />
 
             </Routes>
           </div>
