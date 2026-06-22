@@ -10,7 +10,7 @@ import { Form, Formik, FieldArray, Field } from "formik";
 import * as yup from "yup";
 import GroupedSelect from '../components/common/GroupedSelect';
 import {
-  MdClose, MdLocalShipping, MdWarehouse, MdArrowBack,
+  MdLocalShipping, MdWarehouse, MdArrowBack,
 } from "react-icons/md";
 
 const inputCls = "bg-[#F9FAFB] border border-gray-200 focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-3 py-2.5 rounded-xl w-full outline-none text-sm text-[#111827] transition-all placeholder:text-gray-300";
@@ -82,10 +82,10 @@ const syncLineAndTotals = (items, index, patch, setFieldValue) => {
   setFieldValue('payable',        totals.totalAmount);
 };
 
-const safeFetchProductsByCity = async (cityId) => {
+/* ── Fetch ALL products (no city filter) ── */
+const safeFetchAllProducts = async () => {
   try {
     const params = new URLSearchParams({ page: 1, limit: 500 });
-    if (cityId) params.append('city', cityId);
     return extractList(await getDatas(`/product/search?${params.toString()}`));
   } catch (err) {
     console.warn('Products fetch failed:', err?.message);
@@ -98,11 +98,7 @@ const safeFetchCities = async () => {
   catch (err) { console.warn('Cities fetch failed:', err?.message); return []; }
 };
 
-// ── Get current stock from product object (handles any field name) ──
-const getProductStock = (product) =>
-  Number(product?.stock ?? product?.quantity ?? product?.currentStock ?? 0);
-
-// ── Update stock for all purchased items ──
+/* ── Update stock for all purchased items ── */
 const updateStocksAfterPurchase = async (items, products) => {
   const session = JSON.parse(sessionStorage.getItem('karyana-admin') || '{}');
   const token   = session.token;
@@ -137,25 +133,27 @@ const updateStocksAfterPurchase = async (items, products) => {
 const AddPurchase = () => {
   const navigate = useNavigate();
 
-  const [pageLoading, setPageLoading]         = useState(true);
-  const [submitting, setSubmitting]           = useState(false);
-  const [suppliers, setSuppliers]             = useState([]);
-  const [products, setProducts]               = useState([]);
-  const [productsLoading, setProductsLoading] = useState(false);
-  const [cities, setCities]                   = useState([]);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [submitting, setSubmitting]   = useState(false);
+  const [suppliers, setSuppliers]     = useState([]);
+  const [products, setProducts]       = useState([]);
+  const [cities, setCities]           = useState([]);
 
-  /* ── Load suppliers + cities on mount ── */
+  /* ── Load suppliers + cities + ALL products on mount ── */
   useEffect(() => {
     const init = async () => {
       try {
         setPageLoading(true);
-        const [suppRes, cityList] = await Promise.all([
+        const [suppRes, cityList, productList] = await Promise.all([
           getAllPurchases(),
           safeFetchCities(),
+          safeFetchAllProducts(),
         ]);
         setSuppliers(extractList(suppRes));
         setCities(cityList);
+        setProducts(productList);
         if (!cityList.length) toast.warn('No warehouses/cities found');
+        if (!productList.length) toast.warn('No products found');
       } catch (err) {
         console.error('AddPurchase init error:', err);
         toast.error('Failed to load form data');
@@ -166,22 +164,13 @@ const AddPurchase = () => {
     init();
   }, []);
 
-  /* ── Load products when warehouse changes ── */
-  const handleWarehouseChange = async (cityId, setFieldValue) => {
-    setFieldValue('location', cityId);
-    setFieldValue('items', [emptyLineItem()]);
+  /* ── Warehouse change — only resets items, does NOT reload products ── */
+  const handleWarehouseChange = (cityId, setFieldValue) => {
+    setFieldValue('location',      cityId);
+    setFieldValue('items',         [emptyLineItem()]);
     setFieldValue('totalAmount',    0);
     setFieldValue('discountAmount', 0);
     setFieldValue('payable',        0);
-    setProducts([]);
-    if (!cityId) return;
-    try {
-      setProductsLoading(true);
-      const list = await safeFetchProductsByCity(cityId);
-      setProducts(list);
-      if (!list.length) toast.warn('No products found for this warehouse');
-    } catch { toast.error('Failed to load products'); }
-    finally   { setProductsLoading(false); }
   };
 
   /* ── Grouped products for select ── */
@@ -262,11 +251,11 @@ const AddPurchase = () => {
       const res = await addPurchaseLedger(values.supplier, payload);
 
       if (res?.success) {
-  await updateStocksAfterPurchase(values.items, products); // no token arg needed anymore
-  toast.success('Purchase added successfully');
-  resetForm();
-  navigate('/Ledgers/Purchases');
-} else {
+        await updateStocksAfterPurchase(values.items, products);
+        toast.success('Purchase added successfully');
+        resetForm();
+        navigate('/Ledgers/Purchases');
+      } else {
         toast.error(res?.msg || 'Failed to add purchase');
       }
     } catch (err) {
@@ -355,7 +344,11 @@ const AddPurchase = () => {
                   {/* Address */}
                   <div className="sm:col-span-2">
                     <label className={labelCls}>Address</label>
-                    <input name="address" placeholder="Address" value={values.address} onChange={handleChange} className={inputCls} />
+                    <input
+                      name="address" placeholder="Address"
+                      value={values.address} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Bill No */}
@@ -364,7 +357,8 @@ const AddPurchase = () => {
                       Bill No <span className="text-[#FF5934]">*</span>
                     </label>
                     <input
-                      name="billNo" placeholder="Bill No" value={values.billNo} onChange={handleChange}
+                      name="billNo" placeholder="Bill No"
+                      value={values.billNo} onChange={handleChange}
                       className={`${inputCls} ${errors.billNo && touched.billNo ? 'border-red-400' : ''}`}
                     />
                     {errors.billNo && touched.billNo && (
@@ -395,7 +389,8 @@ const AddPurchase = () => {
                   <div>
                     <label className={labelCls}>Term Days</label>
                     <input
-                      type="number" name="termDays" placeholder="e.g. 30" value={values.termDays} min="0"
+                      type="number" name="termDays" placeholder="e.g. 30"
+                      value={values.termDays} min="0"
                       onChange={e => {
                         handleChange(e);
                         if (values.date) setFieldValue('dueDate', calcDueDate(values.date, e.target.value));
@@ -412,19 +407,31 @@ const AddPurchase = () => {
                         auto from term days
                       </span>
                     </label>
-                    <input type="date" name="dueDate" value={values.dueDate} onChange={handleChange} className={inputCls} />
+                    <input
+                      type="date" name="dueDate"
+                      value={values.dueDate} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Vehicle Number */}
                   <div>
                     <label className={labelCls}>Vehicle Number</label>
-                    <input name="vehicleNumber" placeholder="Vehicle Number" value={values.vehicleNumber} onChange={handleChange} className={inputCls} />
+                    <input
+                      name="vehicleNumber" placeholder="Vehicle Number"
+                      value={values.vehicleNumber} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Bilty Number */}
                   <div>
                     <label className={labelCls}>Bilty Number</label>
-                    <input name="biltyNumber" placeholder="Bilty Number" value={values.biltyNumber} onChange={handleChange} className={inputCls} />
+                    <input
+                      name="biltyNumber" placeholder="Bilty Number"
+                      value={values.biltyNumber} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Freight Amount */}
@@ -432,14 +439,22 @@ const AddPurchase = () => {
                     <label className={labelCls}>Freight Amount</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-[#9CA3AF] font-semibold pointer-events-none">PKR</span>
-                      <input name="freightAmount" placeholder="0.00" value={values.freightAmount} onChange={handleChange} className={`${inputCls} pl-12`} />
+                      <input
+                        name="freightAmount" placeholder="0.00"
+                        value={values.freightAmount} onChange={handleChange}
+                        className={`${inputCls} pl-12`}
+                      />
                     </div>
                   </div>
 
                   {/* Transport Details */}
                   <div className="sm:col-span-2">
                     <label className={labelCls}>Transport Details</label>
-                    <input name="transportDetails" placeholder="Transport Details" value={values.transportDetails} onChange={handleChange} className={inputCls} />
+                    <input
+                      name="transportDetails" placeholder="Transport Details"
+                      value={values.transportDetails} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Warehouse */}
@@ -471,20 +486,10 @@ const AddPurchase = () => {
                     {cities.length === 0 && (
                       <p className="text-[10px] text-red-400 mt-1">No warehouses loaded. Check your Cities API.</p>
                     )}
-                    {cities.length > 0 && !values.location && (
-                      <p className="text-[10px] text-[#9CA3AF] mt-1">
-                        {cities.length} warehouse{cities.length !== 1 ? 's' : ''} available. Select one to load products.
-                      </p>
-                    )}
-                    {values.location && productsLoading && (
-                      <p className="text-[10px] text-[#FF5934] mt-1 flex items-center gap-1 animate-pulse">
-                        <MdWarehouse size={10} /> Loading products…
-                      </p>
-                    )}
-                    {values.location && !productsLoading && (
+                    {values.location && (
                       <p className="text-[10px] text-emerald-600 mt-1 flex items-center gap-1">
                         <MdWarehouse size={10} />
-                        {cities.find(c => c._id === values.location)?.name} — {products.length} product{products.length !== 1 ? 's' : ''} loaded
+                        {cities.find(c => c._id === values.location)?.name} selected
                       </p>
                     )}
                   </div>
@@ -505,30 +510,18 @@ const AddPurchase = () => {
               <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 sm:p-6">
                 <p className="sec-label">Products</p>
 
-                {!values.location && (
-                  <div className="flex items-center gap-2.5 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-4">
-                    <MdWarehouse size={16} className="text-amber-500 flex-shrink-0" />
-                    <p className="text-[12px] text-amber-700 font-medium">
-                      Select a <strong>warehouse</strong> above to load available products.
-                    </p>
-                  </div>
-                )}
-                {values.location && productsLoading && (
-                  <div className="flex items-center gap-2.5 bg-orange-50 border border-orange-100 rounded-xl px-4 py-3 mb-4">
-                    <div className="w-4 h-4 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                    <p className="text-[12px] text-orange-700 font-medium">Loading products for this warehouse…</p>
-                  </div>
-                )}
-                {values.location && !productsLoading && products.length === 0 && (
-                  <div className="flex items-center gap-2.5 bg-orange-50 border border-orange-100 rounded-xl px-4 py-3 mb-4">
-                    <MdWarehouse size={16} className="text-orange-400 flex-shrink-0" />
-                    <p className="text-[12px] text-orange-700 font-medium">No products found for this warehouse.</p>
-                  </div>
-                )}
-                {values.location && !productsLoading && products.length > 0 && (
+                {/* Products count banner */}
+                {products.length > 0 && (
                   <div className="flex items-center gap-2 text-[11px] text-emerald-600 font-semibold mb-4">
                     <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     {products.length} product{products.length !== 1 ? 's' : ''} available
+                  </div>
+                )}
+
+                {products.length === 0 && (
+                  <div className="flex items-center gap-2.5 bg-orange-50 border border-orange-100 rounded-xl px-4 py-3 mb-4">
+                    <MdWarehouse size={16} className="text-orange-400 flex-shrink-0" />
+                    <p className="text-[12px] text-orange-700 font-medium">No products found.</p>
                   </div>
                 )}
 
@@ -536,6 +529,7 @@ const AddPurchase = () => {
                   {({ push, remove }) => (
                     <div className="bg-[#F9FAFB] rounded-2xl border border-gray-100 p-3 sm:p-4">
 
+                      {/* Column headers — desktop only */}
                       <div className="hidden lg:grid grid-cols-[minmax(220px,2fr)_minmax(100px,1fr)_minmax(100px,1fr)_minmax(100px,1fr)_minmax(110px,1fr)_40px] gap-3 mb-2 px-1">
                         {['Product', 'Purchase Rate', 'Discount %', 'Quantity', 'Amount', ''].map(h => (
                           <div key={h || 'del'} className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest">{h}</div>
@@ -548,6 +542,7 @@ const AddPurchase = () => {
                             key={index}
                             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(220px,2fr)_minmax(100px,1fr)_minmax(100px,1fr)_minmax(100px,1fr)_minmax(110px,1fr)_40px] gap-3 pb-3 border-b border-gray-100 last:border-0 last:pb-0 items-start"
                           >
+                            {/* Product */}
                             <div className="sm:col-span-2 lg:col-span-1 min-w-0">
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Product</label>
                               <GroupedSelect
@@ -567,18 +562,15 @@ const AddPurchase = () => {
                                   setFieldValue(`items.${index}.purchaseDiscount`, patch.purchaseDiscount);
                                   syncLineAndTotals(values.items, index, patch, setFieldValue);
                                 }}
-                                placeholder={
-                                  !values.location    ? 'Select warehouse first…' :
-                                  productsLoading     ? 'Loading products…'       :
-                                                        'Select product…'
-                                }
-                                isDisabled={!values.location || productsLoading}
+                                placeholder="Select product…"
+                                isDisabled={products.length === 0}
                               />
                               {touched.items?.[index]?.product && errors.items?.[index]?.product && (
                                 <p className="text-red-500 text-[10px] mt-1">{errors.items[index].product}</p>
                               )}
                             </div>
 
+                            {/* Purchase Rate */}
                             <div>
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Purchase Rate</label>
                               <Field
@@ -588,6 +580,7 @@ const AddPurchase = () => {
                               />
                             </div>
 
+                            {/* Discount % */}
                             <div>
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Discount %</label>
                               <Field
@@ -597,6 +590,7 @@ const AddPurchase = () => {
                               />
                             </div>
 
+                            {/* Quantity */}
                             <div>
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Quantity</label>
                               <Field
@@ -606,6 +600,7 @@ const AddPurchase = () => {
                               />
                             </div>
 
+                            {/* Amount (readonly) */}
                             <div>
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Amount</label>
                               <div className={`${inputCls} flex items-center font-semibold text-[#111827] bg-white min-h-[42px]`}>
@@ -613,6 +608,7 @@ const AddPurchase = () => {
                               </div>
                             </div>
 
+                            {/* Remove */}
                             <div className="flex sm:block items-end justify-end">
                               <button
                                 type="button"
@@ -651,7 +647,7 @@ const AddPurchase = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-white border border-gray-100 rounded-2xl shadow-sm p-4 sm:p-6">
                 {[
                   { label: 'Discount Amount', value: Number(values.discountAmount).toFixed(2) },
-                  { label: 'Payable Amount',  value: Number(values.payable).toFixed(2)        },
+                  { label: 'Payable Amount',  value: Number(values.payable).toFixed(2) },
                   { label: 'Total Amount',    value: Number(values.totalAmount).toFixed(2), highlight: true },
                 ].map(({ label, value, highlight }) => (
                   <div key={label}>
@@ -674,7 +670,7 @@ const AddPurchase = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || productsLoading}
+                  disabled={submitting}
                   className="flex-1 h-12 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:opacity-50 text-white text-sm font-bold shadow-lg shadow-orange-100 transition-all flex items-center justify-center gap-2"
                 >
                   {submitting

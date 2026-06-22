@@ -12,7 +12,7 @@ import { Form, Formik, FieldArray, Field } from "formik";
 import * as yup from "yup";
 import GroupedSelect from '../components/common/GroupedSelect';
 import {
-  MdClose, MdWarehouse, MdArrowBack, MdAssignmentReturn,
+  MdWarehouse, MdArrowBack, MdAssignmentReturn,
 } from "react-icons/md";
 
 const inputCls = "bg-[#F9FAFB] border border-gray-200 focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-3 py-2.5 rounded-xl w-full outline-none text-sm text-[#111827] transition-all placeholder:text-gray-300";
@@ -84,10 +84,10 @@ const syncLineAndTotals = (items, index, patch, setFieldValue) => {
   setFieldValue('payable',        totals.totalAmount);
 };
 
-const safeFetchProductsByCity = async (cityId) => {
+/* ── Fetch ALL products (no city filter) ── */
+const safeFetchAllProducts = async () => {
   try {
     const params = new URLSearchParams({ page: 1, limit: 500 });
-    if (cityId) params.append('city', cityId);
     return extractList(await getDatas(`/product/search?${params.toString()}`));
   } catch (err) {
     console.warn('Products fetch failed:', err?.message);
@@ -100,23 +100,19 @@ const safeFetchCities = async () => {
   catch (err) { console.warn('Cities fetch failed:', err?.message); return []; }
 };
 
-// ── Update stock for all purchased items (DECREASE — regular purchase) ──
+/* ── Update stock after purchase (DECREASE) ── */
 const updateStocksAfterPurchase = async (items, products) => {
   const session = JSON.parse(sessionStorage.getItem('karyana-admin') || '{}');
   const token   = session.token;
-
   if (!token) {
     toast.warn('Purchase saved, but stock could not be updated — session token missing.');
     return;
   }
-
   await Promise.allSettled(
     items.map((item) => {
       const product = products.find((p) => p._id === item.product);
       if (!product) return Promise.resolve();
-
       const newStock = Math.max((product.stock ?? 0) - (Number(item.quantity) || 0), 0);
-
       return updateProduct(
         {
           ...product,
@@ -132,23 +128,19 @@ const updateStocksAfterPurchase = async (items, products) => {
   );
 };
 
-// ── Update stock for all returned items (INCREASE — credit note) ──
+/* ── Update stock after credit note (INCREASE) ── */
 const updateStocksAfterCreditNote = async (items, products) => {
   const session = JSON.parse(sessionStorage.getItem('karyana-admin') || '{}');
   const token   = session.token;
-
   if (!token) {
     toast.warn('Credit note saved, but stock could not be updated — session token missing.');
     return;
   }
-
   await Promise.allSettled(
     items.map((item) => {
       const product = products.find((p) => p._id === item.product);
       if (!product) return Promise.resolve();
-
       const newStock = (product.stock ?? 0) + (Number(item.quantity) || 0);
-
       return updateProduct(
         {
           ...product,
@@ -166,35 +158,33 @@ const updateStocksAfterCreditNote = async (items, products) => {
 
 const AddPurchaseNote = () => {
   const navigate = useNavigate();
-  const token = useSelector((s) => s.admin?.token);
-
-  // ── mode toggle: 'purchase' | 'credit' ──
-  // const [mode, setMode] = useState('purchase');
-  // const isCreditNote = mode === 'credit';
+  const token    = useSelector((s) => s.admin?.token);
 
   const isCreditNote = true;
 
-  const [pageLoading, setPageLoading]         = useState(true);
-  const [submitting, setSubmitting]           = useState(false);
-  const [suppliers, setSuppliers]             = useState([]);
-  const [products, setProducts]               = useState([]);
-  const [productsLoading, setProductsLoading] = useState(false);
-  const [cities, setCities]                   = useState([]);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [submitting, setSubmitting]   = useState(false);
+  const [suppliers, setSuppliers]     = useState([]);
+  const [products, setProducts]       = useState([]);
+  const [cities, setCities]           = useState([]);
 
-  /* ── Load suppliers + cities on mount ── */
+  /* ── Load suppliers + cities + ALL products on mount ── */
   useEffect(() => {
     const init = async () => {
       try {
         setPageLoading(true);
-        const [suppRes, cityList] = await Promise.all([
+        const [suppRes, cityList, productList] = await Promise.all([
           getAllPurchases(),
           safeFetchCities(),
+          safeFetchAllProducts(),
         ]);
         setSuppliers(extractList(suppRes));
         setCities(cityList);
-        if (!cityList.length) toast.warn('No warehouses/cities found');
+        setProducts(productList);
+        if (!cityList.length)    toast.warn('No warehouses/cities found');
+        if (!productList.length) toast.warn('No products found');
       } catch (err) {
-        console.error('AddPurchase init error:', err);
+        console.error('AddPurchaseNote init error:', err);
         toast.error('Failed to load form data');
       } finally {
         setPageLoading(false);
@@ -203,22 +193,13 @@ const AddPurchaseNote = () => {
     init();
   }, []);
 
-  /* ── Load products when warehouse changes ── */
-  const handleWarehouseChange = async (cityId, setFieldValue) => {
-    setFieldValue('location', cityId);
-    setFieldValue('items', [emptyLineItem()]);
+  /* ── Warehouse change — resets items only, does NOT reload products ── */
+  const handleWarehouseChange = (cityId, setFieldValue) => {
+    setFieldValue('location',      cityId);
+    setFieldValue('items',         [emptyLineItem()]);
     setFieldValue('totalAmount',    0);
     setFieldValue('discountAmount', 0);
     setFieldValue('payable',        0);
-    setProducts([]);
-    if (!cityId) return;
-    try {
-      setProductsLoading(true);
-      const list = await safeFetchProductsByCity(cityId);
-      setProducts(list);
-      if (!list.length) toast.warn('No products found for this warehouse');
-    } catch { toast.error('Failed to load products'); }
-    finally   { setProductsLoading(false); }
   };
 
   /* ── Grouped products for select ── */
@@ -273,7 +254,6 @@ const AddPurchaseNote = () => {
       }
 
       if (isCreditNote) {
-        // ── CREDIT NOTE PATH ──
         const computedItems = values.items.map(item => {
           const line = calculateLineTotals(item);
           return {
@@ -287,19 +267,19 @@ const AddPurchaseNote = () => {
         });
 
         const payload = {
-          supplier:          values.supplier,
-          address:           values.address,
-          billNo:            values.billNo,
-          vehicleNumber:     values.vehicleNumber,
-          biltyNumber:       values.biltyNumber,
-          transportDetails:  values.transportDetails,
-          freightAmount:     Number(values.freightAmount || 0),
-          details:           values.details,
-          date:              values.date,
-          termDays:          values.termDays ? Number(values.termDays) : undefined,
-          dueDate:           values.dueDate,
-          location:          values.location,
-          items:             computedItems,
+          supplier:         values.supplier,
+          address:          values.address,
+          billNo:           values.billNo,
+          vehicleNumber:    values.vehicleNumber,
+          biltyNumber:      values.biltyNumber,
+          transportDetails: values.transportDetails,
+          freightAmount:    Number(values.freightAmount || 0),
+          details:          values.details,
+          date:             values.date,
+          termDays:         values.termDays ? Number(values.termDays) : undefined,
+          dueDate:          values.dueDate,
+          location:         values.location,
+          items:            computedItems,
         };
 
         const res = await createPurchaseCreditNote(payload, token);
@@ -313,7 +293,6 @@ const AddPurchaseNote = () => {
           toast.error(res?.data?.msg || 'Failed to add purchase credit note');
         }
       } else {
-        // ── REGULAR PURCHASE PATH ──
         const payload = {
           billNo:           values.billNo,
           biltyNumber:      values.biltyNumber,
@@ -400,29 +379,6 @@ const AddPurchaseNote = () => {
               </p>
             </div>
           </div>
-
-          {/* ── Mode Toggle ── */}
-          {/* ── Mode Toggle ── */}
-{/* <div className="flex bg-gray-100 rounded-xl p-1 gap-1">
-  <button
-    type="button"
-    onClick={() => setMode('purchase')}
-    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${
-      mode === 'purchase' ? 'bg-white text-[#FF5934] shadow-sm' : 'text-gray-500 hover:text-gray-700'
-    }`}
-  >
-    <MdLocalShipping size={14} /> Purchase
-  </button>
-  <button
-    type="button"
-    onClick={() => setMode('credit')}
-    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${
-      mode === 'credit' ? 'bg-white text-[#FF5934] shadow-sm' : 'text-gray-500 hover:text-gray-700'
-    }`}
-  >
-    <MdAssignmentReturn size={14} /> Credit Note
-  </button>
-</div> */}
         </div>
 
         <Formik
@@ -434,7 +390,7 @@ const AddPurchaseNote = () => {
           {({ values, handleChange, errors, touched, setFieldValue }) => (
             <Form className="flex flex-col gap-5">
 
-              {/* ── Purchase Info Card ── */}
+              {/* ── Info Card ── */}
               <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 sm:p-6">
                 <p className="sec-label">{isCreditNote ? 'Credit Note Info' : 'Purchase Info'}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -467,7 +423,11 @@ const AddPurchaseNote = () => {
                   {/* Address */}
                   <div className="sm:col-span-2">
                     <label className={labelCls}>Address</label>
-                    <input name="address" placeholder="Address" value={values.address} onChange={handleChange} className={inputCls} />
+                    <input
+                      name="address" placeholder="Address"
+                      value={values.address} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Bill No */}
@@ -476,7 +436,8 @@ const AddPurchaseNote = () => {
                       Bill No <span className="text-[#FF5934]">*</span>
                     </label>
                     <input
-                      name="billNo" placeholder="Bill No" value={values.billNo} onChange={handleChange}
+                      name="billNo" placeholder="Bill No"
+                      value={values.billNo} onChange={handleChange}
                       className={`${inputCls} ${errors.billNo && touched.billNo ? 'border-red-400' : ''}`}
                     />
                     {errors.billNo && touched.billNo && (
@@ -507,7 +468,8 @@ const AddPurchaseNote = () => {
                   <div>
                     <label className={labelCls}>Term Days</label>
                     <input
-                      type="number" name="termDays" placeholder="e.g. 30" value={values.termDays} min="0"
+                      type="number" name="termDays" placeholder="e.g. 30"
+                      value={values.termDays} min="0"
                       onChange={e => {
                         handleChange(e);
                         if (values.date) setFieldValue('dueDate', calcDueDate(values.date, e.target.value));
@@ -524,19 +486,31 @@ const AddPurchaseNote = () => {
                         auto from term days
                       </span>
                     </label>
-                    <input type="date" name="dueDate" value={values.dueDate} onChange={handleChange} className={inputCls} />
+                    <input
+                      type="date" name="dueDate"
+                      value={values.dueDate} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Vehicle Number */}
                   <div>
                     <label className={labelCls}>Vehicle Number</label>
-                    <input name="vehicleNumber" placeholder="Vehicle Number" value={values.vehicleNumber} onChange={handleChange} className={inputCls} />
+                    <input
+                      name="vehicleNumber" placeholder="Vehicle Number"
+                      value={values.vehicleNumber} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Bilty Number */}
                   <div>
                     <label className={labelCls}>Bilty Number</label>
-                    <input name="biltyNumber" placeholder="Bilty Number" value={values.biltyNumber} onChange={handleChange} className={inputCls} />
+                    <input
+                      name="biltyNumber" placeholder="Bilty Number"
+                      value={values.biltyNumber} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Freight Amount */}
@@ -544,14 +518,22 @@ const AddPurchaseNote = () => {
                     <label className={labelCls}>Freight Amount</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-[#9CA3AF] font-semibold pointer-events-none">PKR</span>
-                      <input name="freightAmount" placeholder="0.00" value={values.freightAmount} onChange={handleChange} className={`${inputCls} pl-12`} />
+                      <input
+                        name="freightAmount" placeholder="0.00"
+                        value={values.freightAmount} onChange={handleChange}
+                        className={`${inputCls} pl-12`}
+                      />
                     </div>
                   </div>
 
                   {/* Transport Details */}
                   <div className="sm:col-span-2">
                     <label className={labelCls}>Transport Details</label>
-                    <input name="transportDetails" placeholder="Transport Details" value={values.transportDetails} onChange={handleChange} className={inputCls} />
+                    <input
+                      name="transportDetails" placeholder="Transport Details"
+                      value={values.transportDetails} onChange={handleChange}
+                      className={inputCls}
+                    />
                   </div>
 
                   {/* Warehouse */}
@@ -583,20 +565,10 @@ const AddPurchaseNote = () => {
                     {cities.length === 0 && (
                       <p className="text-[10px] text-red-400 mt-1">No warehouses loaded. Check your Cities API.</p>
                     )}
-                    {cities.length > 0 && !values.location && (
-                      <p className="text-[10px] text-[#9CA3AF] mt-1">
-                        {cities.length} warehouse{cities.length !== 1 ? 's' : ''} available. Select one to load products.
-                      </p>
-                    )}
-                    {values.location && productsLoading && (
-                      <p className="text-[10px] text-[#FF5934] mt-1 flex items-center gap-1 animate-pulse">
-                        <MdWarehouse size={10} /> Loading products…
-                      </p>
-                    )}
-                    {values.location && !productsLoading && (
+                    {values.location && (
                       <p className="text-[10px] text-emerald-600 mt-1 flex items-center gap-1">
                         <MdWarehouse size={10} />
-                        {cities.find(c => c._id === values.location)?.name} — {products.length} product{products.length !== 1 ? 's' : ''} loaded
+                        {cities.find(c => c._id === values.location)?.name} selected
                       </p>
                     )}
                   </div>
@@ -617,30 +589,17 @@ const AddPurchaseNote = () => {
               <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 sm:p-6">
                 <p className="sec-label">{isCreditNote ? 'Returned Products' : 'Products'}</p>
 
-                {!values.location && (
-                  <div className="flex items-center gap-2.5 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-4">
-                    <MdWarehouse size={16} className="text-amber-500 flex-shrink-0" />
-                    <p className="text-[12px] text-amber-700 font-medium">
-                      Select a <strong>warehouse</strong> above to load available products.
-                    </p>
-                  </div>
-                )}
-                {values.location && productsLoading && (
-                  <div className="flex items-center gap-2.5 bg-orange-50 border border-orange-100 rounded-xl px-4 py-3 mb-4">
-                    <div className="w-4 h-4 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                    <p className="text-[12px] text-orange-700 font-medium">Loading products for this warehouse…</p>
-                  </div>
-                )}
-                {values.location && !productsLoading && products.length === 0 && (
-                  <div className="flex items-center gap-2.5 bg-orange-50 border border-orange-100 rounded-xl px-4 py-3 mb-4">
-                    <MdWarehouse size={16} className="text-orange-400 flex-shrink-0" />
-                    <p className="text-[12px] text-orange-700 font-medium">No products found for this warehouse.</p>
-                  </div>
-                )}
-                {values.location && !productsLoading && products.length > 0 && (
+                {products.length > 0 && (
                   <div className="flex items-center gap-2 text-[11px] text-emerald-600 font-semibold mb-4">
                     <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     {products.length} product{products.length !== 1 ? 's' : ''} available
+                  </div>
+                )}
+
+                {products.length === 0 && (
+                  <div className="flex items-center gap-2.5 bg-orange-50 border border-orange-100 rounded-xl px-4 py-3 mb-4">
+                    <MdWarehouse size={16} className="text-orange-400 flex-shrink-0" />
+                    <p className="text-[12px] text-orange-700 font-medium">No products found.</p>
                   </div>
                 )}
 
@@ -660,6 +619,7 @@ const AddPurchaseNote = () => {
                             key={index}
                             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(220px,2fr)_minmax(100px,1fr)_minmax(100px,1fr)_minmax(100px,1fr)_minmax(110px,1fr)_40px] gap-3 pb-3 border-b border-gray-100 last:border-0 last:pb-0 items-start"
                           >
+                            {/* Product */}
                             <div className="sm:col-span-2 lg:col-span-1 min-w-0">
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Product</label>
                               <GroupedSelect
@@ -679,18 +639,15 @@ const AddPurchaseNote = () => {
                                   setFieldValue(`items.${index}.purchaseDiscount`, patch.purchaseDiscount);
                                   syncLineAndTotals(values.items, index, patch, setFieldValue);
                                 }}
-                                placeholder={
-                                  !values.location    ? 'Select warehouse first…' :
-                                  productsLoading     ? 'Loading products…'       :
-                                                        'Select product…'
-                                }
-                                isDisabled={!values.location || productsLoading}
+                                placeholder="Select product…"
+                                isDisabled={products.length === 0}
                               />
                               {touched.items?.[index]?.product && errors.items?.[index]?.product && (
                                 <p className="text-red-500 text-[10px] mt-1">{errors.items[index].product}</p>
                               )}
                             </div>
 
+                            {/* Purchase Rate */}
                             <div>
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Purchase Rate</label>
                               <Field
@@ -700,6 +657,7 @@ const AddPurchaseNote = () => {
                               />
                             </div>
 
+                            {/* Discount % */}
                             <div>
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Discount %</label>
                               <Field
@@ -709,6 +667,7 @@ const AddPurchaseNote = () => {
                               />
                             </div>
 
+                            {/* Quantity */}
                             <div>
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Quantity</label>
                               <Field
@@ -718,6 +677,7 @@ const AddPurchaseNote = () => {
                               />
                             </div>
 
+                            {/* Amount (readonly) */}
                             <div>
                               <label className="lg:hidden block text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-1">Amount</label>
                               <div className={`${inputCls} flex items-center font-semibold text-[#111827] bg-white min-h-[42px]`}>
@@ -725,6 +685,7 @@ const AddPurchaseNote = () => {
                               </div>
                             </div>
 
+                            {/* Remove */}
                             <div className="flex sm:block items-end justify-end">
                               <button
                                 type="button"
@@ -763,7 +724,7 @@ const AddPurchaseNote = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-white border border-gray-100 rounded-2xl shadow-sm p-4 sm:p-6">
                 {[
                   { label: 'Discount Amount', value: Number(values.discountAmount).toFixed(2) },
-                  { label: 'Payable Amount',  value: Number(values.payable).toFixed(2)        },
+                  { label: 'Payable Amount',  value: Number(values.payable).toFixed(2) },
                   { label: 'Total Amount',    value: Number(values.totalAmount).toFixed(2), highlight: true },
                 ].map(({ label, value, highlight }) => (
                   <div key={label}>
@@ -786,14 +747,15 @@ const AddPurchaseNote = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || productsLoading}
+                  disabled={submitting}
                   className="flex-1 h-12 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] disabled:opacity-50 text-white text-sm font-bold shadow-lg shadow-orange-100 transition-all flex items-center justify-center gap-2"
                 >
                   {submitting
                     ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving…</>
                     : isCreditNote
                       ? <><MdAssignmentReturn size={16} /> Save Credit Note</>
-                      : <><MdLocalShipping size={16} /> Save Purchase</>}
+                      : <span>Save Purchase</span>
+                  }
                 </button>
               </div>
 
