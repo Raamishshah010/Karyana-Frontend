@@ -1,15 +1,11 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   getAllRetailers,
   getRetailerLedgerById,
-  approveLedger,
-  rejectLedger,
   getAllCreditNotes,
-} from '../APIS';
-import { toast } from 'react-toastify';
-import { GrFormNext, GrFormPrevious } from 'react-icons/gr';
-import { FaRegEye } from 'react-icons/fa6';
-import { AiOutlineCheck, AiOutlineClose } from 'react-icons/ai';
+} from "../APIS";
+import { toast } from "react-toastify";
+import { GrFormNext, GrFormPrevious } from "react-icons/gr";
 import {
   MdClose,
   MdArrowBack,
@@ -19,17 +15,17 @@ import {
   MdKeyboardArrowDown,
   MdFilterList,
   MdSearch,
-} from 'react-icons/md';
+} from "react-icons/md";
 
 const TRANSACTIONS_PER_PAGE = 11;
 const CREDIT_NOTE_FETCH_LIMIT = 1000;
 const PLACEHOLDER_IMAGE =
-  'https://developers.elementor.com/docs/assets/img/elementor-placeholder-image.png';
+  "https://developers.elementor.com/docs/assets/img/elementor-placeholder-image.png";
 
 /* ─── helpers ─────────────────────────────────────── */
 const toNumber = (val) => {
-  if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
-  const cleaned = String(val ?? '0').replace(/[^0-9.-]/g, '');
+  if (typeof val === "number") return Number.isFinite(val) ? val : 0;
+  const cleaned = String(val ?? "0").replace(/[^0-9.-]/g, "");
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : 0;
 };
@@ -37,7 +33,7 @@ const toNumber = (val) => {
 const fmtMoney = (val) => toNumber(val).toLocaleString();
 
 const isOrderEntry = (entry) => {
-  const details = String(entry?.details ?? entry?.description ?? '');
+  const details = String(entry?.details ?? entry?.description ?? "");
   return (
     /order\s+.*\s+placed/i.test(details) ||
     /^order\b/i.test(details) ||
@@ -47,32 +43,34 @@ const isOrderEntry = (entry) => {
 };
 
 const isReturnEntry = (entry) => {
-  const details = String(entry?.details ?? entry?.description ?? '').toLowerCase();
-  const type = String(entry?.type || '').toUpperCase();
+  const details = String(
+    entry?.details ?? entry?.description ?? ""
+  ).toLowerCase();
+  const type = String(entry?.type || "").toUpperCase();
 
   return (
-    ['RETURN', 'CREDIT_NOTE', 'CREDITNOTE'].includes(type) ||
-    details.includes('credit note') ||
-    details.includes('return') ||
-    details.includes('returned')
+    ["RETURN", "CREDIT_NOTE", "CREDITNOTE"].includes(type) ||
+    details.includes("credit note") ||
+    details.includes("return") ||
+    details.includes("returned")
   );
 };
 
 const formatLedgerDetails = (entry) => {
-  const base = entry?.description ?? entry?.details ?? 'Transaction';
+  const base = entry?.description ?? entry?.details ?? "Transaction";
 
-  if (isOrderEntry(entry)) return 'Order punched from app';
-  if (isReturnEntry(entry)) return base || 'Credit note / return';
+  if (isOrderEntry(entry)) return "Order punched from app";
+  if (isReturnEntry(entry)) return base || "Credit note / return";
 
   return base;
 };
 
 const formatRetailerData = (list = []) =>
   list.map((r) => ({
-    _id: r._id || 'N/A',
-    name: r.name || 'N/A',
-    phone: r.phone || r.phoneNumber || 'N/A',
-    shopName: r.shopName || 'N/A',
+    _id: r._id || "N/A",
+    name: r.name || "N/A",
+    phone: r.phone || r.phoneNumber || "N/A",
+    shopName: r.shopName || "N/A",
     image: r.image || PLACEHOLDER_IMAGE,
     isActive: r.isActive || false,
     balance: fmtMoney(r.balance || 0),
@@ -99,25 +97,34 @@ const pickAmount = (entry) => {
 };
 
 const CREDIT_TYPES = [
-  'PAYMENT',
-  'RECEIPT',
-  'CR',
-  'CREDIT',
-  'RETURN',
-  'CREDIT_NOTE',
-  'CREDITNOTE',
+  "PAYMENT",
+  "RECEIPT",
+  "CR",
+  "CREDIT",
+  "RETURN",
+  "CREDIT_NOTE",
+  "CREDITNOTE",
 ];
 
 const isCreditEntry = (entry) => {
   if (isOrderEntry(entry)) return false;
   if (isReturnEntry(entry)) return true;
-  return CREDIT_TYPES.includes(String(entry?.type || '').toUpperCase());
+  return CREDIT_TYPES.includes(String(entry?.type || "").toUpperCase());
 };
 
 const effectiveType = (entry) => {
-  if (isOrderEntry(entry)) return 'ORDER';
-  if (isReturnEntry(entry)) return 'CREDIT_NOTE';
-  return String(entry?.type || '').toUpperCase();
+  if (isOrderEntry(entry)) return "ORDER";
+  if (isReturnEntry(entry)) return "CREDIT_NOTE";
+  return String(entry?.type || "").toUpperCase();
+};
+
+const getTypeLabel = (row) => {
+  const type = String(row?.type || "").toUpperCase();
+
+  if (type === "CREDIT_NOTE") return "Returned";
+  if (type === "ORDER") return "PAYMENT";
+
+  return type || "—";
 };
 
 const mapLedger = (ledger) => {
@@ -127,7 +134,7 @@ const mapLedger = (ledger) => {
   return {
     id: ledger.transactionId || ledger._id,
     sourceId: ledger._id,
-    source: 'ledger',
+    source: "ledger",
 
     details: formatLedgerDetails(ledger),
     refNo: ledger.refNo ?? ledger.referenceNo ?? null,
@@ -138,13 +145,15 @@ const mapLedger = (ledger) => {
     rawType: ledger.type,
 
     rawAmount: amount,
-    rawBalance: Number.isFinite(toNumber(ledger?.balance)) ? toNumber(ledger?.balance) : null,
+    rawBalance: Number.isFinite(toNumber(ledger?.balance))
+      ? toNumber(ledger?.balance)
+      : null,
     isCredit: credit,
 
     debit: credit ? 0 : amount,
     credit: credit ? amount : 0,
 
-    date: ledger.date ? new Date(ledger.date).toISOString().split('T')[0] : '-',
+    date: ledger.date ? new Date(ledger.date).toISOString().split("T")[0] : "-",
     sortTime: new Date(ledger.createdAt || ledger.date || 0).getTime(),
 
     isApproved: ledger.isApproved === false ? false : true,
@@ -152,7 +161,6 @@ const mapLedger = (ledger) => {
     isImported: ledger.isImportedFromExcel === true,
 
     image: ledger.image || null,
-    statusLabel: null,
   };
 };
 
@@ -165,15 +173,15 @@ const mapCreditNoteToLedger = (cn) => {
   return {
     id: `CN-${cn._id}`,
     sourceId: cn._id,
-    source: 'credit-note',
+    source: "credit-note",
 
-    details: `Credit note${quantity ? ` (${quantity} items)` : ''}`,
+    details: `Credit note${quantity ? ` (${quantity} items)` : ""}`,
     refNo: cn?.creditNoteId || null,
     voucherNo: null,
     quantity,
 
-    type: 'CREDIT_NOTE',
-    rawType: 'CREDIT_NOTE',
+    type: "CREDIT_NOTE",
+    rawType: "CREDIT_NOTE",
 
     rawAmount: amount,
     rawBalance: null,
@@ -182,7 +190,7 @@ const mapCreditNoteToLedger = (cn) => {
     debit: 0,
     credit: amount,
 
-    date: cn?.date ? new Date(cn.date).toISOString().split('T')[0] : '-',
+    date: cn?.date ? new Date(cn.date).toISOString().split("T")[0] : "-",
     sortTime: new Date(cn?.createdAt || cn?.date || 0).getTime(),
 
     isApproved: true,
@@ -190,19 +198,18 @@ const mapCreditNoteToLedger = (cn) => {
     isImported: false,
 
     image: null,
-    statusLabel: cn?.status || 'Placed',
   };
 };
 
 const isLikelyCreditNoteLedgerRow = (row) => {
-  const type = String(row?.type || '').toUpperCase();
-  const details = String(row?.details || '').toLowerCase();
+  const type = String(row?.type || "").toUpperCase();
+  const details = String(row?.details || "").toLowerCase();
 
   return (
-    ['CREDIT_NOTE', 'RETURN', 'CREDITNOTE'].includes(type) ||
-    details.includes('credit note') ||
-    details.includes('return') ||
-    details.includes('returned')
+    ["CREDIT_NOTE", "RETURN", "CREDITNOTE"].includes(type) ||
+    details.includes("credit note") ||
+    details.includes("return") ||
+    details.includes("returned")
   );
 };
 
@@ -233,7 +240,7 @@ const computeRunningBalances = (rows = [], latestBalanceFallback = null) => {
       .map((row) => ({
         ...row,
         runningBalance: null,
-        balanceDisplay: '—',
+        balanceDisplay: "—",
       }));
   }
 
@@ -246,13 +253,17 @@ const computeRunningBalances = (rows = [], latestBalanceFallback = null) => {
 
   for (let i = anchorIndex - 1; i >= 0; i -= 1) {
     const nextRow = work[i + 1];
-    const nextDelta = nextRow.isCredit ? -toNumber(nextRow.rawAmount) : toNumber(nextRow.rawAmount);
+    const nextDelta = nextRow.isCredit
+      ? -toNumber(nextRow.rawAmount)
+      : toNumber(nextRow.rawAmount);
     work[i].runningBalance = toNumber(nextRow.runningBalance) - nextDelta;
   }
 
   for (let i = anchorIndex + 1; i < work.length; i += 1) {
     const prevRow = work[i - 1];
-    const currDelta = work[i].isCredit ? -toNumber(work[i].rawAmount) : toNumber(work[i].rawAmount);
+    const currDelta = work[i].isCredit
+      ? -toNumber(work[i].rawAmount)
+      : toNumber(work[i].rawAmount);
     work[i].runningBalance = toNumber(prevRow.runningBalance) + currDelta;
   }
 
@@ -263,7 +274,7 @@ const computeRunningBalances = (rows = [], latestBalanceFallback = null) => {
       balanceDisplay:
         Number.isFinite(row.runningBalance) && row.runningBalance !== null
           ? fmtMoney(row.runningBalance)
-          : '—',
+          : "—",
     }));
 };
 
@@ -273,22 +284,18 @@ const SalesPayments = () => {
   const [listLoading, setListLoading] = useState(false);
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [dropdownSearch, setDropdownSearch] = useState('');
+  const [dropdownSearch, setDropdownSearch] = useState("");
   const dropdownRef = useRef(null);
 
   const [selectedUser, setSelectedUser] = useState(null);
   const [transactionData, setTransactionData] = useState([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
-  const [actionStatuses, setActionStatuses] = useState({});
 
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [drawerImageSrc, setDrawerImageSrc] = useState(null);
-
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [appliedStartDate, setAppliedStartDate] = useState('');
-  const [appliedEndDate, setAppliedEndDate] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [appliedStartDate, setAppliedStartDate] = useState("");
+  const [appliedEndDate, setAppliedEndDate] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
 
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -305,11 +312,11 @@ const SalesPayments = () => {
     const handler = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setDropdownOpen(false);
-        setDropdownSearch('');
+        setDropdownSearch("");
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   useEffect(() => {
@@ -319,7 +326,7 @@ const SalesPayments = () => {
         const res = await getAllRetailers();
         setAllRetailers(formatRetailerData(res?.data?.data || []));
       } catch {
-        toast.error('Failed to load retailers');
+        toast.error("Failed to load retailers");
       } finally {
         setListLoading(false);
       }
@@ -343,7 +350,10 @@ const SalesPayments = () => {
 
         const creditNoteRows = Array.isArray(creditNotesRes?.data?.data)
           ? creditNotesRes.data.data
-              .filter((cn) => String(cn?.RetailerUser?._id || '') === String(retailerId))
+              .filter(
+                (cn) =>
+                  String(cn?.RetailerUser?._id || "") === String(retailerId)
+              )
               .map(mapCreditNoteToLedger)
           : [];
 
@@ -351,7 +361,8 @@ const SalesPayments = () => {
           ledgerRows
             .filter(isLikelyCreditNoteLedgerRow)
             .map(
-              (row) => `${row.date}|${toNumber(row.rawAmount)}|${toNumber(row.quantity)}`
+              (row) =>
+                `${row.date}|${toNumber(row.rawAmount)}|${toNumber(row.quantity)}`
             )
         );
 
@@ -370,7 +381,7 @@ const SalesPayments = () => {
 
         setTransactionData(withRunningBalance);
       } catch {
-        toast.error('Failed to fetch ledger');
+        toast.error("Failed to fetch ledger");
         setTransactionData([]);
       } finally {
         setLedgerLoading(false);
@@ -382,11 +393,11 @@ const SalesPayments = () => {
   useEffect(() => {
     if (!selectedUser?._id) return;
     setCurrentPage(1);
-    setTypeFilter('all');
-    setStartDate('');
-    setEndDate('');
-    setAppliedStartDate('');
-    setAppliedEndDate('');
+    setTypeFilter("all");
+    setStartDate("");
+    setEndDate("");
+    setAppliedStartDate("");
+    setAppliedEndDate("");
     fetchMergedLedger(selectedUser._id);
   }, [selectedUser?._id, fetchMergedLedger]);
 
@@ -395,17 +406,17 @@ const SalesPayments = () => {
 
     const onFocus = () => fetchMergedLedger(selectedUser._id);
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         fetchMergedLedger(selectedUser._id);
       }
     };
 
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [selectedUser?._id, fetchMergedLedger]);
 
@@ -415,8 +426,8 @@ const SalesPayments = () => {
   };
 
   const handleDateFilter = () => {
-    if (!selectedUser?._id) return toast.error('Select a user first');
-    if (!startDate || !endDate) return toast.error('Select both dates');
+    if (!selectedUser?._id) return toast.error("Select a user first");
+    if (!startDate || !endDate) return toast.error("Select both dates");
 
     setAppliedStartDate(startDate);
     setAppliedEndDate(endDate);
@@ -424,98 +435,82 @@ const SalesPayments = () => {
   };
 
   const clearDateFilter = () => {
-    setStartDate('');
-    setEndDate('');
-    setAppliedStartDate('');
-    setAppliedEndDate('');
+    setStartDate("");
+    setEndDate("");
+    setAppliedStartDate("");
+    setAppliedEndDate("");
     setCurrentPage(1);
-  };
-
-  const handleApprove = async (row) => {
-    if (row.source !== 'ledger') return;
-    if (!row?.sourceId) return toast.error('Missing ledger ID');
-
-    try {
-      setActionStatuses((p) => ({ ...p, [row.id]: 'approved' }));
-      const res = await approveLedger(String(row.sourceId), { isApproved: true });
-      toast.success(res?.msg || 'Approved');
-      await refreshLedger();
-    } catch (err) {
-      setActionStatuses((p) => ({ ...p, [row.id]: undefined }));
-      toast.error(err?.response?.data?.msg || 'Failed to approve');
-    }
-  };
-
-  const handleReject = async (row) => {
-    if (row.source !== 'ledger') return;
-    if (!row?.sourceId) return toast.error('Missing ledger ID');
-
-    try {
-      setActionStatuses((p) => ({ ...p, [row.id]: 'rejected' }));
-      const res = await rejectLedger(String(row.sourceId), { isRejected: true });
-      toast.success(res?.msg || 'Rejected');
-      await refreshLedger();
-    } catch (err) {
-      setActionStatuses((p) => ({ ...p, [row.id]: undefined }));
-      toast.error(err?.response?.data?.msg || 'Failed to reject');
-    }
-  };
-
-  const handleViewImage = (row) => {
-    if (!row?.image) {
-      toast.info('No image available');
-      return;
-    }
-    setDrawerImageSrc(row.image);
-    setIsDrawerOpen(true);
   };
 
   const handleSelectUser = (retailer) => {
     setSelectedUser(retailer);
     setDropdownOpen(false);
-    setDropdownSearch('');
-    setStartDate('');
-    setEndDate('');
-    setAppliedStartDate('');
-    setAppliedEndDate('');
-    setActionStatuses({});
+    setDropdownSearch("");
+    setStartDate("");
+    setEndDate("");
+    setAppliedStartDate("");
+    setAppliedEndDate("");
     setCurrentPage(1);
   };
 
   const filteredRows = useMemo(() => {
-    return transactionData.filter((row) => {
-      const matchesType =
-        typeFilter === 'all' ||
-        String(row.type || '').toUpperCase() === typeFilter.toUpperCase();
+  return transactionData.filter((row) => {
+    const displayType = getTypeLabel(row).toUpperCase();
 
-      const matchesStart = !appliedStartDate || row.date >= appliedStartDate;
-      const matchesEnd = !appliedEndDate || row.date <= appliedEndDate;
 
-      return matchesType && matchesStart && matchesEnd;
-    });
-  }, [transactionData, typeFilter, appliedStartDate, appliedEndDate]);
+const matchesType =
+  typeFilter === "all" || displayType === typeFilter.toUpperCase();
 
-  const totalPages = Math.ceil(filteredRows.length / TRANSACTIONS_PER_PAGE) || 1;
+    const matchesStart = !appliedStartDate || row.date >= appliedStartDate;
+    const matchesEnd = !appliedEndDate || row.date <= appliedEndDate;
+
+    return matchesType && matchesStart && matchesEnd;
+  });
+}, [transactionData, typeFilter, appliedStartDate, appliedEndDate]);
+
+  const totalPages =
+    Math.ceil(filteredRows.length / TRANSACTIONS_PER_PAGE) || 1;
   const pageStart = (currentPage - 1) * TRANSACTIONS_PER_PAGE;
-  const visibleRows = filteredRows.slice(pageStart, pageStart + TRANSACTIONS_PER_PAGE);
+  const visibleRows = filteredRows.slice(
+    pageStart,
+    pageStart + TRANSACTIONS_PER_PAGE
+  );
 
   const debitRows = filteredRows.filter((row) => row.debit > 0);
   const creditRows = filteredRows.filter((row) => row.credit > 0);
 
   const pendingDebitRows = debitRows.filter(
-    (row) => row.source === 'ledger' && !row.isImported && row.isApproved === false && !row.isRejected
+    (row) =>
+      row.source === "ledger" &&
+      !row.isImported &&
+      row.isApproved === false &&
+      !row.isRejected
   );
 
   const pendingCreditRows = creditRows.filter(
-    (row) => row.source === 'ledger' && !row.isImported && row.isApproved === false && !row.isRejected
+    (row) =>
+      row.source === "ledger" &&
+      !row.isImported &&
+      row.isApproved === false &&
+      !row.isRejected
   );
 
-  const totalDebitAmount = filteredRows.reduce((sum, row) => sum + toNumber(row.debit), 0);
-  const totalCreditAmount = filteredRows.reduce((sum, row) => sum + toNumber(row.credit), 0);
+  const totalDebitAmount = filteredRows.reduce(
+    (sum, row) => sum + toNumber(row.debit),
+    0
+  );
+  const totalCreditAmount = filteredRows.reduce(
+    (sum, row) => sum + toNumber(row.credit),
+    0
+  );
 
-  const transactionTypes = [
-    ...new Set(transactionData.map((t) => t.type).filter(Boolean)),
-  ];
+ const transactionTypes = [
+  ...new Set(
+    transactionData
+      .map((t) => getTypeLabel(t))
+      .filter((t) => t && t !== "—")
+  ),
+];
 
   useEffect(() => {
     setCurrentPage(1);
@@ -530,12 +525,10 @@ const SalesPayments = () => {
         .sp-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
         @keyframes spIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
         .sp-animate { animation: spIn 0.22s ease both; }
-        @keyframes drawerIn { from { transform:translateX(100%); } to { transform:translateX(0); } }
-        .sp-drawer { animation: drawerIn 0.25s cubic-bezier(0.4,0,0.2,1); }
-        .sp-no-scroll::-webkit-scrollbar { display:none; }
-        .sp-no-scroll { scrollbar-width:none; }
         @keyframes ddIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
         .sp-dropdown { animation: ddIn 0.15s ease both; }
+        .sp-no-scroll::-webkit-scrollbar { display:none; }
+        .sp-no-scroll { scrollbar-width:none; }
       `}</style>
 
       <div className="sp-page">
@@ -548,12 +541,11 @@ const SalesPayments = () => {
                   onClick={() => {
                     setSelectedUser(null);
                     setTransactionData([]);
-                    setStartDate('');
-                    setEndDate('');
-                    setAppliedStartDate('');
-                    setAppliedEndDate('');
-                    setActionStatuses({});
-                    setTypeFilter('all');
+                    setStartDate("");
+                    setEndDate("");
+                    setAppliedStartDate("");
+                    setAppliedEndDate("");
+                    setTypeFilter("all");
                     setCurrentPage(1);
                   }}
                   className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] transition-all shadow-sm"
@@ -573,10 +565,12 @@ const SalesPayments = () => {
                     &nbsp;·&nbsp;
                     <span
                       className={`font-semibold ${
-                        selectedUser.isActive ? 'text-emerald-500' : 'text-gray-400'
+                        selectedUser.isActive
+                          ? "text-emerald-500"
+                          : "text-gray-400"
                       }`}
                     >
-                      {selectedUser.isActive ? 'Active' : 'Inactive'}
+                      {selectedUser.isActive ? "Active" : "Inactive"}
                     </span>
                   </p>
                 </div>
@@ -594,10 +588,10 @@ const SalesPayments = () => {
                     >
                       <option value="all">All Types</option>
                       {transactionTypes.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
+  <option key={t} value={t}>
+    {t}
+  </option>
+))}
                     </select>
                   </div>
                 )}
@@ -606,7 +600,7 @@ const SalesPayments = () => {
                   <input
                     type="date"
                     value={startDate}
-                    max={new Date().toISOString().split('T')[0]}
+                    max={new Date().toISOString().split("T")[0]}
                     onChange={(e) => setStartDate(e.target.value)}
                     className="bg-transparent outline-none text-sm text-[#374151]"
                   />
@@ -615,7 +609,7 @@ const SalesPayments = () => {
                     type="date"
                     value={endDate}
                     min={startDate}
-                    max={new Date().toISOString().split('T')[0]}
+                    max={new Date().toISOString().split("T")[0]}
                     onChange={(e) => setEndDate(e.target.value)}
                     className="bg-transparent outline-none text-sm text-[#374151]"
                   />
@@ -626,7 +620,10 @@ const SalesPayments = () => {
                   >
                     Filter
                   </button>
-                  {(startDate || endDate || appliedStartDate || appliedEndDate) && (
+                  {(startDate ||
+                    endDate ||
+                    appliedStartDate ||
+                    appliedEndDate) && (
                     <button
                       onClick={clearDateFilter}
                       className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors"
@@ -641,17 +638,19 @@ const SalesPayments = () => {
             {/* Stats */}
             <div className="grid grid-cols-5 gap-3 mb-5">
               {[
-                { label: 'Debit Entries', value: debitRows.length },
-                { label: 'Credit Entries', value: creditRows.length },
-                { label: 'Pending Debit', value: pendingDebitRows.length },
-                { label: 'Pending Credit', value: pendingCreditRows.length },
-                { label: 'Balance', value: `PKR ${selectedUser.balance}` },
+                { label: "Debit Entries", value: debitRows.length },
+                { label: "Credit Entries", value: creditRows.length },
+                { label: "Pending Debit", value: pendingDebitRows.length },
+                { label: "Pending Credit", value: pendingCreditRows.length },
+                { label: "Balance", value: `PKR ${selectedUser.balance}` },
               ].map(({ label, value }) => (
                 <div
                   key={label}
                   className="bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm"
                 >
-                  <p className="text-[13px] font-bold text-[#FF5934]">{value}</p>
+                  <p className="text-[13px] font-bold text-[#FF5934]">
+                    {value}
+                  </p>
                   <p className="text-[11px] text-[#9CA3AF] font-semibold uppercase tracking-wide mt-0.5">
                     {label}
                   </p>
@@ -713,17 +712,16 @@ const SalesPayments = () => {
                     <thead>
                       <tr className="border-b border-gray-50">
                         {[
-                          'ID',
-                          'Details',
-                          'Type',
-                          'Ref No.',
-                          'V. No.',
-                          'Qty',
-                          'Debit',
-                          'Credit',
-                          'Running Balance',
-                          'Date',
-                          'Action',
+                          "ID",
+                          "Details",
+                          "Type",
+                          "Ref No.",
+                          "V. No.",
+                          "Qty",
+                          "Debit",
+                          "Credit",
+                          "Running Balance",
+                          "Date",
                         ].map((h) => (
                           <th
                             key={h}
@@ -738,10 +736,13 @@ const SalesPayments = () => {
                     <tbody className="divide-y divide-gray-50">
                       {visibleRows.length === 0 ? (
                         <tr>
-                          <td colSpan={11} className="py-16 text-center">
+                          <td colSpan={10} className="py-16 text-center">
                             <div className="flex flex-col items-center gap-3">
                               <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                                <MdOutlineReceipt size={24} className="text-gray-300" />
+                                <MdOutlineReceipt
+                                  size={24}
+                                  className="text-gray-300"
+                                />
                               </div>
                               <p className="text-[#9CA3AF] text-sm font-medium">
                                 No entries found
@@ -766,111 +767,60 @@ const SalesPayments = () => {
                               <span
                                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${
                                   t.isCredit
-                                    ? 'bg-sky-50 text-sky-600 ring-sky-200'
-                                    : 'bg-emerald-50 text-emerald-600 ring-emerald-200'
+                                    ? "bg-sky-50 text-sky-600 ring-sky-200"
+                                    : "bg-emerald-50 text-emerald-600 ring-emerald-200"
                                 }`}
                               >
-                                {t.type}
+                                {getTypeLabel(t)}
                               </span>
                             </td>
 
                             <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">
-                              {t.refNo ?? '—'}
+                              {t.refNo ?? "—"}
                             </td>
 
                             <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">
-                              {t.voucherNo ?? '—'}
+                              {t.voucherNo ?? "—"}
                             </td>
 
                             <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">
-                              {t.quantity ?? '—'}
+                              {t.quantity ?? "—"}
                             </td>
 
                             <td className="px-4 py-3">
                               <span
                                 className={`text-[13px] font-semibold ${
-                                  t.debit > 0 ? 'text-emerald-600' : 'text-gray-300'
+                                  t.debit > 0
+                                    ? "text-emerald-600"
+                                    : "text-gray-300"
                                 }`}
                               >
-                                PKR {t.debit > 0 ? fmtMoney(t.debit) : '0'}
+                                PKR {t.debit > 0 ? fmtMoney(t.debit) : "0"}
                               </span>
                             </td>
 
                             <td className="px-4 py-3">
                               <span
                                 className={`text-[13px] font-semibold ${
-                                  t.credit > 0 ? 'text-sky-600' : 'text-gray-300'
+                                  t.credit > 0
+                                    ? "text-sky-600"
+                                    : "text-gray-300"
                                 }`}
                               >
-                                PKR {t.credit > 0 ? fmtMoney(t.credit) : '0'}
+                                PKR {t.credit > 0 ? fmtMoney(t.credit) : "0"}
                               </span>
                             </td>
 
                             <td className="px-4 py-3">
                               <span className="text-[13px] font-semibold text-[#111827]">
-                                {t.balanceDisplay === '—'
-                                  ? '—'
+                                {t.balanceDisplay === "—"
+                                  ? "—"
                                   : `PKR ${t.balanceDisplay}`}
                               </span>
                             </td>
 
                             <td className="px-4 py-3 text-[12px] text-[#6B7280]">
                               {t.date}
-                            </td>
-
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-1.5">
-                                {t.source === 'credit-note' ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-sky-50 text-sky-600 ring-1 ring-sky-200">
-                                    {t.statusLabel || 'Credit Note'}
-                                  </span>
-                                ) : t.isRejected ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-100 text-red-600 ring-1 ring-red-200">
-                                    Rejected
-                                  </span>
-                                ) : actionStatuses[t.id] === 'approved' ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-600 ring-1 ring-emerald-200">
-                                    Approved
-                                  </span>
-                                ) : actionStatuses[t.id] === 'rejected' ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-100 text-red-600 ring-1 ring-red-200">
-                                    Rejected
-                                  </span>
-                                ) : t.isApproved ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-600 ring-1 ring-emerald-200">
-                                    Approved
-                                  </span>
-                                ) : t.isImported ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-gray-100 text-gray-500 ring-1 ring-gray-200">
-                                    Imported
-                                  </span>
-                                ) : (
-                                  <>
-                                    <button
-                                      onClick={() => handleApprove(t)}
-                                      title="Approve"
-                                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-100 transition-all"
-                                    >
-                                      <AiOutlineCheck size={14} />
-                                    </button>
-                                    <button
-                                      onClick={() => handleReject(t)}
-                                      title="Reject"
-                                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-500 border border-red-100 transition-all"
-                                    >
-                                      <AiOutlineClose size={14} />
-                                    </button>
-                                  </>
-                                )}
-
-                                <button
-                                  onClick={() => handleViewImage(t)}
-                                  title="View Image"
-                                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-orange-50 text-[#9CA3AF] hover:text-[#FF5934] border border-gray-100 transition-all"
-                                >
-                                  <FaRegEye size={13} />
-                                </button>
-                              </div>
                             </td>
                           </tr>
                         ))
@@ -891,7 +841,9 @@ const SalesPayments = () => {
                   </button>
 
                   <div className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-[#374151]">
-                    <span className="font-semibold text-[#FF5934]">{currentPage}</span>
+                    <span className="font-semibold text-[#FF5934]">
+                      {currentPage}
+                    </span>
                     <span className="text-gray-300 mx-1">/</span>
                     <span>{totalPages}</span>
                   </div>
@@ -956,13 +908,15 @@ const SalesPayments = () => {
                       </div>
                     </div>
                   ) : (
-                    <span className="text-[#9CA3AF]">— Choose a customer —</span>
+                    <span className="text-[#9CA3AF]">
+                      — Choose a customer —
+                    </span>
                   )}
 
                   <MdKeyboardArrowDown
                     size={18}
                     className={`text-[#9CA3AF] flex-shrink-0 transition-transform duration-200 ${
-                      dropdownOpen ? 'rotate-180' : ''
+                      dropdownOpen ? "rotate-180" : ""
                     }`}
                   />
                 </button>
@@ -970,7 +924,10 @@ const SalesPayments = () => {
                 {dropdownOpen && (
                   <div className="sp-dropdown absolute top-full left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg z-30 overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 bg-[#FAFAFA]">
-                      <MdSearch size={15} className="text-[#9CA3AF] flex-shrink-0" />
+                      <MdSearch
+                        size={15}
+                        className="text-[#9CA3AF] flex-shrink-0"
+                      />
                       <input
                         autoFocus
                         value={dropdownSearch}
@@ -980,7 +937,7 @@ const SalesPayments = () => {
                       />
                       {dropdownSearch && (
                         <button
-                          onClick={() => setDropdownSearch('')}
+                          onClick={() => setDropdownSearch("")}
                           className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors"
                         >
                           <MdClose size={13} />
@@ -1011,7 +968,9 @@ const SalesPayments = () => {
                               />
                               <span
                                 className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
-                                  retailer.isActive ? 'bg-emerald-400' : 'bg-gray-300'
+                                  retailer.isActive
+                                    ? "bg-emerald-400"
+                                    : "bg-gray-300"
                                 }`}
                               />
                             </div>
@@ -1021,7 +980,8 @@ const SalesPayments = () => {
                                 {retailer.name}
                               </p>
                               <p className="text-[11px] text-[#9CA3AF] truncate">
-                                {retailer.shopName} &nbsp;·&nbsp; {retailer.phone}
+                                {retailer.shopName} &nbsp;·&nbsp;{" "}
+                                {retailer.phone}
                               </p>
                             </div>
 
@@ -1032,11 +992,11 @@ const SalesPayments = () => {
                               <span
                                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                                   retailer.isActive
-                                    ? 'bg-emerald-50 text-emerald-600'
-                                    : 'bg-gray-100 text-gray-400'
+                                    ? "bg-emerald-50 text-emerald-600"
+                                    : "bg-gray-100 text-gray-400"
                                 }`}
                               >
-                                {retailer.isActive ? 'Active' : 'Inactive'}
+                                {retailer.isActive ? "Active" : "Inactive"}
                               </span>
                             </div>
                           </li>
@@ -1062,49 +1022,9 @@ const SalesPayments = () => {
                 No customer selected
               </h3>
               <p className="text-sm text-[#9CA3AF] max-w-xs">
-                Use the dropdown above to pick a customer and view merged ledger and sale credit note entries.
+                Use the dropdown above to pick a customer and view merged ledger
+                and sale credit note entries.
               </p>
-            </div>
-          </div>
-        )}
-
-        {/* Image Drawer */}
-        {isDrawerOpen && (
-          <div className="fixed inset-0 z-50 flex">
-            <div
-              className="flex-1 bg-black/40 backdrop-blur-[2px]"
-              onClick={() => setIsDrawerOpen(false)}
-            />
-            <div className="sp-drawer w-[380px] max-w-[90vw] bg-white h-full shadow-2xl flex flex-col">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h3 className="text-[15px] font-bold text-[#111827]">Entry Image</h3>
-                <button
-                  onClick={() => setIsDrawerOpen(false)}
-                  className="w-8 h-8 rounded-lg bg-gray-50 hover:bg-gray-100 flex items-center justify-center text-[#9CA3AF] transition-colors"
-                >
-                  <AiOutlineClose size={16} />
-                </button>
-              </div>
-
-              <div className="p-5 flex-1 overflow-auto sp-no-scroll">
-                {drawerImageSrc ? (
-                  <img
-                    src={drawerImageSrc}
-                    alt="Entry"
-                    className="w-full h-auto rounded-2xl shadow-sm"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-48 text-[#9CA3AF] gap-3">
-                    <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                      <MdOutlineReceipt size={24} className="text-gray-300" />
-                    </div>
-                    <p className="text-sm font-medium">No image available</p>
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         )}

@@ -337,7 +337,7 @@ const AddInvoice = () => {
       ...p,
       phoneNumber: r.phoneNumber || p.phoneNumber,
       shippingAddress: address || p.shippingAddress,
-      city: r.cityID?._id || p.city,
+      // city: r.cityID?._id || p.city,
       SaleUser: r.salesPersonID?._id || p.SaleUser,
     }));
   }, [form.RetailerUser, retailers]);
@@ -519,14 +519,14 @@ const AddInvoice = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate(-1)} className="h-10 px-5 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-colors">Cancel</button>
+            {/* <button onClick={() => navigate(-1)} className="h-10 px-5 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-colors">Cancel</button>
             <button
               onClick={handleSubmit} disabled={submitting}
               className="h-10 px-6 rounded-xl text-white text-sm font-bold flex items-center gap-2 transition-all disabled:opacity-60"
               style={{ background: ACCENT, boxShadow: `0 4px 14px ${ACCENT}55` }}
             >
               {submitting ? <><Spinner /> Saving…</> : <><MdAdd size={16} /> Save Invoice</>}
-            </button>
+            </button> */}
           </div>
         </div>
       </div>
