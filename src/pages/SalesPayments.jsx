@@ -122,7 +122,7 @@ const getTypeLabel = (row) => {
   const type = String(row?.type || "").toUpperCase();
 
   if (type === "CREDIT_NOTE") return "Returned";
-  if (type === "ORDER") return "PAYMENT";
+  if (type === "ORDER") return "Order";
 
   return type || "—";
 };

@@ -76,6 +76,7 @@ import Returns from './pages/Returns.jsx';
 import PurchaseCreditNote from './pages/PurchaseCreditNote.jsx';
 import AddPayments from './pages/AddPayments.jsx';
 import Payments from './pages/Payments.jsx';
+import SupplierLedger from './pages/SupplierLedger.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -197,6 +198,7 @@ const App = () => {
 
 
               <Route path="/Ledgers/Supplier" element={<Supplier />} />
+              <Route path="/Suppliers/Ledger/:id" element={<SupplierLedger />} />
               <Route path="/Ledgers/Purchases" element={<Purchases />} />
               <Route path="/Ledgers/Expenses" element={<Expenses />} />
               <Route path="/Ledgers/Nominals" element={<Nominals />} />
