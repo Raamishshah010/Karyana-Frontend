@@ -490,13 +490,13 @@ const SalesInvoices = () => {
             >
               <MdAdd size={16} /> Add Invoice
             </button>
-            <button
+            {/* <button
               onClick={() => navigate('/Add-Credit-Note')}
               className="flex items-center gap-2 text-sm font-bold text-white px-4 py-2 rounded-xl transition-all"
               style={{ background: '#FF5934', boxShadow: '0 4px 14px rgba(255,89,52,0.35)' }}
             >
               <MdAdd size={16} /> Add Credit Note
-            </button>
+            </button> */}
           </div>
         </div>
 

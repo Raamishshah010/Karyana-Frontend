@@ -42,14 +42,34 @@ const cellInputCls =
 const ProductPickerCell = ({ products, loading, value, onPick }) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
+
+  const updatePos = () => {
+    if (wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+    }
+  };
 
   useEffect(() => {
     const fn = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', fn);
     return () => document.removeEventListener('mousedown', fn);
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      updatePos();
+      window.addEventListener('scroll', updatePos, true);
+      window.addEventListener('resize', updatePos);
+    }
+    return () => {
+      window.removeEventListener('scroll', updatePos, true);
+      window.removeEventListener('resize', updatePos);
+    };
+  }, [open]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return products.slice(0, 50);
@@ -64,29 +84,34 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
   return (
     <div ref={wrapRef} className="relative">
       <div
-        onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 30); }}
+        onClick={() => { setOpen(true); updatePos(); setTimeout(() => inputRef.current?.focus(), 30); }}
         className="flex items-center gap-2 cursor-pointer px-2.5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors min-h-[48px]"
       >
-        {value
-          ? (
-            <>
-              {value.productImage
-                ? <img src={value.productImage} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0 border border-gray-100" />
-                : <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center flex-shrink-0"><MdShoppingBag size={13} className="text-gray-300" /></div>
-              }
-              <span className="text-[13.5px] text-gray-800 font-medium truncate">{value.productName}</span>
-            </>
-          )
-          : <span className="text-[13.5px] text-gray-300">Select product…</span>
-        }
+        {value ? (
+          <>
+            {value.productImage
+              ? <img src={value.productImage} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0 border border-gray-100" />
+              : <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center flex-shrink-0"><MdShoppingBag size={13} className="text-gray-300" /></div>
+            }
+            <span className="text-[13.5px] text-gray-800 font-medium truncate">{value.productName}</span>
+          </>
+        ) : (
+          <span className="text-[13.5px] text-gray-300">Select product…</span>
+        )}
         <MdExpandMore size={14} className="text-gray-300 ml-auto flex-shrink-0" />
       </div>
 
       {open && (
         <div
-          className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl z-50 overflow-hidden flex flex-col"
-          style={{ width: 320, maxHeight: 280, boxShadow: '0 8px 28px rgba(0,0,0,0.14)' }}
-        >
+    className="fixed bg-white border border-gray-200 rounded-xl z-[9999] overflow-hidden flex flex-col"
+    style={{
+      width: 320,
+      maxHeight: 280,
+      boxShadow: '0 8px 28px rgba(0,0,0,0.14)',
+      top: wrapRef.current?.getBoundingClientRect().bottom + 4,
+      left: wrapRef.current?.getBoundingClientRect().left,
+    }}
+  >
           <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 bg-gray-50">
             <MdSearch size={14} className="text-gray-400 flex-shrink-0" />
             <input
@@ -127,16 +152,56 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
 };
 
 /* ════════════════════════════════════════
+   DISCOUNT CELL (percent ⇄ flat toggle)
+════════════════════════════════════════ */
+const DiscountCell = ({ row, idx, onChange, grossAmount }) => {
+  const isPercent   = row.discType === 'percent';
+  const discountAmt = isPercent ? grossAmount * (row.discPercent / 100) : Number(row.discAmount) || 0;
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onChange(idx, 'discType', isPercent ? 'flat' : 'percent')}
+          title={isPercent ? 'Switch to flat Rs. discount' : 'Switch to % discount'}
+          className="flex-shrink-0 w-7 h-7 rounded-md border border-gray-200 text-[10px] font-bold text-gray-500 hover:border-[#FF5934] hover:text-[#FF5934] transition-colors"
+        >
+          {isPercent ? '%' : 'Rs'}
+        </button>
+        {isPercent ? (
+          <input
+            type="number" min="0" max="100" step="0.1" value={row.discPercent}
+            onChange={e => onChange(idx, 'discPercent', Number(e.target.value))}
+            className={cellInputCls}
+          />
+        ) : (
+          <input
+            type="number" min="0" step="0.01" value={row.discAmount}
+            onChange={e => onChange(idx, 'discAmount', Number(e.target.value))}
+            className={cellInputCls}
+          />
+        )}
+      </div>
+      {isPercent && (
+        <span className="text-[10px] text-gray-400 text-right pr-1.5">= {fmt(discountAmt)}</span>
+      )}
+    </div>
+  );
+};
+
+/* ════════════════════════════════════════
    LINE ITEM ROW (table row)
 ════════════════════════════════════════ */
 const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemove, canRemove }) => {
   const grossAmount = row.qty * row.rate;
-  const discountAmt = row.discType === 'percent' ? grossAmount * (row.discPercent / 100) : row.discAmount;
+  // ── discount can be a % of gross amount, or a flat Rs. amount ──
+  const discountAmt = row.discType === 'percent' ? grossAmount * (row.discPercent / 100) : Number(row.discAmount) || 0;
   const net = Math.max(grossAmount - discountAmt, 0);
 
   return (
     <tr className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40 transition-colors">
-      <td className="py-1.5 px-2 align-middle" style={{ minWidth: 220 }}>
+      <td className="py-3 px-2 align-middle" style={{ minWidth: 220 }}>
         <ProductPickerCell
           products={products}
           loading={loadingProducts}
@@ -144,7 +209,7 @@ const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemo
           onPick={(p) => onPick(idx, p)}
         />
       </td>
-      <td className="py-1.5 px-2 align-middle" style={{ minWidth: 140 }}>
+      <td className="py-3 px-2 align-middle" style={{ minWidth: 140 }}>
         <input
           value={row.description}
           onChange={e => onChange(idx, 'description', e.target.value)}
@@ -152,7 +217,7 @@ const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemo
           className="w-full bg-transparent text-[13.5px] text-gray-600 outline-none px-1.5 py-3 rounded focus:bg-gray-50"
         />
       </td>
-      <td className="py-1.5 px-2 align-middle" style={{ minWidth: 80 }}>
+      <td className="py-3 px-2 align-middle" style={{ minWidth: 80 }}>
         <select
           value={row.unit}
           onChange={e => onChange(idx, 'unit', e.target.value)}
@@ -162,38 +227,30 @@ const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemo
           <option value="ctn">CTN</option>
         </select>
       </td>
-      <td className="py-1.5 px-1 align-middle" style={{ width: 70 }}>
+      <td className="py-3 px-1 align-middle" style={{ width: 70 }}>
         <input
           type="number" min="1" value={row.qty}
           onChange={e => onChange(idx, 'qty', Number(e.target.value))}
           className={cellInputCls}
         />
       </td>
-      <td className="py-1.5 px-1 align-middle" style={{ width: 90 }}>
+      <td className="py-3 px-1 align-middle" style={{ width: 90 }}>
         <input
           type="number" min="0" step="0.01" value={row.rate}
           onChange={e => onChange(idx, 'rate', Number(e.target.value))}
           className={cellInputCls}
         />
       </td>
-      <td className="py-1.5 px-2 align-middle text-right text-[13.5px] text-gray-700" style={{ width: 90 }}>
+      <td className="py-3 px-2 align-middle text-right text-[13.5px] text-gray-700" style={{ width: 90 }}>
         {fmt(grossAmount)}
       </td>
-      <td className="py-1.5 px-1 align-middle" style={{ width: 70 }}>
-        <input
-          type="number" min="0" max="100" step="0.1" value={row.discPercent}
-          onChange={e => onChange(idx, 'discPercent', Number(e.target.value))}
-          disabled={row.discType !== 'percent'}
-          className={cellInputCls + ' disabled:opacity-30'}
-        />
+      <td className="py-3 px-1 align-middle" style={{ width: 120 }}>
+        <DiscountCell row={row} idx={idx} onChange={onChange} grossAmount={grossAmount} />
       </td>
-      <td className="py-1.5 px-2 align-middle text-right text-[13.5px] text-gray-700" style={{ width: 90 }}>
-        {fmt(discountAmt)}
-      </td>
-      <td className="py-1.5 px-2 align-middle text-right text-[14px] font-bold" style={{ width: 100, color: ACCENT }}>
+      <td className="py-3 px-2 align-middle text-right text-[14px] font-bold" style={{ width: 100, color: ACCENT }}>
         {fmt(net)}
       </td>
-      <td className="py-1.5 px-2 align-middle text-center" style={{ width: 40 }}>
+      <td className="py-3 px-2 align-middle text-center" style={{ width: 40 }}>
         <button
           type="button"
           onClick={() => onRemove(idx)}
@@ -230,7 +287,7 @@ const AddOrderPage = () => {
 
   const [form, setForm] = useState({
     RetailerUser: '', SaleUser: '', city: '', phoneNumber: '',
-    shippingAddress: '', paymentType: 'cod', couponCode: '',
+    shippingAddress: '', paymentType: 'cod', couponCode: '', deduction: 0,
     date: todayISO(), termDays: 0, dueDate: todayISO(),
   });
   const sf = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -290,31 +347,64 @@ const AddOrderPage = () => {
 
   /* ── row helpers ── */
   const pickProduct = (idx, p) => {
-    setRows(prev => prev.map((row, i) => i === idx
-      ? { ...row, product: { productId: p._id, productName: p.englishTitle, productImage: p.image, stock: p.stock, cortanSize: p.cortanSize || 1 }, rate: p.price || 0 }
+  setRows(prev => {
+    const updated = prev.map((row, i) => i === idx
+      ? {
+          ...row,
+          product: {
+            productId: p._id,
+            productName: p.englishTitle,
+            productImage: p.image,
+            stock: p.stock,
+            cortanSize: p.cortanSize || 1,
+          },
+          // ← if unit is ctn, rate = cortanSize * price, else just price
+          rate: row.unit === 'ctn'
+            ? (p.price || 0) * (p.cortanSize || 1)
+            : (p.price || 0),
+        }
       : row
-    ));
-    // auto-append a fresh row if this was the last one
-    setRows(prev => {
-      const isLast = idx === prev.length - 1;
-      return isLast ? [...prev, emptyRow()] : prev;
-    });
-  };
+    );
+    const isLast = idx === prev.length - 1;
+    return isLast ? [...updated, emptyRow()] : updated;
+  });
+};
 
-  const changeRow = (idx, key, val) =>
-    setRows(prev => prev.map((row, i) => i === idx ? { ...row, [key]: val } : row));
+const changeRow = (idx, key, val) =>
+  setRows(prev => prev.map((row, i) => {
+    if (i !== idx) return row;
+    const updated = { ...row, [key]: val };
 
+    // Recalculate rate when unit changes
+    if (key === 'unit' && updated.product) {
+      const cortanSize = updated.product.cortanSize || 1;
+      const basePrice  = updated.product.basePiecePrice || updated.rate;
+
+      // Store the original piece price on first unit set
+      if (!updated.product.basePiecePrice) {
+        updated.product = { ...updated.product, basePiecePrice: updated.rate };
+      }
+
+      updated.rate = val === 'ctn'
+        ? (updated.product.basePiecePrice || updated.rate) * cortanSize
+        : (updated.product.basePiecePrice || updated.rate);
+    }
+
+    return updated;
+  }));
   const removeRow = (idx) =>
     setRows(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
 
   /* ── totals ── */
   const activeRows = rows.filter(r => r.product);
   const subTotal = activeRows.reduce((s, r) => s + r.qty * r.rate, 0);
+  // ── discount per row can be % of gross, or a flat Rs. amount ──
   const totalDiscount = activeRows.reduce((s, r) => {
     const gross = r.qty * r.rate;
-    return s + (r.discType === 'percent' ? gross * (r.discPercent / 100) : r.discAmount);
+    return s + (r.discType === 'percent' ? gross * (r.discPercent / 100) : Number(r.discAmount) || 0);
   }, 0);
-  const grandTotal = subTotal - totalDiscount;
+  const deductionAmt = Number(form.deduction) || 0;
+  const grandTotal = Math.max(subTotal - totalDiscount - deductionAmt, 0);
 
   /* ── validate ── */
   const validate = () => {
@@ -342,9 +432,11 @@ const AddOrderPage = () => {
         city: form.city,
         paymentType: form.paymentType,
         ...(form.couponCode && { couponCode: form.couponCode }),
+        ...(deductionAmt > 0 && { deduction: deductionAmt }),
         items: activeRows.map(r => {
           const gross = r.qty * r.rate;
-          const discAmt = r.discType === 'percent' ? gross * (r.discPercent / 100) : r.discAmount;
+          // ── discount can be % of gross, or a flat Rs. amount ──
+          const discAmt = r.discType === 'percent' ? gross * (r.discPercent / 100) : Number(r.discAmount) || 0;
           const net = Math.max(gross - discAmt, 0);
           const effectivePrice = r.qty ? net / r.qty : r.rate;
           return {
@@ -384,25 +476,12 @@ const AddOrderPage = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate(-1)}
-              className="h-10 px-5 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={submitting}
-              className="h-10 px-6 rounded-xl text-white text-sm font-bold flex items-center gap-2 transition-all disabled:opacity-60"
-              style={{ background: ACCENT, boxShadow: `0 4px 14px ${ACCENT}55` }}
-            >
-              {submitting ? <><Spinner /> Saving…</> : <><MdAdd size={16} /> Save Order</>}
-            </button>
+            
           </div>
         </div>
       </div>
 
-      <div className="max-w-[1180px] mx-auto px-6 py-6 flex flex-col gap-5">
+      <div className=" mx-auto px-6 py-6 flex flex-col gap-5">
 
         {/* ── Customer Details ── */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -455,7 +534,7 @@ const AddOrderPage = () => {
 
             {/* City */}
             <div className="col-span-12 md:col-span-4">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1">City / Site <span style={{ color: ACCENT }}>*</span></p>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">Location / Site <span style={{ color: ACCENT }}>*</span></p>
               <div className="relative">
                 <select
                   value={form.city}
@@ -569,19 +648,19 @@ const AddOrderPage = () => {
         </div>
 
         {/* ── Products Details (table) ── */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/70 flex items-center justify-between">
-            <p className="text-[12.5px] font-bold text-gray-700">Products Details</p>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
+  <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/70 flex items-center justify-between rounded-t-2xl">
+    <p className="text-[12.5px] font-bold text-gray-700">Products Details</p>
             {loadingProducts && <span className="text-[11px] text-gray-400 flex items-center gap-1.5"><Spinner /> loading catalogue…</span>}
           </div>
 
           {errors.items && <p className="text-red-400 text-[11px] px-5 pt-3">{errors.items}</p>}
 
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse" style={{ minWidth: 960 }}>
+          <div className="overflow-x-auto" style={{ overflowY: 'visible' }}>
+  <table className="w-full border-collapse" style={{ minWidth: 960 }}>
               <thead>
                 <tr style={{ background: ACCENT }}>
-                  {['Product', 'Description', 'Unit', 'Qty', 'Rate', 'Amount', 'Disc %', 'Discount', 'Net'].map((h, i) => (
+                  {['Product', 'Description', 'Unit', 'Qty', 'Rate', 'Amount', 'Discount', 'Net'].map((h, i) => (
                     <th key={h} className={`text-[10.5px] font-bold text-white uppercase tracking-wide px-2 py-3.5 ${i >= 3 ? 'text-right' : 'text-left'}`}>
                       {h}
                     </th>
@@ -612,7 +691,6 @@ const AddOrderPage = () => {
                   </td>
                   <td></td>
                   <td className="px-2 py-2.5 text-right text-[12px] font-bold text-gray-700">{fmt(subTotal)}</td>
-                  <td></td>
                   <td className="px-2 py-2.5 text-right text-[12px] font-bold text-gray-700">{fmt(totalDiscount)}</td>
                   <td className="px-2 py-2.5 text-right text-[13px] font-bold" style={{ color: ACCENT }}>{fmt(grandTotal)}</td>
                   <td></td>
@@ -636,14 +714,26 @@ const AddOrderPage = () => {
         {/* ── Notes + Totals ── */}
         <div className="grid grid-cols-12 gap-5">
           <div className="col-span-12 md:col-span-7">
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 h-full">
-              <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Coupon Code</p>
-              <input
-                value={form.couponCode}
-                onChange={e => sf('couponCode', e.target.value.toUpperCase())}
-                placeholder="e.g. SAVE10"
-                className={inputCls + ' font-mono tracking-wider max-w-xs'}
-              />
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 h-full grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Coupon Code</p>
+                <input
+                  value={form.couponCode}
+                  onChange={e => sf('couponCode', e.target.value.toUpperCase())}
+                  placeholder="e.g. SAVE10"
+                  className={inputCls + ' font-mono tracking-wider'}
+                />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Deduction (Rs.)</p>
+                <input
+                  type="number" min="0" step="0.01"
+                  value={form.deduction}
+                  onChange={e => sf('deduction', Number(e.target.value))}
+                  placeholder="0.00"
+                  className={inputCls}
+                />
+              </div>
             </div>
           </div>
 
@@ -658,6 +748,12 @@ const AddOrderPage = () => {
                   <span className="text-gray-500">Discount</span>
                   <span className="font-semibold text-gray-700">- Rs. {fmt(totalDiscount)}</span>
                 </div>
+                {deductionAmt > 0 && (
+                  <div className="flex items-center justify-between text-[13px]">
+                    <span className="text-gray-500">Deduction</span>
+                    <span className="font-semibold text-gray-700">- Rs. {fmt(deductionAmt)}</span>
+                  </div>
+                )}
               </div>
               <div className="flex items-center justify-between px-5 py-4" style={{ background: ACCENT }}>
                 <span className="text-[12px] font-bold uppercase tracking-wide text-white/80">Total</span>

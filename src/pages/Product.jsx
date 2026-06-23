@@ -8,7 +8,7 @@ import { GrFormNext, GrFormPrevious } from "react-icons/gr";
 import {
   createProduct, deleteProduct, bulkDeleteProducts, getProducts,
   updateProduct, uploadFile, getAllCities, updateProductStatus,
-  getDatas, getAllCategories, getAllBrands, getCityCategories,
+  getDatas, getAllCategories, getAllBrands,
   getCategoryBrands, getBrand,
 } from "../APIS";
 import { useSelector } from "react-redux";
@@ -123,7 +123,9 @@ const Product = () => {
   const [state, setState] = useState({
     id: "", productId: "", urduTitle: "", englishTitle: "", urduDescription: "",
     englishDescription: "", image: "", categoryID: "", cityID: "", brandID: "",
-    packings: "", bulkOrders: [], discountType: "Percentage", discount: 1,
+    packings: "", bulkOrders: [], discountType: "Percentage", discount: 0,
+    purchaseDiscountType: "Percentage", purchaseDiscount: 0,
+    purchaseTradeOffer: 0, saleTradeOffer: 0,
     stock: 0, cortanSize: 0, purchaseRate: 0, saleRate: 0,
     includeBulkOrder: false, isDiscounted: false, includePacking: false,
   });
@@ -224,7 +226,8 @@ const Product = () => {
 
   const validations = yup.object().shape({
     productId: yup.string().required("Product ID is required"),
-    brandID: yup.string(), categoryID: yup.string(), cityID: yup.string(),
+    brandID: yup.string(), categoryID: yup.string(),
+    cityID: yup.string().required("Site is required"),
     stock: yup.number().min(1, "Stock must be at least 1").required("Stock is required"),
     urduTitle: yup.string().required("Title in Urdu is required"),
     englishTitle: yup.string().required("Title in English is required"),
@@ -235,13 +238,19 @@ const Product = () => {
         const { purchaseRate } = this.parent;
         return (value === 0 && purchaseRate === 0) || (value !== undefined && purchaseRate !== undefined && value >= purchaseRate);
       }).required("Sales rate is required"),
+    discount: yup.number().transform((v) => (isNaN(v) ? 0 : v)).min(0, "Discount can't be negative"),
+    purchaseDiscount: yup.number().transform((v) => (isNaN(v) ? 0 : v)).min(0, "Discount can't be negative"),
+    purchaseTradeOffer: yup.number().transform((v) => (isNaN(v) ? 0 : v)).min(0, "Trade offer can't be negative"),
+    saleTradeOffer: yup.number().transform((v) => (isNaN(v) ? 0 : v)).min(0, "Trade offer can't be negative"),
   });
 
   const clearForm = () => {
     setState({
       id: "", productId: "", urduTitle: "", englishTitle: "", urduDescription: "",
       englishDescription: "", image: "", categoryID: "", cityID: "", brandID: "",
-      packings: "", bulkOrders: [], discountType: "", discount: 1, price: 0,
+      packings: "", bulkOrders: [], discountType: "Percentage", discount: 0, price: 0,
+      purchaseDiscountType: "Percentage", purchaseDiscount: 0,
+      purchaseTradeOffer: 0, saleTradeOffer: 0,
       stock: 0, cortanSize: 0, purchaseRate: 0, includeBulkOrder: false,
       isDiscounted: false, includePacking: false,
     });
@@ -313,17 +322,29 @@ const Product = () => {
     setBulkOrder({ amount: 1, quantity: "" });
   };
 
+  /* ── Site / Category / Brand are now decoupled: a site no longer filters which
+     categories/brands are available — it only gates whether the fields are usable. ── */
   const changeHandler = async (key, value) => {
     const isEditMode = show;
-    if (key === "cityID" && value) {
-      try {
-        const res = await getCityCategories(value);
-        setFormCategories({ isLoaded: true, data: res.data.data || [] });
-        if (!isEditMode) {
-          setFormBrands({ isLoaded: false, data: [] });
-          setState((p) => ({ ...p, [key]: value, categoryID: "", brandID: "" }));
-        } else setState((p) => ({ ...p, [key]: value }));
-      } catch (error) { toast.error('Failed to load categories'); }
+    if (key === "cityID") {
+      setState((p) => ({ ...p, cityID: value }));
+      if (value) {
+        // ── site selected: unlock the full (unfiltered) category & brand lists ──
+        if (categories.isLoaded) {
+          setFormCategories({ isLoaded: true, data: categories.data });
+        } else {
+          try {
+            const res = await getAllCategories();
+            setCategories({ isLoaded: true, data: res.data.data });
+            setFormCategories({ isLoaded: true, data: res.data.data });
+          } catch (error) { toast.error('Failed to load categories'); }
+        }
+      } else if (!isEditMode) {
+        // site cleared while adding: lock category & brand again
+        setFormCategories({ isLoaded: false, data: [] });
+        setFormBrands({ isLoaded: false, data: [] });
+        setState((p) => ({ ...p, categoryID: "", brandID: "" }));
+      }
     } else if (key === "categoryID" && value) {
       try {
         const res = await getCategoryBrands(value);
@@ -355,14 +376,27 @@ const Product = () => {
   };
 
   const handleSubmit = async (values) => {
+    if (values.discountType === 'Percentage' && Number(values.discount) > 100) {
+      toast.error('Sale discount percentage cannot exceed 100');
+      return;
+    }
+    if (values.purchaseDiscountType === 'Percentage' && Number(values.purchaseDiscount) > 100) {
+      toast.error('Purchase discount percentage cannot exceed 100');
+      return;
+    }
     try {
       setLoading(true);
       const updateData = {
-        ...values, image: state.image, includePacking: state.includePacking,
-        includeBulkOrder: state.includeBulkOrder, bulkOrders: state.bulkOrders || [],
-        isDiscounted: values.isDiscounted || false, discountType: values.discountType || 'Percentage',
-        discount: values.discount || 0,
-      };
+  ...values, image: state.image, includePacking: state.includePacking,
+  includeBulkOrder: state.includeBulkOrder, bulkOrders: state.bulkOrders || [],
+  isDiscounted: Number(values.discount || 0) > 0, discountType: values.discountType || 'Percentage',
+  discount: Number(values.discount) || 0,
+  isPurchaseDiscounted: Number(values.purchaseDiscount || 0) > 0,
+  purchaseDiscountType: values.purchaseDiscountType || 'Percentage',
+  purchaseDiscount: Number(values.purchaseDiscount) || 0,
+  purchaseTradeOffer: Number(values.purchaseTradeOffer) || 0,
+  saleTradeOffer: Number(values.saleTradeOffer) || 0,
+};
       if (state.id) {
         updateData.id = state.id; updateData.productId = state.productId || values.productId;
         updateData.cityID = values.cityID || state.cityID;
@@ -504,10 +538,14 @@ const Product = () => {
         stock: item.stock || 0, image: item.image || "", cityID: cityId, categoryID: categoryId,
         brandID: brandId, unitID: item.unitID || "", discount: item.discount || 0,
         discountType: item.discountType || "Percentage", isDiscounted: item.isDiscounted || false,
+        purchaseDiscountType: item.purchaseDiscountType || "Percentage",
+        purchaseDiscount: item.purchaseDiscount || 0,
+        purchaseTradeOffer: item.purchaseTradeOffer || 0,
+        saleTradeOffer: item.saleTradeOffer || 0,
         isActive: item.isActive !== undefined ? item.isActive : true,
         includeBulkOrder: item.includeBulkOrder || false, packings: item.packings || "",
         includePacking: item.includePacking || false, purchaseRate: item.purchaseRate || 0,
-        purchaseDiscount: item.purchaseDiscount || 0, salesDiscount: item.salesDiscount || 0,
+        purchaseDiscount2: item.purchaseDiscount || 0, salesDiscount: item.salesDiscount || 0,
         cortanSize: item.cortanSize || 0, bulkOrders: item.bulkOrders || [],
       });
       setStock(item.stock || 0);
@@ -837,11 +875,11 @@ const Product = () => {
                   <input type="checkbox" checked={data.length > 0 && selectedProductIds.length === data.length}
                     onChange={toggleSelectAll} className="w-4 h-4 cursor-pointer rounded" />
                 </th>
-                {["Image", "Product", "Category", "Brand", "Price", "Stock",
-                  ...(!role.includes(ROLES[2]) ? ["Active", "Verified"] : []),
-                  "Actions"].map(h => (
-                  <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
-                ))}
+                {["Image", "Product", "Category", "Brand", "Price", "Stock", "Discounts/TO",
+  ...(!role.includes(ROLES[2]) ? ["Active", "Verified"] : []),
+  "Actions"].map(h => (
+  <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
+))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -900,6 +938,36 @@ const Product = () => {
                       {product.stock}
                     </span>
                   </td>
+
+                  {/* Discounts / Trade Offers */}
+<td className="px-4 py-3">
+  <div className="flex flex-wrap gap-1 max-w-[140px]">
+    {product.isPurchaseDiscounted && Number(product.purchaseDiscount) > 0 && (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-600 ring-1 ring-purple-200 whitespace-nowrap">
+        PD {product.purchaseDiscount}{product.purchaseDiscountType === 'Flat' ? ' Rs' : '%'}
+      </span>
+    )}
+    {product.isDiscounted && Number(product.discount) > 0 && (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200 whitespace-nowrap">
+        SD {product.discount}{product.discountType === 'Flat' ? ' Rs' : '%'}
+      </span>
+    )}
+    {Number(product.purchaseTradeOffer) > 0 && (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-600 ring-1 ring-blue-200 whitespace-nowrap">
+        PTO {product.purchaseTradeOffer}
+      </span>
+    )}
+    {Number(product.saleTradeOffer) > 0 && (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-600 ring-1 ring-amber-200 whitespace-nowrap">
+        STO {product.saleTradeOffer}
+      </span>
+    )}
+    {!product.isPurchaseDiscounted && !product.isDiscounted &&
+      !Number(product.purchaseTradeOffer) && !Number(product.saleTradeOffer) && (
+        <span className="text-[11px] text-gray-300">—</span>
+    )}
+  </div>
+</td>
 
                   {/* Toggles */}
                   {!role.includes(ROLES[2]) && (
@@ -1101,11 +1169,24 @@ const Product = () => {
                           <FieldGroup icon={MdLocationOn} label="Site">
                             <Select name="cityID" data={cities.data} searchKey="_id" searchValue="name" value={state.cityID} changeHandler={changeHandler} className={inputCls} />
                           </FieldGroup>
+
+                          {!state.cityID && (
+                            <p className="text-[11px] text-amber-600 -mt-1.5">Select a site first to unlock category & brand.</p>
+                          )}
+
                           <FieldGroup icon={MdCategory} label="Category">
-                            <Select name="categoryID" data={formCategories.data} searchKey="_id" searchValue="englishName" value={state.categoryID} changeHandler={changeHandler} className={inputCls} />
+                            <Select
+                              name="categoryID" data={formCategories.data} searchKey="_id" searchValue="englishName"
+                              value={state.categoryID} changeHandler={changeHandler} disabled={!state.cityID}
+                              className={inputCls + (!state.cityID ? ' opacity-50 pointer-events-none' : '')}
+                            />
                           </FieldGroup>
                           <FieldGroup icon={MdBrandingWatermark} label="Brand">
-                            <Select name="brandID" data={formBrands.data} searchKey="_id" searchValue="englishName" value={state.brandID} changeHandler={changeHandler} className={inputCls} />
+                            <Select
+                              name="brandID" data={formBrands.data} searchKey="_id" searchValue="englishName"
+                              value={state.brandID} changeHandler={changeHandler} disabled={!state.cityID}
+                              className={inputCls + (!state.cityID ? ' opacity-50 pointer-events-none' : '')}
+                            />
                           </FieldGroup>
                         </div>
                       </div>
@@ -1127,6 +1208,50 @@ const Product = () => {
                           </FieldGroup>
                           <FieldGroup icon={MdLocalOffer} label="Sales Rate">
                             <Input name="price" placeholder="Sales rate" type="number" changeHandler={changeHandler} className={inputCls} />
+                          </FieldGroup>
+                        </div>
+                      </div>
+
+                      {/* Section: Discounts & Trade Offers */}
+                      <div>
+                        <p className="text-[10px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-3 flex items-center gap-2">
+                          <span className="flex-1 border-t border-gray-100" />Discounts & Trade Offers<span className="flex-1 border-t border-gray-100" />
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <FieldGroup icon={MdLocalOffer} label="Purchase Discount">
+                            <div className="grid grid-cols-[92px_1fr] gap-2">
+                              <select
+                                value={state.purchaseDiscountType}
+                                onChange={(e) => changeHandler('purchaseDiscountType', e.target.value)}
+                                className={`${inputCls} filter-select`}
+                              >
+                                <option value="Percentage">%</option>
+                                <option value="Flat">Flat</option>
+                              </select>
+                              <Input name="purchaseDiscount" placeholder="0" type="number" changeHandler={changeHandler} className={inputCls} />
+                            </div>
+                          </FieldGroup>
+
+                          <FieldGroup icon={MdLocalOffer} label="Sale Discount">
+                            <div className="grid grid-cols-[92px_1fr] gap-2">
+                              <select
+                                value={state.discountType}
+                                onChange={(e) => changeHandler('discountType', e.target.value)}
+                                className={`${inputCls} filter-select`}
+                              >
+                                <option value="Percentage">%</option>
+                                <option value="Flat">Flat</option>
+                              </select>
+                              <Input name="discount" placeholder="0" type="number" changeHandler={changeHandler} className={inputCls} />
+                            </div>
+                          </FieldGroup>
+
+                          <FieldGroup icon={MdLocalOffer} label="Purchase Trade Offer (TO)">
+                            <Input name="purchaseTradeOffer" placeholder="0" type="number" changeHandler={changeHandler} className={inputCls} />
+                          </FieldGroup>
+
+                          <FieldGroup icon={MdLocalOffer} label="Sale Trade Offer (TO)">
+                            <Input name="saleTradeOffer" placeholder="0" type="number" changeHandler={changeHandler} className={inputCls} />
                           </FieldGroup>
                         </div>
                       </div>
@@ -1210,7 +1335,10 @@ const Product = () => {
                     { icon: MdCategory, label: "Category", value: categories.isLoaded ? memoizedGetCategoryName(selectedProduct.category) : '…' },
                     { icon: MdBrandingWatermark, label: "Brand", value: brands.isLoaded ? memoizedGetBrandName(selectedProduct.brand || selectedProduct.brandID) : '…' },
                     { icon: MdWarehouse, label: "Carton Size", value: selectedProduct.cortanSize },
-                    ...(selectedProduct.isDiscounted ? [{ icon: MdLocalOffer, label: "Discount", value: `${selectedProduct.discount}% off` }] : []),
+                    ...(selectedProduct.isDiscounted ? [{ icon: MdLocalOffer, label: "Sale Discount", value: `${selectedProduct.discount}${selectedProduct.discountType === 'Flat' ? ' Rs.' : '%'} off` }] : []),
+                    ...(selectedProduct.isPurchaseDiscounted ? [{ icon: MdLocalOffer, label: "Purchase Discount", value: `${selectedProduct.purchaseDiscount}${selectedProduct.purchaseDiscountType === 'Flat' ? ' Rs.' : '%'} off` }] : []),
+                    ...(selectedProduct.purchaseTradeOffer ? [{ icon: MdLocalOffer, label: "Purchase Trade Offer", value: `${selectedProduct.purchaseTradeOffer} TO` }] : []),
+                    ...(selectedProduct.saleTradeOffer ? [{ icon: MdLocalOffer, label: "Sale Trade Offer", value: `${selectedProduct.saleTradeOffer} TO` }] : []),
                   ].map(({ icon: Icon, label, value }) => (
                     <div key={label} className="flex items-start gap-3 bg-[#F9FAFB] rounded-2xl px-4 py-3 border border-gray-100">
                       <div className="w-8 h-8 rounded-xl bg-[#FF5934]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
