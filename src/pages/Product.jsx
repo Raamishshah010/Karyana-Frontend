@@ -1957,7 +1957,7 @@ const Product = () => {
                           <span className="flex-1 border-t border-gray-100" />
                         </p>
                         <div className="grid grid-cols-2 gap-3">
-                          <FieldGroup icon={MdWarehouse} label="Stock">
+                          <FieldGroup icon={MdWarehouse} label="Opening Stock">
                             <Input
                               name="stock"
                               placeholder="Enter stock"

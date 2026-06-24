@@ -804,11 +804,11 @@ const Retailers = () => {
                           <span className="flex-1 border-t border-gray-100" /> Shop Info <span className="flex-1 border-t border-gray-100" />
                         </p>
                         <div className="grid grid-cols-2 gap-3">
-                          <FieldGroup icon={MdStorefront} label="Shop Name">
-                            <Input name="shopName" placeholder="Shop name" value={values.shopName} onChange={handleChange}
+                          <FieldGroup icon={MdStorefront} label="Business Name">
+                            <Input name="shopName" placeholder="Business Name" value={values.shopName} onChange={handleChange}
                               className={inputClsErr(errors.shopName, touched.shopName)} />
                           </FieldGroup>
-                          <FieldGroup icon={MdCategory} label="Shop Category">
+                          <FieldGroup icon={MdCategory} label="Business Category">
                             <Input name="shopCategory" placeholder="Category" value={values.shopCategory} onChange={handleChange}
                               className={inputClsErr(errors.shopCategory, touched.shopCategory)} />
                           </FieldGroup>

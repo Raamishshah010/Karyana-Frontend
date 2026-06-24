@@ -57,6 +57,16 @@ const isoToDisplay = (iso) => {
   return `${d}/${m}/${y}`;
 };
 
+/* ─── display-only label override ───
+   Internal type codes (row.type) stay exactly the same everywhere —
+   dr/cr direction, badge colors, filtering, PDF/Excel exports, etc.
+   This ONLY changes the text shown to the user for the type badge
+   in the on-screen table. ─── */
+const TYPE_DISPLAY_LABELS = {
+  PAYMENT: "Order",
+};
+const getTypeDisplayLabel = (type) => TYPE_DISPLAY_LABELS[type] || type;
+
 /* ─────────────────────────────────────────
    NORMALISE a single ledger entry from any
    API response shape into a consistent row.
@@ -1151,7 +1161,7 @@ const ReportsCustomerLedger = () => {
                                           : "bg-gray-100 text-gray-500"
                                 }`}
                               >
-                                {row.type}
+                                {getTypeDisplayLabel(row.type)}
                               </span>
                             </td>
                             <td className="px-3 py-2.5">

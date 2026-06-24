@@ -439,7 +439,7 @@ const Sidebar = () => {
                 label="Dashboard"
                 collapsed={collapsed}
               />
-
+        
               <NavGroup
                 icon={MdPointOfSale}
                 label="Sales"
@@ -469,6 +469,78 @@ const Sidebar = () => {
                 />
               </NavGroup>
 
+
+              <NavGroup
+                icon={MdShoppingCart}
+                label="Purchase"
+                groupId="purchase"
+                {...groupProps}
+              >
+                <SubNavItem
+                  to="/Ledgers/Supplier"
+                  icon={MdBusiness}
+                  label="Supplier"
+                />
+                <SubNavItem
+                  to="/Ledgers/Purchases"
+                  icon={MdShoppingCart}
+                  label="Purchases"
+                />
+                <SubNavItem
+                  to="/Purchase/Credit-Note"
+                  icon={MdReceipt}
+                  label="Credit Note"
+                />
+                <SubNavItem
+                  to="/Purchase/Payments"
+                  icon={MdPayment}
+                  label="Payments"
+                />
+              </NavGroup>
+
+              <NavGroup
+                icon={MdMenuBook}
+                label="Catalogue"
+                groupId="catalogue"
+                {...groupProps}
+              >
+                <SubNavItem
+                  to="/Product"
+                  icon={MdInventory2}
+                  label="Inventory"
+                />
+                <SubNavItem to="/Brands" icon={SlDiamond} label="Brands" />
+                <SubNavItem
+                  to="/Categories"
+                  icon={MdCategory}
+                  label="Categories"
+                />
+              </NavGroup>
+
+<NavGroup
+                icon={MdPeople}
+                label="Users"
+                groupId="users"
+                {...groupProps}
+              >
+                <SubNavItem
+                  to="/Users/Coordinators"
+                  icon={MdSupervisorAccount}
+                  label="Coordinators"
+                />
+                <SubNavItem
+                  to="/Users/WarehouseManagers"
+                  icon={MdWarehouse}
+                  label="Warehouse Managers"
+                />
+                <SubNavItem
+                  to="/Users/Sales"
+                  icon={MdBadge}
+                  label="Sales Person"
+                />
+              </NavGroup>
+
+              
               <NavGroup
                 icon={MdFingerprint}
                 label="Attendance"
@@ -505,47 +577,7 @@ const Sidebar = () => {
                 />
               </NavGroup>
 
-              <NavGroup
-                icon={MdPeople}
-                label="Users"
-                groupId="users"
-                {...groupProps}
-              >
-                <SubNavItem
-                  to="/Users/Coordinators"
-                  icon={MdSupervisorAccount}
-                  label="Coordinators"
-                />
-                <SubNavItem
-                  to="/Users/WarehouseManagers"
-                  icon={MdWarehouse}
-                  label="Warehouse Managers"
-                />
-                <SubNavItem
-                  to="/Users/Sales"
-                  icon={MdBadge}
-                  label="Sales Person"
-                />
-              </NavGroup>
-
-              <NavGroup
-                icon={MdMenuBook}
-                label="Catalogue"
-                groupId="catalogue"
-                {...groupProps}
-              >
-                <SubNavItem
-                  to="/Product"
-                  icon={MdInventory2}
-                  label="Inventory"
-                />
-                <SubNavItem to="/Brands" icon={SlDiamond} label="Brands" />
-                <SubNavItem
-                  to="/Categories"
-                  icon={MdCategory}
-                  label="Categories"
-                />
-              </NavGroup>
+              
 
               <NavGroup
                 icon={MdAssessment}
@@ -577,34 +609,6 @@ const Sidebar = () => {
                   to="/Reports/TargetVsAchieve"
                   icon={FaBullseye}
                   label="Target vs Achievement"
-                />
-              </NavGroup>
-
-              <NavGroup
-                icon={MdShoppingCart}
-                label="Purchase"
-                groupId="purchase"
-                {...groupProps}
-              >
-                <SubNavItem
-                  to="/Ledgers/Supplier"
-                  icon={MdBusiness}
-                  label="Supplier"
-                />
-                <SubNavItem
-                  to="/Ledgers/Purchases"
-                  icon={MdShoppingCart}
-                  label="Purchases"
-                />
-                <SubNavItem
-                  to="/Purchase/Credit-Note"
-                  icon={MdReceipt}
-                  label="Credit Note"
-                />
-                <SubNavItem
-                  to="/Purchase/Payments"
-                  icon={MdPayment}
-                  label="Payments"
                 />
               </NavGroup>
 
