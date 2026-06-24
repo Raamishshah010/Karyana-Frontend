@@ -4,7 +4,12 @@ import { toast } from 'react-toastify';
 import { GrFormNext, GrFormPrevious } from 'react-icons/gr';
 import { MdArrowBack, MdRefresh, MdReceipt } from 'react-icons/md';
 import { Loader } from '../components/common/loader';
-import { getTransactionsByCompanyId, getPaymentsBySupplier } from '../APIS';
+import {
+  getTransactionsByCompanyId,
+  getPaymentsBySupplier,
+  getAllPurchaseInvoices,
+  getAllPurchaseCreditNotes,
+} from '../APIS';
 
 const ACCENT = '#FF5934';
 const LIMIT = 25;
@@ -43,9 +48,11 @@ const SupplierLedger = () => {
   // ── combined + sorted ledger entries ──
   const [ledger, setLedger] = useState([]);
 
-  const buildLedger = useCallback((txns, pmts) => {
+  const buildLedger = useCallback((txns, pmts, invoices, creditNotes) => {
     const txnList = Array.isArray(txns) ? txns : [];
     const pmtList = Array.isArray(pmts) ? pmts : [];
+    const invList = Array.isArray(invoices) ? invoices : [];
+    const cnList  = Array.isArray(creditNotes) ? creditNotes : [];
 
     // The /transactions ledger already records payments as rows with
     // type === 'PAYMENT', and links back to the source payment doc via
@@ -53,6 +60,19 @@ const SupplierLedger = () => {
     // /payments, we'd count it twice — once from each endpoint.
     const alreadyInLedger = new Set(
       txnList.map((t) => t.transactionId).filter(Boolean)
+    );
+
+    // Purchase invoices and purchase credit notes live in their own
+    // collections and aren't linked back to /transactions by any shared id.
+    // Dedupe by date + amount so a supplier with a legacy row already
+    // sitting in /transactions for the same bill doesn't get counted twice.
+    const sig = (dateVal, amountVal) =>
+      `${String(dateVal || '').slice(0, 10)}|${Number(amountVal || 0)}`;
+
+    const nonPaymentLedgerSignatures = new Set(
+      txnList
+        .filter((t) => String(t.type || '').toUpperCase() !== 'PAYMENT')
+        .map((t) => sig(t.date || t.createdAt, t.amount))
     );
 
     const txnRows = txnList.map((t) => ({
@@ -80,28 +100,61 @@ const SupplierLedger = () => {
         ref:         p.voucherNo || '—',
       }));
 
-    const combined = [...txnRows, ...pmtRows].sort(
+    const invoiceRows = invList
+      .filter((inv) => !nonPaymentLedgerSignatures.has(
+        sig(inv.date || inv.createdAt, inv.totalAmount ?? inv.amount)
+      ))
+      .map((inv) => ({
+        _id:         inv._id,
+        date:        inv.date || inv.createdAt,
+        type:        'PURCHASE',
+        description: inv.details || 'Purchase Invoice',
+        debit:       Number(inv.totalAmount ?? inv.amount ?? 0),
+        credit:      0,
+        apiBalance:  null, // /purchase-invoices doesn't carry a running balance
+        ref:         inv.invoiceId || '—',
+      }));
+
+    // A purchase credit note is a return to the supplier — it reduces what
+    // you owe them, so it posts as a Credit, same direction as a payment.
+    const creditNoteRows = cnList
+      .filter((cn) => !nonPaymentLedgerSignatures.has(
+        sig(cn.date || cn.createdAt, cn.totalAmount ?? cn.payable)
+      ))
+      .map((cn) => ({
+        _id:         cn._id,
+        date:        cn.date || cn.createdAt,
+        type:        'CREDIT_NOTE',
+        description: cn.details || 'Purchase Credit Note (Return)',
+        debit:       0,
+        credit:      Number(cn.totalAmount ?? cn.payable ?? 0),
+        apiBalance:  null, // /purchase-credit-note doesn't carry a running balance
+        ref:         cn.purchaseCreditNoteId || cn.billNo || '—',
+      }));
+
+    const combined = [...txnRows, ...pmtRows, ...invoiceRows, ...creditNoteRows].sort(
       (a, b) => new Date(a.date) - new Date(b.date)
     );
 
-    // Running balance: trust the API's own balance whenever a row has one
-    // (keeps us in sync with the server), otherwise fall back to adding
-    // this row's debit/credit on top of the last known balance.
+    // Running balance must be computed oldest → newest (each row builds on
+    // the one before it), but the table itself should display newest first.
     let running = 0;
     const withBalance = combined.map((row) => {
       running = row.apiBalance != null ? row.apiBalance : running + row.debit - row.credit;
       return { ...row, runningBalance: running };
     });
 
-    return withBalance;
+    return withBalance.slice().reverse();
   }, []);
 
   const fetchAll = useCallback(async () => {
     try {
       setLoading(true);
-      const [txnRes, pmtRes] = await Promise.allSettled([
+      const [txnRes, pmtRes, invRes, cnRes] = await Promise.allSettled([
         getTransactionsByCompanyId(id),
         getPaymentsBySupplier(id, 1, 1000),
+        getAllPurchaseInvoices(),
+        getAllPurchaseCreditNotes(1, 1000),
       ]);
 
       const txnRaw = txnRes.status === 'fulfilled' ? txnRes.value : null;
@@ -120,7 +173,32 @@ const SupplierLedger = () => {
         Array.isArray(pmtRaw)             ? pmtRaw           :
         [];
 
-      const built = buildLedger(txns, pmts);
+      // Purchase invoices live in their own collection and the API only
+      // exposes "get all" — so fetch everything and keep just this supplier.
+      const invRaw = invRes.status === 'fulfilled' ? invRes.value : null;
+      const allInvoices =
+        Array.isArray(invRaw?.invoices) ? invRaw.invoices :
+        Array.isArray(invRaw?.data)     ? invRaw.data     :
+        Array.isArray(invRaw)           ? invRaw          :
+        [];
+      const invoices = allInvoices.filter(
+        (inv) => String(inv?.companyId?._id || inv?.companyId || '') === String(id)
+      );
+
+      // getAllPurchaseCreditNotes returns the raw axios response (unlike
+      // getAllPurchaseInvoices, which already unwraps .data), so the real
+      // payload sits one level deeper at cnRaw.data.
+      const cnRaw = cnRes.status === 'fulfilled' ? cnRes.value : null;
+      const allCreditNotes =
+        Array.isArray(cnRaw?.data?.data) ? cnRaw.data.data :
+        Array.isArray(cnRaw?.data)       ? cnRaw.data      :
+        Array.isArray(cnRaw)             ? cnRaw           :
+        [];
+      const creditNotes = allCreditNotes.filter(
+        (cn) => String(cn?.supplier?._id || cn?.supplier || '') === String(id)
+      );
+
+      const built = buildLedger(txns, pmts, invoices, creditNotes);
       setLedger(built);
       setTotalPages(Math.ceil(built.length / LIMIT) || 1);
     } catch (err) {
