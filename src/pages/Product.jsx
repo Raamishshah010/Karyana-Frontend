@@ -1368,7 +1368,7 @@ const Product = () => {
               disabled={isCoordinator}
               className="filter-select bg-transparent outline-none text-sm text-[#374151] min-w-[120px]"
             >
-              <option value="">All Sites</option>
+              <option value="">All Sites / Locations</option>
               {cities.data.map((item) => (
                 <option value={item._id} key={item._id}>
                   {item.name}
@@ -1912,7 +1912,7 @@ const Product = () => {
                           <span className="flex-1 border-t border-gray-100" />
                         </p>
                         <div className="grid grid-cols-1 gap-3">
-                          <FieldGroup icon={MdLocationOn} label="Site">
+                          <FieldGroup icon={MdLocationOn} label="Sites / Locations">
                             <Select
                               name="cityID"
                               data={cities.data}

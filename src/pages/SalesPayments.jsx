@@ -3,18 +3,14 @@ import {
   getAllRetailers,
   getRetailerLedgerById,
   getAllCreditNotes,
+  addDirectPayment,
+  getAllPurchases    
 } from "../APIS";
 import { toast } from "react-toastify";
 import { GrFormNext, GrFormPrevious } from "react-icons/gr";
 import {
-  MdClose,
-  MdArrowBack,
-  MdPerson,
-  MdOutlineReceipt,
-  MdRefresh,
-  MdKeyboardArrowDown,
-  MdFilterList,
-  MdSearch,
+  MdClose, MdArrowBack, MdPerson, MdOutlineReceipt,
+  MdRefresh, MdKeyboardArrowDown, MdFilterList, MdSearch, MdAdd,
 } from "react-icons/md";
 
 const TRANSACTIONS_PER_PAGE = 11;
@@ -22,7 +18,7 @@ const CREDIT_NOTE_FETCH_LIMIT = 1000;
 const PLACEHOLDER_IMAGE =
   "https://developers.elementor.com/docs/assets/img/elementor-placeholder-image.png";
 
-/* ─── helpers ─────────────────────────────────────── */
+/* ─── helpers ─── */
 const toNumber = (val) => {
   if (typeof val === "number") return Number.isFinite(val) ? val : 0;
   const cleaned = String(val ?? "0").replace(/[^0-9.-]/g, "");
@@ -43,11 +39,8 @@ const isOrderEntry = (entry) => {
 };
 
 const isReturnEntry = (entry) => {
-  const details = String(
-    entry?.details ?? entry?.description ?? ""
-  ).toLowerCase();
-  const type = String(entry?.type || "").toUpperCase();
-
+  const details = String(entry?.details ?? entry?.description ?? "").toLowerCase();
+  const type    = String(entry?.type || "").toUpperCase();
   return (
     ["RETURN", "CREDIT_NOTE", "CREDITNOTE"].includes(type) ||
     details.includes("credit note") ||
@@ -58,153 +51,115 @@ const isReturnEntry = (entry) => {
 
 const formatLedgerDetails = (entry) => {
   const base = entry?.description ?? entry?.details ?? "Transaction";
-
-  if (isOrderEntry(entry)) return "Order punched from app";
+  if (isOrderEntry(entry))  return "Order punched from app";
   if (isReturnEntry(entry)) return base || "Credit note / return";
-
   return base;
 };
 
 const formatRetailerData = (list = []) =>
   list.map((r) => ({
-    _id: r._id || "N/A",
-    name: r.name || "N/A",
-    phone: r.phone || r.phoneNumber || "N/A",
+   _id:      r._id      || "N/A", 
+    name:     r.name     || "N/A",
+    phone:    r.phone    || r.phoneNumber || "N/A",
     shopName: r.shopName || "N/A",
-    image: r.image || PLACEHOLDER_IMAGE,
+    image:    r.image    || PLACEHOLDER_IMAGE,
     isActive: r.isActive || false,
-    balance: fmtMoney(r.balance || 0),
+    balance:  fmtMoney(r.balance || 0),
   }));
 
 const pickAmount = (entry) => {
   const candidates = [
-    entry?.amount,
-    entry?.totalAmount,
-    entry?.netAmount,
-    entry?.invoiceAmount,
-    entry?.grandTotal,
-    entry?.total,
-    entry?.debit,
-    entry?.credit,
+    entry?.amount, entry?.totalAmount, entry?.netAmount,
+    entry?.invoiceAmount, entry?.grandTotal, entry?.total,
+    entry?.debit, entry?.credit,
   ];
-
   for (const c of candidates) {
     const n = toNumber(c);
     if (n !== 0) return n;
   }
-
   return toNumber(entry?.amount || 0);
 };
 
-const CREDIT_TYPES = [
-  "PAYMENT",
-  "RECEIPT",
-  "CR",
-  "CREDIT",
-  "RETURN",
-  "CREDIT_NOTE",
-  "CREDITNOTE",
-];
+const CREDIT_TYPES = ["PAYMENT", "RECEIPT", "CR", "CREDIT", "RETURN", "CREDIT_NOTE", "CREDITNOTE"];
 
-const isCreditEntry = (entry) => {
-  if (isOrderEntry(entry)) return false;
+const isCreditEntry  = (entry) => {
+  if (isOrderEntry(entry))  return false;
   if (isReturnEntry(entry)) return true;
   return CREDIT_TYPES.includes(String(entry?.type || "").toUpperCase());
 };
 
 const effectiveType = (entry) => {
-  if (isOrderEntry(entry)) return "ORDER";
+  if (isOrderEntry(entry))  return "ORDER";
   if (isReturnEntry(entry)) return "CREDIT_NOTE";
   return String(entry?.type || "").toUpperCase();
 };
 
 const getTypeLabel = (row) => {
   const type = String(row?.type || "").toUpperCase();
-
   if (type === "CREDIT_NOTE") return "Returned";
-  if (type === "ORDER") return "Order";
-
+  if (type === "ORDER")       return "Order";
   return type || "—";
 };
 
 const mapLedger = (ledger) => {
   const amount = pickAmount(ledger);
   const credit = isCreditEntry(ledger);
-
   return {
-    id: ledger.transactionId || ledger._id,
-    sourceId: ledger._id,
-    source: "ledger",
-
-    details: formatLedgerDetails(ledger),
-    refNo: ledger.refNo ?? ledger.referenceNo ?? null,
-    voucherNo: ledger.voucherNo ?? ledger.invoiceNo ?? null,
-    quantity: ledger.quantity ?? null,
-
-    type: effectiveType(ledger),
-    rawType: ledger.type,
-
-    rawAmount: amount,
-    rawBalance: Number.isFinite(toNumber(ledger?.balance))
-      ? toNumber(ledger?.balance)
-      : null,
-    isCredit: credit,
-
-    debit: credit ? 0 : amount,
-    credit: credit ? amount : 0,
-
-    date: ledger.date ? new Date(ledger.date).toISOString().split("T")[0] : "-",
-    sortTime: new Date(ledger.createdAt || ledger.date || 0).getTime(),
-
+    id:         ledger.transactionId || ledger._id,
+    sourceId:   ledger._id,
+    source:     "ledger",
+    details:    formatLedgerDetails(ledger),
+    refNo:      ledger.refNo      ?? ledger.referenceNo ?? null,
+    voucherNo:  ledger.voucherNo  ?? ledger.invoiceNo   ?? null,
+    quantity:   ledger.quantity   ?? null,
+    type:       effectiveType(ledger),
+    rawType:    ledger.type,
+    rawAmount:  amount,
+    rawBalance: Number.isFinite(toNumber(ledger?.balance)) ? toNumber(ledger?.balance) : null,
+    isCredit:   credit,
+    debit:      credit ? 0 : amount,
+    credit:     credit ? amount : 0,
+    date:       ledger.date ? new Date(ledger.date).toISOString().split("T")[0] : "-",
+    sortTime:   new Date(ledger.createdAt || ledger.date || 0).getTime(),
     isApproved: ledger.isApproved === false ? false : true,
     isRejected: ledger.isRejected === true,
     isImported: ledger.isImportedFromExcel === true,
-
-    image: ledger.image || null,
+    image:      ledger.image || null,
   };
 };
 
 const mapCreditNoteToLedger = (cn) => {
-  const amount = toNumber(cn?.total || 0);
+  const amount   = toNumber(cn?.total || 0);
   const quantity = Array.isArray(cn?.items)
     ? cn.items.reduce((sum, item) => sum + toNumber(item?.quantity || 0), 0)
     : null;
-
   return {
-    id: `CN-${cn._id}`,
-    sourceId: cn._id,
-    source: "credit-note",
-
-    details: `Credit note${quantity ? ` (${quantity} items)` : ""}`,
-    refNo: cn?.creditNoteId || null,
-    voucherNo: null,
+    id:         `CN-${cn._id}`,
+    sourceId:   cn._id,
+    source:     "credit-note",
+    details:    `Credit note${quantity ? ` (${quantity} items)` : ""}`,
+    refNo:      cn?.creditNoteId || null,
+    voucherNo:  null,
     quantity,
-
-    type: "CREDIT_NOTE",
-    rawType: "CREDIT_NOTE",
-
-    rawAmount: amount,
+    type:       "CREDIT_NOTE",
+    rawType:    "CREDIT_NOTE",
+    rawAmount:  amount,
     rawBalance: null,
-    isCredit: true,
-
-    debit: 0,
-    credit: amount,
-
-    date: cn?.date ? new Date(cn.date).toISOString().split("T")[0] : "-",
-    sortTime: new Date(cn?.createdAt || cn?.date || 0).getTime(),
-
+    isCredit:   true,
+    debit:      0,
+    credit:     amount,
+    date:       cn?.date ? new Date(cn.date).toISOString().split("T")[0] : "-",
+    sortTime:   new Date(cn?.createdAt || cn?.date || 0).getTime(),
     isApproved: true,
     isRejected: false,
     isImported: false,
-
-    image: null,
+    image:      null,
   };
 };
 
 const isLikelyCreditNoteLedgerRow = (row) => {
-  const type = String(row?.type || "").toUpperCase();
+  const type    = String(row?.type    || "").toUpperCase();
   const details = String(row?.details || "").toLowerCase();
-
   return (
     ["CREDIT_NOTE", "RETURN", "CREDITNOTE"].includes(type) ||
     details.includes("credit note") ||
@@ -215,56 +170,34 @@ const isLikelyCreditNoteLedgerRow = (row) => {
 
 const computeRunningBalances = (rows = [], latestBalanceFallback = null) => {
   if (!rows.length) return [];
-
   const asc = [...rows].sort((a, b) => (a.sortTime || 0) - (b.sortTime || 0));
 
-  let anchorIndex = -1;
-  let anchorBalance = null;
-
+  let anchorIndex = -1, anchorBalance = null;
   for (let i = asc.length - 1; i >= 0; i -= 1) {
     if (Number.isFinite(asc[i].rawBalance) && asc[i].rawBalance !== null) {
-      anchorIndex = i;
-      anchorBalance = asc[i].rawBalance;
-      break;
+      anchorIndex = i; anchorBalance = asc[i].rawBalance; break;
     }
   }
-
   if (anchorIndex === -1 && Number.isFinite(latestBalanceFallback)) {
-    anchorIndex = asc.length - 1;
-    anchorBalance = latestBalanceFallback;
+    anchorIndex = asc.length - 1; anchorBalance = latestBalanceFallback;
   }
-
   if (anchorIndex === -1) {
     return [...rows]
       .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0))
-      .map((row) => ({
-        ...row,
-        runningBalance: null,
-        balanceDisplay: "—",
-      }));
+      .map((row) => ({ ...row, runningBalance: null, balanceDisplay: "—" }));
   }
 
-  const work = asc.map((row) => ({
-    ...row,
-    runningBalance: null,
-  }));
-
+  const work = asc.map((row) => ({ ...row, runningBalance: null }));
   work[anchorIndex].runningBalance = anchorBalance;
-
   for (let i = anchorIndex - 1; i >= 0; i -= 1) {
-    const nextRow = work[i + 1];
-    const nextDelta = nextRow.isCredit
-      ? -toNumber(nextRow.rawAmount)
-      : toNumber(nextRow.rawAmount);
-    work[i].runningBalance = toNumber(nextRow.runningBalance) - nextDelta;
+    const next      = work[i + 1];
+    const nextDelta = next.isCredit ? -toNumber(next.rawAmount) : toNumber(next.rawAmount);
+    work[i].runningBalance = toNumber(next.runningBalance) - nextDelta;
   }
-
   for (let i = anchorIndex + 1; i < work.length; i += 1) {
-    const prevRow = work[i - 1];
-    const currDelta = work[i].isCredit
-      ? -toNumber(work[i].rawAmount)
-      : toNumber(work[i].rawAmount);
-    work[i].runningBalance = toNumber(prevRow.runningBalance) + currDelta;
+    const prev      = work[i - 1];
+    const currDelta = work[i].isCredit ? -toNumber(work[i].rawAmount) : toNumber(work[i].rawAmount);
+    work[i].runningBalance = toNumber(prev.runningBalance) + currDelta;
   }
 
   return work
@@ -278,27 +211,47 @@ const computeRunningBalances = (rows = [], latestBalanceFallback = null) => {
     }));
 };
 
-/* ─── component ───────────────────────────────────── */
+/* ─── component ─── */
 const SalesPayments = () => {
-  const [allRetailers, setAllRetailers] = useState([]);
-  const [listLoading, setListLoading] = useState(false);
-
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [dropdownSearch, setDropdownSearch] = useState("");
+  const [allRetailers,  setAllRetailers]  = useState([]);
+  const [listLoading,   setListLoading]   = useState(false);
+  const [dropdownOpen,  setDropdownOpen]  = useState(false);
+  const [dropdownSearch,setDropdownSearch]= useState("");
   const dropdownRef = useRef(null);
 
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUser,    setSelectedUser]    = useState(null);
   const [transactionData, setTransactionData] = useState([]);
-  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerLoading,   setLedgerLoading]   = useState(false);
 
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [appliedStartDate, setAppliedStartDate] = useState("");
-  const [appliedEndDate, setAppliedEndDate] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
+  const [startDate,         setStartDate]         = useState("");
+  const [endDate,           setEndDate]           = useState("");
+  const [appliedStartDate,  setAppliedStartDate]  = useState("");
+  const [appliedEndDate,    setAppliedEndDate]     = useState("");
+  const [typeFilter,        setTypeFilter]        = useState("all");
+  const [currentPage,       setCurrentPage]       = useState(1);
 
-  const [currentPage, setCurrentPage] = useState(1);
+  const [companies, setCompanies] = useState([]);
 
+  useEffect(() => {
+  (async () => {
+    try {
+      const res = await getAllPurchases();
+      setCompanies(res?.data?.data || res?.data || []);
+    } catch {
+      toast.error("Failed to load companies");
+    }
+  })();
+}, []);
+
+  /* payment modal */
+  const [showPaymentModal,  setShowPaymentModal]  = useState(false);
+  const [paymentForm,       setPaymentForm]       = useState({
+    amount: "", paymentMethod: "cash", refNo: "", notes: "",
+    date: new Date().toISOString().split("T")[0],
+  });
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+
+  /* dropdown filter */
   const dropdownList = allRetailers.filter((r) => {
     const q = dropdownSearch.toLowerCase();
     return (
@@ -311,8 +264,7 @@ const SalesPayments = () => {
   useEffect(() => {
     const handler = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setDropdownOpen(false);
-        setDropdownSearch("");
+        setDropdownOpen(false); setDropdownSearch("");
       }
     };
     document.addEventListener("mousedown", handler);
@@ -325,196 +277,176 @@ const SalesPayments = () => {
         setListLoading(true);
         const res = await getAllRetailers();
         setAllRetailers(formatRetailerData(res?.data?.data || []));
-      } catch {
-        toast.error("Failed to load retailers");
-      } finally {
-        setListLoading(false);
-      }
+      } catch { toast.error("Failed to load retailers"); }
+      finally  { setListLoading(false); }
     })();
   }, []);
 
-  const fetchMergedLedger = useCallback(
-    async (retailerId) => {
-      try {
-        setLedgerLoading(true);
+  /* ── fetch + merge ledger + credit notes ── */
+  const fetchMergedLedger = useCallback(async (retailerId) => {
+    try {
+      setLedgerLoading(true);
+      const [ledgerRes, creditNotesRes] = await Promise.all([
+        getRetailerLedgerById(retailerId),
+        getAllCreditNotes(1, CREDIT_NOTE_FETCH_LIMIT),
+      ]);
 
-        const [ledgerRes, creditNotesRes] = await Promise.all([
-          getRetailerLedgerById(retailerId),
-          getAllCreditNotes(1, CREDIT_NOTE_FETCH_LIMIT),
-        ]);
-
-        const ledgerRows =
-          ledgerRes?.success && Array.isArray(ledgerRes.ledgers)
-            ? ledgerRes.ledgers.map(mapLedger)
-            : [];
-
-        const creditNoteRows = Array.isArray(creditNotesRes?.data?.data)
-          ? creditNotesRes.data.data
-              .filter(
-                (cn) =>
-                  String(cn?.RetailerUser?._id || "") === String(retailerId)
-              )
-              .map(mapCreditNoteToLedger)
+      const ledgerRows =
+        ledgerRes?.success && Array.isArray(ledgerRes.ledgers)
+          ? ledgerRes.ledgers.map(mapLedger)
           : [];
 
-        const ledgerCreditNoteSignatures = new Set(
-          ledgerRows
-            .filter(isLikelyCreditNoteLedgerRow)
-            .map(
-              (row) =>
-                `${row.date}|${toNumber(row.rawAmount)}|${toNumber(row.quantity)}`
-            )
-        );
+      const creditNoteRows = Array.isArray(creditNotesRes?.data?.data)
+        ? creditNotesRes.data.data
+            .filter((cn) => String(cn?.RetailerUser?._id || "") === String(retailerId))
+            .map(mapCreditNoteToLedger)
+        : [];
 
-        const uniqueCreditNoteRows = creditNoteRows.filter((row) => {
-          const sig = `${row.date}|${toNumber(row.rawAmount)}|${toNumber(row.quantity)}`;
-          return !ledgerCreditNoteSignatures.has(sig);
-        });
+      const ledgerCNSigs = new Set(
+        ledgerRows
+          .filter(isLikelyCreditNoteLedgerRow)
+          .map((r) => `${r.date}|${toNumber(r.rawAmount)}|${toNumber(r.quantity)}`)
+      );
 
-        const mergedRows = [...ledgerRows, ...uniqueCreditNoteRows];
+      const uniqueCNRows = creditNoteRows.filter((r) => {
+        const sig = `${r.date}|${toNumber(r.rawAmount)}|${toNumber(r.quantity)}`;
+        return !ledgerCNSigs.has(sig);
+      });
 
-        const latestBalanceFallback = toNumber(selectedUser?.balance || 0);
-        const withRunningBalance = computeRunningBalances(
-          mergedRows,
-          latestBalanceFallback
-        );
+      const merged = computeRunningBalances(
+        [...ledgerRows, ...uniqueCNRows],
+        toNumber(selectedUser?.balance || 0)
+      );
 
-        setTransactionData(withRunningBalance);
-      } catch {
-        toast.error("Failed to fetch ledger");
-        setTransactionData([]);
-      } finally {
-        setLedgerLoading(false);
-      }
-    },
-    [selectedUser?.balance]
-  );
+      setTransactionData(merged);
+    } catch { toast.error("Failed to fetch ledger"); setTransactionData([]); }
+    finally  { setLedgerLoading(false); }
+  }, [selectedUser?.balance]);
 
   useEffect(() => {
     if (!selectedUser?._id) return;
-    setCurrentPage(1);
-    setTypeFilter("all");
-    setStartDate("");
-    setEndDate("");
-    setAppliedStartDate("");
-    setAppliedEndDate("");
+    setCurrentPage(1); setTypeFilter("all");
+    setStartDate(""); setEndDate(""); setAppliedStartDate(""); setAppliedEndDate("");
     fetchMergedLedger(selectedUser._id);
   }, [selectedUser?._id, fetchMergedLedger]);
 
   useEffect(() => {
     if (!selectedUser?._id) return;
-
     const onFocus = () => fetchMergedLedger(selectedUser._id);
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        fetchMergedLedger(selectedUser._id);
-      }
-    };
-
+    const onVis   = () => { if (document.visibilityState === "visible") fetchMergedLedger(selectedUser._id); };
     window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVis); };
   }, [selectedUser?._id, fetchMergedLedger]);
 
-  const refreshLedger = async () => {
-    if (!selectedUser?._id) return;
-    await fetchMergedLedger(selectedUser._id);
-  };
+  const refreshLedger = () => selectedUser?._id && fetchMergedLedger(selectedUser._id);
 
   const handleDateFilter = () => {
     if (!selectedUser?._id) return toast.error("Select a user first");
-    if (!startDate || !endDate) return toast.error("Select both dates");
-
-    setAppliedStartDate(startDate);
-    setAppliedEndDate(endDate);
-    setCurrentPage(1);
+    if (!startDate || !endDate)  return toast.error("Select both dates");
+    setAppliedStartDate(startDate); setAppliedEndDate(endDate); setCurrentPage(1);
   };
 
   const clearDateFilter = () => {
-    setStartDate("");
-    setEndDate("");
-    setAppliedStartDate("");
-    setAppliedEndDate("");
-    setCurrentPage(1);
+    setStartDate(""); setEndDate(""); setAppliedStartDate(""); setAppliedEndDate(""); setCurrentPage(1);
   };
 
   const handleSelectUser = (retailer) => {
-    setSelectedUser(retailer);
-    setDropdownOpen(false);
-    setDropdownSearch("");
-    setStartDate("");
-    setEndDate("");
-    setAppliedStartDate("");
-    setAppliedEndDate("");
-    setCurrentPage(1);
+    setSelectedUser(retailer); setDropdownOpen(false); setDropdownSearch("");
+    setStartDate(""); setEndDate(""); setAppliedStartDate(""); setAppliedEndDate(""); setCurrentPage(1);
   };
 
-  const filteredRows = useMemo(() => {
-  return transactionData.filter((row) => {
-    const displayType = getTypeLabel(row).toUpperCase();
-
-
-const matchesType =
-  typeFilter === "all" || displayType === typeFilter.toUpperCase();
-
-    const matchesStart = !appliedStartDate || row.date >= appliedStartDate;
-    const matchesEnd = !appliedEndDate || row.date <= appliedEndDate;
-
-    return matchesType && matchesStart && matchesEnd;
+  const openPaymentModal = () => {
+  setPaymentForm({
+    companyId: "",
+    amount:    "",
+    date:      new Date().toISOString().split("T")[0],
+    details:   "",
   });
-}, [transactionData, typeFilter, appliedStartDate, appliedEndDate]);
+  setShowPaymentModal(true);
+};
 
-  const totalPages =
-    Math.ceil(filteredRows.length / TRANSACTIONS_PER_PAGE) || 1;
-  const pageStart = (currentPage - 1) * TRANSACTIONS_PER_PAGE;
-  const visibleRows = filteredRows.slice(
-    pageStart,
-    pageStart + TRANSACTIONS_PER_PAGE
-  );
+const closePaymentModal = () => {
+  setShowPaymentModal(false);
+  setPaymentForm({
+    companyId: "",
+    amount:    "",
+    date:      new Date().toISOString().split("T")[0],
+    details:   "",
+  });
+};
 
-  const debitRows = filteredRows.filter((row) => row.debit > 0);
-  const creditRows = filteredRows.filter((row) => row.credit > 0);
 
-  const pendingDebitRows = debitRows.filter(
-    (row) =>
-      row.source === "ledger" &&
-      !row.isImported &&
-      row.isApproved === false &&
-      !row.isRejected
-  );
+  /* ─────────────────────────────────────────────────────
+     PAYMENT SUBMIT — uses addDirectPayment from APIS.js
+     → POST /ledger/:retailerId/directadd
+  ───────────────────────────────────────────────────── */
+const handlePaymentSubmit = async () => {
+  if (!selectedUser?._id)        return toast.error("No customer selected");
+  if (!paymentForm.companyId)    return toast.error("Please select a company");
 
-  const pendingCreditRows = creditRows.filter(
-    (row) =>
-      row.source === "ledger" &&
-      !row.isImported &&
-      row.isApproved === false &&
-      !row.isRejected
-  );
+  const amt = toNumber(paymentForm.amount);
+  if (!paymentForm.amount || amt <= 0) {
+    return toast.error("Please enter a valid payment amount");
+  }
 
-  const totalDebitAmount = filteredRows.reduce(
-    (sum, row) => sum + toNumber(row.debit),
-    0
-  );
-  const totalCreditAmount = filteredRows.reduce(
-    (sum, row) => sum + toNumber(row.credit),
-    0
-  );
+  try {
+    setPaymentSubmitting(true);
 
- const transactionTypes = [
-  ...new Set(
-    transactionData
-      .map((t) => getTypeLabel(t))
-      .filter((t) => t && t !== "—")
-  ),
-];
+    // Body matches backend: { retailerId, amount, date, details }
+    const payload = {
+      retailerId: selectedUser._id,
+      amount:     amt,
+      date:       paymentForm.date,
+      details:    paymentForm.details || "Transaction",
+    };
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [typeFilter, appliedStartDate, appliedEndDate]);
+    // URL param :id must be the COMPANY (Purchase) _id
+    const response = await addDirectPayment(paymentForm.companyId, payload);
+
+    if (response) {
+      toast.success(response?.msg || "Payment processed successfully!");
+      closePaymentModal();
+      await fetchMergedLedger(selectedUser._id);
+    }
+  } catch (err) {
+    console.error("Payment error:", err);
+    toast.error(
+      err?.response?.data?.msg   ||
+      err?.response?.data?.error ||
+      err?.message               ||
+      "Failed to record payment"
+    );
+  } finally {
+    setPaymentSubmitting(false);
+  }
+};
+
+
+  /* ── filtered + paginated rows ── */
+  const filteredRows = useMemo(() => {
+    return transactionData.filter((row) => {
+      const displayType = getTypeLabel(row).toUpperCase();
+      const matchesType  = typeFilter === "all" || displayType === typeFilter.toUpperCase();
+      const matchesStart = !appliedStartDate || row.date >= appliedStartDate;
+      const matchesEnd   = !appliedEndDate   || row.date <= appliedEndDate;
+      return matchesType && matchesStart && matchesEnd;
+    });
+  }, [transactionData, typeFilter, appliedStartDate, appliedEndDate]);
+
+  useEffect(() => { setCurrentPage(1); }, [typeFilter, appliedStartDate, appliedEndDate]);
+
+  const totalPages  = Math.ceil(filteredRows.length / TRANSACTIONS_PER_PAGE) || 1;
+  const pageStart   = (currentPage - 1) * TRANSACTIONS_PER_PAGE;
+  const visibleRows = filteredRows.slice(pageStart, pageStart + TRANSACTIONS_PER_PAGE);
+
+  const debitRows         = filteredRows.filter((r) => r.debit  > 0);
+  const creditRows        = filteredRows.filter((r) => r.credit > 0);
+  const pendingDebitRows  = debitRows.filter((r) => r.source === "ledger" && !r.isImported && r.isApproved === false && !r.isRejected);
+  const pendingCreditRows = creditRows.filter((r) => r.source === "ledger" && !r.isImported && r.isApproved === false && !r.isRejected);
+  const totalDebitAmount  = filteredRows.reduce((s, r) => s + toNumber(r.debit),  0);
+  const totalCreditAmount = filteredRows.reduce((s, r) => s + toNumber(r.credit), 0);
+  const transactionTypes  = [...new Set(transactionData.map((t) => getTypeLabel(t)).filter((t) => t && t !== "—"))];
 
   return (
     <>
@@ -523,111 +455,85 @@ const matchesType =
         .sp-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
         .sp-row { transition: background 0.15s, box-shadow 0.15s; }
         .sp-row:hover { background: #FFFAF9; box-shadow: 0 0 0 1px #FFD7CE inset; }
-        @keyframes spIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-        .sp-animate { animation: spIn 0.22s ease both; }
-        @keyframes ddIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes spIn  { from { opacity:0; transform:translateY(6px);  } to { opacity:1; transform:translateY(0); } }
+        @keyframes ddIn  { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes modalIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }
+        .sp-animate  { animation: spIn 0.22s ease both; }
         .sp-dropdown { animation: ddIn 0.15s ease both; }
+        .modal-overlay { backdrop-filter:blur(4px); }
+        .modal-card    { animation: modalIn 0.25s cubic-bezier(0.34,1.2,0.64,1); }
         .sp-no-scroll::-webkit-scrollbar { display:none; }
         .sp-no-scroll { scrollbar-width:none; }
+        /* Styled inputs inside modal */
+        .pay-input {
+          width:100%; background:#F9FAFB; border:1.5px solid #E5E7EB; border-radius:10px;
+          padding:10px 14px; font-size:13px; color:#111827; outline:none;
+          font-family:'DM Sans',sans-serif; transition:border-color .15s,box-shadow .15s;
+        }
+        .pay-input:focus { border-color:#FF5934; box-shadow:0 0 0 3px rgba(255,89,52,.1); background:#fff; }
+        .pay-label { display:block; font-size:11px; font-weight:700; color:#6B7280; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
       `}</style>
 
       <div className="sp-page">
+
+        {/* ══════════════════ LEDGER VIEW ══════════════════ */}
         {selectedUser ? (
           <div className="sp-animate">
+
             {/* Header */}
             <div className="flex items-center justify-between mt-6 mb-5 flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => {
-                    setSelectedUser(null);
-                    setTransactionData([]);
-                    setStartDate("");
-                    setEndDate("");
-                    setAppliedStartDate("");
-                    setAppliedEndDate("");
-                    setTypeFilter("all");
-                    setCurrentPage(1);
-                  }}
+                  onClick={() => { setSelectedUser(null); setTransactionData([]); setStartDate(""); setEndDate(""); setAppliedStartDate(""); setAppliedEndDate(""); setTypeFilter("all"); setCurrentPage(1); }}
                   className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-gray-200 text-[#374151] hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] transition-all shadow-sm"
                 >
                   <MdArrowBack size={18} />
                 </button>
-
                 <div>
-                  <h2 className="text-[20px] font-bold text-[#111827] tracking-tight">
-                    {selectedUser.name}
-                  </h2>
+                  <h2 className="text-[20px] font-bold text-[#111827] tracking-tight">{selectedUser.name}</h2>
                   <p className="text-sm text-[#9CA3AF] mt-0.5">
                     {selectedUser.shopName} &nbsp;·&nbsp; Balance:&nbsp;
-                    <span className="font-bold text-[#FF5934]">
-                      PKR {selectedUser.balance}
-                    </span>
+                    <span className="font-bold text-[#FF5934]">PKR {selectedUser.balance}</span>
                     &nbsp;·&nbsp;
-                    <span
-                      className={`font-semibold ${
-                        selectedUser.isActive
-                          ? "text-emerald-500"
-                          : "text-gray-400"
-                      }`}
-                    >
+                    <span className={`font-semibold ${selectedUser.isActive ? "text-emerald-500" : "text-gray-400"}`}>
                       {selectedUser.isActive ? "Active" : "Inactive"}
                     </span>
                   </p>
                 </div>
               </div>
 
-              {/* Filters */}
+              {/* Toolbar */}
               <div className="flex items-center gap-2 flex-wrap">
+                <button onClick={openPaymentModal}
+                  className="flex items-center gap-2 bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold px-4 py-2 rounded-xl transition-all shadow-md shadow-orange-100">
+                  <MdAdd size={16} /> Add Payment
+                </button>
+
                 {transactionTypes.length > 0 && (
                   <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
                     <MdFilterList size={14} className="text-[#9CA3AF]" />
-                    <select
-                      value={typeFilter}
-                      onChange={(e) => setTypeFilter(e.target.value)}
-                      className="bg-transparent outline-none text-sm text-[#374151] pr-1"
-                    >
+                    <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
+                      className="bg-transparent outline-none text-sm text-[#374151] pr-1">
                       <option value="all">All Types</option>
-                      {transactionTypes.map((t) => (
-  <option key={t} value={t}>
-    {t}
-  </option>
-))}
+                      {transactionTypes.map((t) => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
                 )}
 
                 <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
-                  <input
-                    type="date"
-                    value={startDate}
-                    max={new Date().toISOString().split("T")[0]}
+                  <input type="date" value={startDate} max={new Date().toISOString().split("T")[0]}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="bg-transparent outline-none text-sm text-[#374151]"
-                  />
+                    className="bg-transparent outline-none text-sm text-[#374151]" />
                   <span className="text-[#9CA3AF] text-xs">to</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    min={startDate}
-                    max={new Date().toISOString().split("T")[0]}
+                  <input type="date" value={endDate} min={startDate} max={new Date().toISOString().split("T")[0]}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="bg-transparent outline-none text-sm text-[#374151]"
-                  />
-                  <button
-                    onClick={handleDateFilter}
-                    disabled={!startDate || !endDate}
-                    className="ml-1 bg-[#FF5934] text-white text-[12px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-40 hover:bg-[#e84d2a] transition-colors"
-                  >
+                    className="bg-transparent outline-none text-sm text-[#374151]" />
+                  <button onClick={handleDateFilter} disabled={!startDate || !endDate}
+                    className="ml-1 bg-[#FF5934] text-white text-[12px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-40 hover:bg-[#e84d2a] transition-colors">
                     Filter
                   </button>
-                  {(startDate ||
-                    endDate ||
-                    appliedStartDate ||
-                    appliedEndDate) && (
-                    <button
-                      onClick={clearDateFilter}
-                      className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors"
-                    >
+                  {(startDate || endDate || appliedStartDate || appliedEndDate) && (
+                    <button onClick={clearDateFilter} className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
                       <MdClose size={15} />
                     </button>
                   )}
@@ -636,68 +542,43 @@ const matchesType =
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-5 gap-3 mb-5">
+            <div className="grid grid-cols-5 gap-3 mb-4">
               {[
-                { label: "Debit Entries", value: debitRows.length },
-                { label: "Credit Entries", value: creditRows.length },
-                { label: "Pending Debit", value: pendingDebitRows.length },
-                { label: "Pending Credit", value: pendingCreditRows.length },
-                { label: "Balance", value: `PKR ${selectedUser.balance}` },
+                { label: "Debit Entries",   value: debitRows.length },
+                { label: "Credit Entries",  value: creditRows.length },
+                { label: "Pending Debit",   value: pendingDebitRows.length },
+                { label: "Pending Credit",  value: pendingCreditRows.length },
+                { label: "Balance",         value: `PKR ${selectedUser.balance}` },
               ].map(({ label, value }) => (
-                <div
-                  key={label}
-                  className="bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm"
-                >
-                  <p className="text-[13px] font-bold text-[#FF5934]">
-                    {value}
-                  </p>
-                  <p className="text-[11px] text-[#9CA3AF] font-semibold uppercase tracking-wide mt-0.5">
-                    {label}
-                  </p>
+                <div key={label} className="bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm">
+                  <p className="text-[13px] font-bold text-[#FF5934]">{value}</p>
+                  <p className="text-[11px] text-[#9CA3AF] font-semibold uppercase tracking-wide mt-0.5">{label}</p>
                 </div>
               ))}
             </div>
 
             <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm">
-                <p className="text-[13px] font-bold text-emerald-600">
-                  PKR {fmtMoney(totalDebitAmount)}
-                </p>
-                <p className="text-[11px] text-[#9CA3AF] font-semibold uppercase tracking-wide mt-0.5">
-                  Total Debit Amount
-                </p>
+                <p className="text-[13px] font-bold text-emerald-600">PKR {fmtMoney(totalDebitAmount)}</p>
+                <p className="text-[11px] text-[#9CA3AF] font-semibold uppercase tracking-wide mt-0.5">Total Debit Amount</p>
               </div>
-
               <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm">
-                <p className="text-[13px] font-bold text-sky-600">
-                  PKR {fmtMoney(totalCreditAmount)}
-                </p>
-                <p className="text-[11px] text-[#9CA3AF] font-semibold uppercase tracking-wide mt-0.5">
-                  Total Credit Amount
-                </p>
+                <p className="text-[13px] font-bold text-sky-600">PKR {fmtMoney(totalCreditAmount)}</p>
+                <p className="text-[11px] text-[#9CA3AF] font-semibold uppercase tracking-wide mt-0.5">Total Credit Amount</p>
               </div>
             </div>
 
-            {/* Combined Table */}
+            {/* Ledger table */}
             <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-[#FAFAFA]">
                 <div className="flex items-center gap-2">
                   <MdOutlineReceipt size={16} className="text-[#FF5934]" />
-                  <span className="text-[13px] font-bold text-[#374151]">
-                    Ledger Entries
-                  </span>
-                  <span className="bg-[#FF5934]/10 text-[#FF5934] text-[11px] font-bold px-2 py-0.5 rounded-full">
-                    {filteredRows.length}
-                  </span>
-                  <span className="text-[11px] text-[#9CA3AF] ml-1">
-                    ledger + credit notes
-                  </span>
+                  <span className="text-[13px] font-bold text-[#374151]">Ledger Entries</span>
+                  <span className="bg-[#FF5934]/10 text-[#FF5934] text-[11px] font-bold px-2 py-0.5 rounded-full">{filteredRows.length}</span>
+                  <span className="text-[11px] text-[#9CA3AF] ml-1">ledger + credit notes</span>
                 </div>
-
-                <button
-                  onClick={refreshLedger}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-gray-200 text-[#9CA3AF] hover:text-[#FF5934] hover:border-[#FF5934] transition-all"
-                >
+                <button onClick={refreshLedger}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-gray-200 text-[#9CA3AF] hover:text-[#FF5934] hover:border-[#FF5934] transition-all">
                   <MdRefresh size={15} />
                 </button>
               </div>
@@ -711,42 +592,20 @@ const matchesType =
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-50">
-                        {[
-                          "ID",
-                          "Details",
-                          "Type",
-                          "Ref No.",
-                          "V. No.",
-                          "Qty",
-                          "Debit",
-                          "Credit",
-                          "Running Balance",
-                          "Date",
-                        ].map((h) => (
-                          <th
-                            key={h}
-                            className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3"
-                          >
-                            {h}
-                          </th>
+                        {["ID","Details","Type","Ref No.","V. No.","Qty","Debit","Credit","Running Balance","Date"].map((h) => (
+                          <th key={h} className="text-left text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest px-4 py-3">{h}</th>
                         ))}
                       </tr>
                     </thead>
-
                     <tbody className="divide-y divide-gray-50">
                       {visibleRows.length === 0 ? (
                         <tr>
                           <td colSpan={10} className="py-16 text-center">
                             <div className="flex flex-col items-center gap-3">
                               <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
-                                <MdOutlineReceipt
-                                  size={24}
-                                  className="text-gray-300"
-                                />
+                                <MdOutlineReceipt size={24} className="text-gray-300" />
                               </div>
-                              <p className="text-[#9CA3AF] text-sm font-medium">
-                                No entries found
-                              </p>
+                              <p className="text-[#9CA3AF] text-sm font-medium">No entries found</p>
                             </div>
                           </td>
                         </tr>
@@ -758,70 +617,33 @@ const matchesType =
                                 #{String(t.id).slice(-8).toUpperCase()}
                               </span>
                             </td>
-
-                            <td className="px-4 py-3 text-[13px] text-[#374151] max-w-[220px] truncate">
-                              {t.details}
-                            </td>
-
+                            <td className="px-4 py-3 text-[13px] text-[#374151] max-w-[220px] truncate">{t.details}</td>
                             <td className="px-4 py-3">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${
-                                  t.isCredit
-                                    ? "bg-sky-50 text-sky-600 ring-sky-200"
-                                    : "bg-emerald-50 text-emerald-600 ring-emerald-200"
-                                }`}
-                              >
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ring-1 ${
+                                t.isCredit ? "bg-sky-50 text-sky-600 ring-sky-200" : "bg-emerald-50 text-emerald-600 ring-emerald-200"
+                              }`}>
                                 {getTypeLabel(t)}
                               </span>
                             </td>
-
-                            <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">
-                              {t.refNo ?? "—"}
-                            </td>
-
-                            <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">
-                              {t.voucherNo ?? "—"}
-                            </td>
-
-                            <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">
-                              {t.quantity ?? "—"}
-                            </td>
-
+                            <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">{t.refNo     ?? "—"}</td>
+                            <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">{t.voucherNo ?? "—"}</td>
+                            <td className="px-4 py-3 text-[12px] text-[#9CA3AF]">{t.quantity  ?? "—"}</td>
                             <td className="px-4 py-3">
-                              <span
-                                className={`text-[13px] font-semibold ${
-                                  t.debit > 0
-                                    ? "text-emerald-600"
-                                    : "text-gray-300"
-                                }`}
-                              >
+                              <span className={`text-[13px] font-semibold ${t.debit > 0 ? "text-emerald-600" : "text-gray-300"}`}>
                                 PKR {t.debit > 0 ? fmtMoney(t.debit) : "0"}
                               </span>
                             </td>
-
                             <td className="px-4 py-3">
-                              <span
-                                className={`text-[13px] font-semibold ${
-                                  t.credit > 0
-                                    ? "text-sky-600"
-                                    : "text-gray-300"
-                                }`}
-                              >
+                              <span className={`text-[13px] font-semibold ${t.credit > 0 ? "text-sky-600" : "text-gray-300"}`}>
                                 PKR {t.credit > 0 ? fmtMoney(t.credit) : "0"}
                               </span>
                             </td>
-
                             <td className="px-4 py-3">
                               <span className="text-[13px] font-semibold text-[#111827]">
-                                {t.balanceDisplay === "—"
-                                  ? "—"
-                                  : `PKR ${t.balanceDisplay}`}
+                                {t.balanceDisplay === "—" ? "—" : `PKR ${t.balanceDisplay}`}
                               </span>
                             </td>
-
-                            <td className="px-4 py-3 text-[12px] text-[#6B7280]">
-                              {t.date}
-                            </td>
+                            <td className="px-4 py-3 text-[12px] text-[#6B7280]">{t.date}</td>
                           </tr>
                         ))
                       )}
@@ -832,57 +654,40 @@ const matchesType =
 
               {filteredRows.length > TRANSACTIONS_PER_PAGE && (
                 <div className="flex items-center gap-1.5 px-4 py-3 border-t border-gray-100">
-                  <button
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage((p) => p - 1)}
-                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                  >
+                  <button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}
+                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                     <GrFormPrevious size={16} />
                   </button>
-
                   <div className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-[#374151]">
-                    <span className="font-semibold text-[#FF5934]">
-                      {currentPage}
-                    </span>
+                    <span className="font-semibold text-[#FF5934]">{currentPage}</span>
                     <span className="text-gray-300 mx-1">/</span>
                     <span>{totalPages}</span>
                   </div>
-
-                  <button
-                    disabled={currentPage >= totalPages}
-                    onClick={() => setCurrentPage((p) => p + 1)}
-                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                  >
+                  <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)}
+                    className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 hover:bg-[#FF5934] hover:text-white hover:border-[#FF5934] disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                     <GrFormNext size={16} />
                   </button>
                 </div>
               )}
             </div>
           </div>
+
         ) : (
+
+          /* ══════════════════ PICKER VIEW ══════════════════ */
           <div className="sp-animate">
             <div className="flex items-center justify-between mt-6 mb-5">
               <div>
-                <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">
-                  Sales Payments
-                </h1>
-                <p className="text-sm text-[#9CA3AF] mt-0.5">
-                  Select a customer to view ledger + sale credit notes
-                </p>
+                <h1 className="text-[22px] font-bold text-[#111827] tracking-tight">Sales Payments</h1>
+                <p className="text-sm text-[#9CA3AF] mt-0.5">Select a customer to view ledger + sale credit notes</p>
               </div>
             </div>
 
             <div className="bg-white border border-gray-100 rounded-2xl px-5 py-4 shadow-sm mb-5">
-              <label className="block text-[12px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-2">
-                Select Customer
-              </label>
-
+              <label className="block text-[12px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-2">Select Customer</label>
               <div className="relative" ref={dropdownRef}>
-                <button
-                  onClick={() => setDropdownOpen((o) => !o)}
-                  disabled={listLoading}
-                  className="w-full flex items-center justify-between gap-3 bg-[#F9FAFB] border border-gray-200 hover:border-[#FF5934] focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-4 py-3 rounded-xl outline-none text-sm transition-all"
-                >
+                <button onClick={() => setDropdownOpen((o) => !o)} disabled={listLoading}
+                  className="w-full flex items-center justify-between gap-3 bg-[#F9FAFB] border border-gray-200 hover:border-[#FF5934] focus:border-[#FF5934] focus:ring-2 focus:ring-[#FF5934]/10 px-4 py-3 rounded-xl outline-none text-sm transition-all">
                   {listLoading ? (
                     <div className="flex items-center gap-2 text-[#9CA3AF]">
                       <div className="w-4 h-4 border-2 border-[#FF5934] border-t-transparent rounded-full animate-spin" />
@@ -890,124 +695,61 @@ const matchesType =
                     </div>
                   ) : selectedUser ? (
                     <div className="flex items-center gap-3">
-                      <img
-                        src={selectedUser.image}
-                        alt={selectedUser.name}
+                      <img src={selectedUser.image} alt={selectedUser.name}
                         className="w-7 h-7 rounded-full object-cover ring-2 ring-white shadow-sm flex-shrink-0"
-                        onError={(e) => {
-                          e.target.src = PLACEHOLDER_IMAGE;
-                        }}
-                      />
+                        onError={(e) => { e.target.src = PLACEHOLDER_IMAGE; }} />
                       <div className="text-left">
-                        <span className="font-semibold text-[#111827]">
-                          {selectedUser.name}
-                        </span>
-                        <span className="text-[#9CA3AF] ml-2 text-xs">
-                          {selectedUser.shopName}
-                        </span>
+                        <span className="font-semibold text-[#111827]">{selectedUser.name}</span>
+                        <span className="text-[#9CA3AF] ml-2 text-xs">{selectedUser.shopName}</span>
                       </div>
                     </div>
                   ) : (
-                    <span className="text-[#9CA3AF]">
-                      — Choose a customer —
-                    </span>
+                    <span className="text-[#9CA3AF]">— Choose a customer —</span>
                   )}
-
-                  <MdKeyboardArrowDown
-                    size={18}
-                    className={`text-[#9CA3AF] flex-shrink-0 transition-transform duration-200 ${
-                      dropdownOpen ? "rotate-180" : ""
-                    }`}
-                  />
+                  <MdKeyboardArrowDown size={18}
+                    className={`text-[#9CA3AF] flex-shrink-0 transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`} />
                 </button>
 
                 {dropdownOpen && (
                   <div className="sp-dropdown absolute top-full left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg z-30 overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 bg-[#FAFAFA]">
-                      <MdSearch
-                        size={15}
-                        className="text-[#9CA3AF] flex-shrink-0"
-                      />
-                      <input
-                        autoFocus
-                        value={dropdownSearch}
-                        onChange={(e) => setDropdownSearch(e.target.value)}
+                      <MdSearch size={15} className="text-[#9CA3AF] flex-shrink-0" />
+                      <input autoFocus value={dropdownSearch} onChange={(e) => setDropdownSearch(e.target.value)}
                         placeholder="Type to filter…"
-                        className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#C4C8D0] w-full"
-                      />
+                        className="bg-transparent outline-none text-sm text-[#111827] placeholder:text-[#C4C8D0] w-full" />
                       {dropdownSearch && (
-                        <button
-                          onClick={() => setDropdownSearch("")}
-                          className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors"
-                        >
+                        <button onClick={() => setDropdownSearch("")} className="text-[#9CA3AF] hover:text-[#FF5934] transition-colors">
                           <MdClose size={13} />
                         </button>
                       )}
                     </div>
-
                     <ul className="max-h-64 overflow-y-auto sp-no-scroll divide-y divide-gray-50">
                       {dropdownList.length === 0 ? (
-                        <li className="px-4 py-6 text-center text-sm text-[#9CA3AF]">
-                          No customers match
+                        <li className="px-4 py-6 text-center text-sm text-[#9CA3AF]">No customers match</li>
+                      ) : dropdownList.map((retailer) => (
+                        <li key={retailer._id} onClick={() => handleSelectUser(retailer)}
+                          className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-[#FFF4F2] transition-colors group">
+                          <div className="relative flex-shrink-0">
+                            <img src={retailer.image} alt={retailer.name}
+                              className="w-8 h-8 rounded-full object-cover ring-2 ring-white shadow-sm"
+                              onError={(e) => { e.target.src = PLACEHOLDER_IMAGE; }} />
+                            <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${retailer.isActive ? "bg-emerald-400" : "bg-gray-300"}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] font-semibold text-[#111827] truncate group-hover:text-[#FF5934] transition-colors">{retailer.name}</p>
+                            <p className="text-[11px] text-[#9CA3AF] truncate">{retailer.shopName} &nbsp;·&nbsp; {retailer.phone}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <span className="text-[12px] font-semibold text-[#111827]">PKR {retailer.balance}</span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${retailer.isActive ? "bg-emerald-50 text-emerald-600" : "bg-gray-100 text-gray-400"}`}>
+                              {retailer.isActive ? "Active" : "Inactive"}
+                            </span>
+                          </div>
                         </li>
-                      ) : (
-                        dropdownList.map((retailer) => (
-                          <li
-                            key={retailer._id}
-                            onClick={() => handleSelectUser(retailer)}
-                            className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-[#FFF4F2] transition-colors group"
-                          >
-                            <div className="relative flex-shrink-0">
-                              <img
-                                src={retailer.image}
-                                alt={retailer.name}
-                                className="w-8 h-8 rounded-full object-cover ring-2 ring-white shadow-sm"
-                                onError={(e) => {
-                                  e.target.src = PLACEHOLDER_IMAGE;
-                                }}
-                              />
-                              <span
-                                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
-                                  retailer.isActive
-                                    ? "bg-emerald-400"
-                                    : "bg-gray-300"
-                                }`}
-                              />
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[13px] font-semibold text-[#111827] truncate group-hover:text-[#FF5934] transition-colors">
-                                {retailer.name}
-                              </p>
-                              <p className="text-[11px] text-[#9CA3AF] truncate">
-                                {retailer.shopName} &nbsp;·&nbsp;{" "}
-                                {retailer.phone}
-                              </p>
-                            </div>
-
-                            <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                              <span className="text-[12px] font-semibold text-[#111827]">
-                                PKR {retailer.balance}
-                              </span>
-                              <span
-                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                                  retailer.isActive
-                                    ? "bg-emerald-50 text-emerald-600"
-                                    : "bg-gray-100 text-gray-400"
-                                }`}
-                              >
-                                {retailer.isActive ? "Active" : "Inactive"}
-                              </span>
-                            </div>
-                          </li>
-                        ))
-                      )}
+                      ))}
                     </ul>
-
                     <div className="px-4 py-2 border-t border-gray-100 bg-[#FAFAFA]">
-                      <span className="text-[11px] text-[#9CA3AF]">
-                        {dropdownList.length} of {allRetailers.length} customers
-                      </span>
+                      <span className="text-[11px] text-[#9CA3AF]">{dropdownList.length} of {allRetailers.length} customers</span>
                     </div>
                   </div>
                 )}
@@ -1018,17 +760,124 @@ const matchesType =
               <div className="w-20 h-20 rounded-3xl bg-[#FFF4F2] border border-[#FFD7CE] flex items-center justify-center mb-4 shadow-sm">
                 <MdPerson size={32} className="text-[#FF5934]" />
               </div>
-              <h3 className="text-[16px] font-bold text-[#374151] mb-1">
-                No customer selected
-              </h3>
+              <h3 className="text-[16px] font-bold text-[#374151] mb-1">No customer selected</h3>
               <p className="text-sm text-[#9CA3AF] max-w-xs">
-                Use the dropdown above to pick a customer and view merged ledger
-                and sale credit note entries.
+                Use the dropdown above to pick a customer and view merged ledger and sale credit note entries.
               </p>
             </div>
           </div>
         )}
       </div>
+
+      {/* ════════════════════════════════════════
+          PAYMENT MODAL
+      ════════════════════════════════════════ */}
+      {showPaymentModal && (
+        <div className="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="modal-card bg-white w-full max-w-[420px] rounded-3xl shadow-2xl overflow-hidden">
+
+            {/* Header */}
+            <div className="relative bg-gradient-to-r from-[#FF5934] to-[#ff8c6b] px-6 pt-5 pb-8">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-white/70 text-xs font-semibold uppercase tracking-widest mb-1">{selectedUser?.name}</p>
+                  <h2 className="text-white text-xl font-bold">Add Payment</h2>
+                  <p className="text-white/60 text-xs mt-0.5">Current balance: PKR {selectedUser?.balance}</p>
+                </div>
+                <button onClick={closePaymentModal}
+                  className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors">
+                  <MdClose size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Form */}
+            <div className="px-6 py-5 flex flex-col gap-4">
+
+  {/* Company (companyId → req.params.id) */}
+  <div>
+    <label className="pay-label">
+      Company <span className="text-[#FF5934]">*</span>
+    </label>
+    <select
+      value={paymentForm.companyId}
+      onChange={(e) => setPaymentForm({ ...paymentForm, companyId: e.target.value })}
+      className="pay-input appearance-none cursor-pointer"
+    >
+      <option value="">— Select company —</option>
+      {companies.map((c) => (
+        <option key={c._id} value={c._id}>
+          {c.name || c.companyName || c.title || "Unnamed company"}
+          {Number.isFinite(toNumber(c.balance)) ? `  ·  PKR ${fmtMoney(c.balance)}` : ""}
+        </option>
+      ))}
+    </select>
+    <p className="text-[11px] text-[#9CA3AF] mt-1">
+      Payment will be deducted from this company’s balance.
+    </p>
+  </div>
+
+  {/* Amount (req.body.amount) */}
+  <div>
+    <label className="pay-label">
+      Amount (PKR) <span className="text-[#FF5934]">*</span>
+    </label>
+    <input
+      type="number" min="0" step="0.01"
+      value={paymentForm.amount}
+      onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+      placeholder="0.00"
+      className="pay-input"
+    />
+  </div>
+
+  {/* Date (req.body.date) */}
+  <div>
+    <label className="pay-label">
+      Date <span className="text-[#FF5934]">*</span>
+    </label>
+    <input
+      type="date"
+      value={paymentForm.date}
+      onChange={(e) => setPaymentForm({ ...paymentForm, date: e.target.value })}
+      className="pay-input"
+    />
+  </div>
+
+  {/* Details (req.body.details) */}
+  <div>
+    <label className="pay-label">
+      Details <span className="text-[#9CA3AF] normal-case font-normal">(optional)</span>
+    </label>
+    <textarea
+      value={paymentForm.details}
+      onChange={(e) => setPaymentForm({ ...paymentForm, details: e.target.value })}
+      placeholder='Defaults to "Transaction" if left blank'
+      rows={2}
+      className="pay-input resize-none"
+    />
+  </div>
+</div>
+
+
+            {/* Footer */}
+            <div className="px-6 pb-6 flex gap-3">
+              <button type="button" onClick={closePaymentModal} disabled={paymentSubmitting}
+                className="flex-1 h-11 rounded-xl border border-gray-200 bg-white text-[#374151] text-sm font-semibold hover:bg-gray-50 transition-colors disabled:opacity-60">
+                Cancel
+              </button>
+              <button onClick={handlePaymentSubmit} disabled={paymentSubmitting}
+                className="flex-1 h-11 rounded-xl bg-[#FF5934] hover:bg-[#e84d2a] text-white text-sm font-bold shadow-lg shadow-orange-100 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                {paymentSubmitting ? (
+                  <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processing…</>
+                ) : (
+                  <><MdAdd size={16} /> Record Payment</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

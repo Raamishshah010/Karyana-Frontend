@@ -460,6 +460,12 @@ const Retailers = () => {
 
   if (loading) return <Loader />;
 
+  const SHOP_CATEGORIES = [
+  'General Store', 'Wholesale / Distributor', 'Kiosk', 'Mart / Super Market',
+  'Bakery', 'Restaurant', 'Educational Institution', 'Office', 'Hospital',
+  'Horeca Reseller', 'Public Kitchen', 'Petro Mart', 'Dhaba', 'Cafe',
+];
+
   return (
     <>
       <style>{`
@@ -809,9 +815,21 @@ const Retailers = () => {
                               className={inputClsErr(errors.shopName, touched.shopName)} />
                           </FieldGroup>
                           <FieldGroup icon={MdCategory} label="Business Category">
-                            <Input name="shopCategory" placeholder="Category" value={values.shopCategory} onChange={handleChange}
-                              className={inputClsErr(errors.shopCategory, touched.shopCategory)} />
-                          </FieldGroup>
+  <select
+    name="shopCategory"
+    value={values.shopCategory}
+    onChange={handleChange}
+    className={inputClsErr(errors.shopCategory, touched.shopCategory)}
+  >
+    <option value="">Select Category…</option>
+    {SHOP_CATEGORIES.map(cat => (
+      <option key={cat} value={cat}>{cat}</option>
+    ))}
+  </select>
+  {errors.shopCategory && touched.shopCategory && (
+    <p className="text-red-400 text-[11px] mt-1">{errors.shopCategory}</p>
+  )}
+</FieldGroup>
                           <FieldGroup icon={MdLocationOn} label="Shop Address 1">
                             <Input name="shopAddress1" placeholder="Primary address" value={values.shopAddress1} onChange={handleChange}
                               className={inputClsErr(errors.shopAddress1, touched.shopAddress1)} />

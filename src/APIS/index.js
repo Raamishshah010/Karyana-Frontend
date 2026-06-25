@@ -1560,22 +1560,21 @@ export const addRetailerLedger = async (id, ledgerData) => {
 export const addDirectPayment = async (id, paymentData) => {
   const config = {
     method: "post",
-    url: `${SERVER_URL}/ledger/${id}/directadd`, 
+    url: `${SERVER_URL}/ledger/${id}/directadd`,
     headers: {
       "Content-Type": "application/json",
     },
-    data: paymentData, 
+    data: JSON.stringify(paymentData),  // ← add JSON.stringify
   };
 
   try {
     const response = await axios(config);
-    return response.data; 
+    return response.data;
   } catch (error) {
     console.error("Error adding direct payment:", error);
-    throw error; 
+    throw error;
   }
 };
-
 export const addPurchaseLedger = async (id, purchaseData) => {
   const config = {
     method: "post",

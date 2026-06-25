@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import {
   MdArrowBack, MdAdd, MdDelete, MdSearch, MdExpandMore,
-  MdShoppingBag,
+  MdShoppingBag, MdClose,
 } from 'react-icons/md';
 import { Spinner } from '../components/common/spinner';
 import { getAllRetailers, getAllSalesPersons, getAllCities, updateProduct, updateOrderStatus } from '../APIS';
@@ -38,16 +38,15 @@ const cellInputCls =
   'w-full bg-transparent text-[13.5px] text-gray-800 outline-none text-right px-1.5 py-3 rounded focus:bg-[#FF5934]/5 focus:ring-1 focus:ring-[#FF5934]/30';
 
 /* ════════════════════════════════════════
-   PRODUCT PICKER CELL
+   PRODUCT PICKER CELL — portal-based dropdown
 ════════════════════════════════════════ */
 const ProductPickerCell = ({ products, loading, value, onPick }) => {
-  const [open, setOpen]     = useState(false);
+  const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [pos, setPos]       = useState({ top: 0, left: 0, width: 320 });
-  const wrapRef             = useRef(null);
-  const inputRef            = useRef(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 320 });
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
 
-  // ── close on outside click ──
   useEffect(() => {
     const fn = (e) => {
       if (
@@ -59,13 +58,12 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
     return () => document.removeEventListener('mousedown', fn);
   }, []);
 
-  // ── recalculate position when opening ──
   const openDropdown = () => {
     if (wrapRef.current) {
       const rect = wrapRef.current.getBoundingClientRect();
       setPos({
-        top:   rect.bottom + window.scrollY + 4,
-        left:  rect.left   + window.scrollX,
+        top: rect.bottom + window.scrollY + 4,
+        left: rect.left + window.scrollX,
         width: Math.max(rect.width, 320),
       });
     }
@@ -91,16 +89,15 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
       id="product-picker-portal"
       style={{
         position: 'absolute',
-        top:      pos.top,
-        left:     pos.left,
-        width:    pos.width,
+        top: pos.top,
+        left: pos.left,
+        width: pos.width,
         maxHeight: 280,
-        zIndex:   9999,
+        zIndex: 9999,
         boxShadow: '0 8px 28px rgba(0,0,0,0.14)',
       }}
       className="bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col"
     >
-      {/* Search */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 bg-gray-50 flex-shrink-0">
         <MdSearch size={14} className="text-gray-400 flex-shrink-0" />
         <input
@@ -117,7 +114,6 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
         )}
       </div>
 
-      {/* List */}
       <div className="overflow-y-auto flex-1">
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-8 text-gray-400 text-sm">
@@ -186,7 +182,7 @@ const ProductPickerCell = ({ products, loading, value, onPick }) => {
    DISCOUNT CELL (percent ⇄ flat toggle)
 ════════════════════════════════════════ */
 const DiscountCell = ({ row, idx, onChange, grossAmount }) => {
-  const isPercent   = row.discType === 'percent';
+  const isPercent = row.discType === 'percent';
   const discountAmt = isPercent ? grossAmount * (row.discPercent / 100) : Number(row.discAmount) || 0;
 
   return (
@@ -202,13 +198,20 @@ const DiscountCell = ({ row, idx, onChange, grossAmount }) => {
         </button>
         {isPercent ? (
           <input
-            type="number" min="0" max="100" step="0.1" value={row.discPercent}
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            value={row.discPercent}
             onChange={(e) => onChange(idx, 'discPercent', Number(e.target.value))}
             className={cellInputCls}
           />
         ) : (
           <input
-            type="number" min="0" step="0.01" value={row.discAmount}
+            type="number"
+            min="0"
+            step="0.01"
+            value={row.discAmount}
             onChange={(e) => onChange(idx, 'discAmount', Number(e.target.value))}
             className={cellInputCls}
           />
@@ -226,47 +229,109 @@ const DiscountCell = ({ row, idx, onChange, grossAmount }) => {
 ════════════════════════════════════════ */
 const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemove, canRemove }) => {
   const grossAmount = row.qty * row.rate;
-  // ── discount can be a % of gross amount, or a flat Rs. amount ──
-  const discountAmt = row.discType === 'percent' ? grossAmount * (row.discPercent / 100) : Number(row.discAmount) || 0;
+  const discountAmt = row.discType === 'percent'
+    ? grossAmount * (row.discPercent / 100)
+    : Number(row.discAmount) || 0;
   const net = Math.max(grossAmount - discountAmt, 0);
+
+  // Trade offer: how many free units the customer gets
+  const toUnit = Number(row.toUnit) || 0;
+  const toCalculated = toUnit > 0 ? Math.floor(row.qty / toUnit) : 0;
 
   return (
     <tr className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40 transition-colors">
       <td className="py-1.5 px-2 align-middle" style={{ minWidth: 220 }}>
         <ProductPickerCell products={products} loading={loadingProducts} value={row.product} onPick={(p) => onPick(idx, p)} />
       </td>
-      <td className="py-1.5 px-2 align-middle" style={{ minWidth: 140 }}>
+
+      <td className="py-1.5 px-2 align-middle" style={{ minWidth: 120 }}>
         <input
           value={row.description}
           onChange={(e) => onChange(idx, 'description', e.target.value)}
-          placeholder="Optional note…"
-          className="w-full bg-transparent text-[13.5px] text-gray-600 outline-none px-1.5 py-3 rounded focus:bg-gray-50"
+          placeholder="Note…"
+          className="w-full bg-transparent text-[13px] text-gray-600 outline-none px-1.5 py-3 rounded focus:bg-gray-50"
         />
       </td>
-      <td className="py-1.5 px-2 align-middle" style={{ minWidth: 80 }}>
+
+      <td className="py-1.5 px-2 align-middle" style={{ minWidth: 75 }}>
         <select
           value={row.unit}
           onChange={(e) => onChange(idx, 'unit', e.target.value)}
-          className="w-full bg-transparent text-[13.5px] text-gray-700 outline-none cursor-pointer px-1.5 py-3 rounded focus:bg-gray-50"
+          className="w-full bg-transparent text-[13px] text-gray-700 outline-none cursor-pointer px-1.5 py-3 rounded focus:bg-gray-50"
         >
           <option value="piece">PCS</option>
           <option value="ctn">CTN</option>
         </select>
       </td>
-      <td className="py-1.5 px-1 align-middle" style={{ width: 70 }}>
-        <input type="number" min="1" value={row.qty} onChange={(e) => onChange(idx, 'qty', Number(e.target.value))} className={cellInputCls} />
+
+      <td className="py-1.5 px-1 align-middle" style={{ width: 68 }}>
+        <input
+          type="number"
+          min="1"
+          value={row.qty}
+          onChange={(e) => onChange(idx, 'qty', Number(e.target.value))}
+          className={cellInputCls}
+        />
       </td>
-      <td className="py-1.5 px-1 align-middle" style={{ width: 90 }}>
-        <input type="number" min="0" step="0.01" value={row.rate} onChange={(e) => onChange(idx, 'rate', Number(e.target.value))} className={cellInputCls} />
+
+      <td className="py-1.5 px-1 align-middle" style={{ width: 88 }}>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={row.rate}
+          onChange={(e) => onChange(idx, 'rate', Number(e.target.value))}
+          className={cellInputCls}
+        />
       </td>
-      <td className="py-1.5 px-2 align-middle text-right text-[13.5px] text-gray-700" style={{ width: 90 }}>{fmt(grossAmount)}</td>
+
+      <td className="py-1.5 px-2 align-middle text-right text-[13px] text-gray-700" style={{ width: 90 }}>
+        {fmt(grossAmount)}
+      </td>
+
       <td className="py-1.5 px-1 align-middle" style={{ width: 120 }}>
         <DiscountCell row={row} idx={idx} onChange={onChange} grossAmount={grossAmount} />
       </td>
-      <td className="py-1.5 px-2 align-middle text-right text-[14px] font-bold" style={{ width: 100, color: ACCENT }}>{fmt(net)}</td>
+
+      <td className="py-1.5 px-2 align-middle text-right" style={{ width: 90 }}>
+        <span className="text-[13px] font-semibold text-amber-500">{fmt(discountAmt)}</span>
+      </td>
+
+      <td className="py-1.5 px-1 align-middle" style={{ width: 72 }}>
+        <div className="flex flex-col">
+          <input
+            type="number"
+            min="0"
+            value={row.toUnit}
+            onChange={(e) => onChange(idx, 'toUnit', Number(e.target.value))}
+            placeholder="0"
+            title="Buy N get 1 free — enter N (e.g. 10 = buy 10 get 1)"
+            className={cellInputCls}
+          />
+          {toUnit > 0 && (
+            <span className="text-[9.5px] text-gray-400 text-right pr-1 leading-tight">
+              1/{toUnit}
+            </span>
+          )}
+        </div>
+      </td>
+
+      <td className="py-1.5 px-2 align-middle text-right" style={{ width: 72 }}>
+        {toCalculated > 0
+          ? <span className="text-[13px] font-bold text-emerald-600">+{toCalculated}</span>
+          : <span className="text-[12px] text-gray-200">—</span>
+        }
+      </td>
+
+      <td className="py-1.5 px-2 align-middle text-right text-[14px] font-bold" style={{ width: 100, color: ACCENT }}>
+        {fmt(net)}
+      </td>
+
       <td className="py-1.5 px-2 align-middle text-center" style={{ width: 40 }}>
         <button
-          type="button" onClick={() => onRemove(idx)} disabled={!canRemove}
+          type="button"
+          onClick={() => onRemove(idx)}
+          disabled={!canRemove}
           className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors disabled:opacity-0 disabled:pointer-events-none"
         >
           <MdDelete size={15} />
@@ -277,8 +342,15 @@ const LineRow = ({ row, idx, products, loadingProducts, onPick, onChange, onRemo
 };
 
 const emptyRow = () => ({
-  product: null, description: '', unit: 'piece', qty: 1, rate: 0,
-  discType: 'percent', discPercent: 0, discAmount: 0,
+  product: null,
+  description: '',
+  unit: 'piece',
+  qty: 1,
+  rate: 0,
+  discType: 'percent',
+  discPercent: 0,
+  discAmount: 0,
+  toUnit: 0,
 });
 
 /* ════════════════════════════════════════
@@ -288,19 +360,27 @@ const AddInvoice = () => {
   const navigate = useNavigate();
   const token = useSelector((s) => s.admin.token);
 
-  const [retailers, setRetailers]             = useState([]);
-  const [products, setProducts]               = useState([]);
+  const [retailers, setRetailers] = useState([]);
+  const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
-  const [loadingSP, setLoadingSP]             = useState(false);
-  const [salesPersons, setSalesPersons]       = useState([]);
-  const [cities, setCities]                   = useState([]);
-  const [submitting, setSubmitting]           = useState(false);
-  const [errors, setErrors]                   = useState({});
+  const [loadingSP, setLoadingSP] = useState(false);
+  const [salesPersons, setSalesPersons] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
 
   const [form, setForm] = useState({
-    RetailerUser: '', SaleUser: '', city: '', phoneNumber: '',
-    shippingAddress: '', paymentType: 'cod', couponCode: '', deduction: 0,
-    date: todayISO(), termDays: 0, dueDate: todayISO(),
+    RetailerUser: '',
+    SaleUser: '',
+    city: '',
+    phoneNumber: '',
+    shippingAddress: '',
+    paymentType: 'cod',
+    couponCode: '',
+    deduction: 0,
+    date: todayISO(),
+    termDays: 0,
+    dueDate: todayISO(),
   });
   const sf = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -326,7 +406,7 @@ const AddInvoice = () => {
     setLoadingSP(true);
     getAllSalesPersons().then((r) => setSalesPersons(r.data?.data || [])).catch(console.error).finally(() => setLoadingSP(false));
     getAllCities().then((r) => { const list = r.data?.data || r.data || []; setCities(Array.isArray(list) ? list : []); }).catch(console.error);
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (!form.RetailerUser) return;
@@ -337,7 +417,6 @@ const AddInvoice = () => {
       ...p,
       phoneNumber: r.phoneNumber || p.phoneNumber,
       shippingAddress: address || p.shippingAddress,
-      // city: r.cityID?._id || p.city,
       SaleUser: r.salesPersonID?._id || p.SaleUser,
     }));
   }, [form.RetailerUser, retailers]);
@@ -351,19 +430,18 @@ const AddInvoice = () => {
     setRows((prev) => {
       const updated = prev.map((row, i) => {
         if (i !== idx) return row;
-        const cortanSize    = p.cortanSize || 1;
-        const piecePrice    = p.price || 0;
-        // ── rate = cortanSize * piecePrice for CTN, piecePrice for PCS ──
-        const rate          = row.unit === 'ctn' ? piecePrice * cortanSize : piecePrice;
+        const cortanSize = p.cortanSize || 1;
+        const piecePrice = p.price || 0;
+        const rate = row.unit === 'ctn' ? piecePrice * cortanSize : piecePrice;
         return {
           ...row,
           product: {
-            productId:      p._id,
-            productName:    p.englishTitle,
-            productImage:   p.image,
-            stock:          p.stock,
-            cortanSize:     cortanSize,
-            basePiecePrice: piecePrice, // store original piece price
+            productId: p._id,
+            productName: p.englishTitle,
+            productImage: p.image,
+            stock: p.stock,
+            cortanSize: cortanSize,
+            basePiecePrice: piecePrice,
           },
           rate,
         };
@@ -378,11 +456,10 @@ const AddInvoice = () => {
       prev.map((row, i) => {
         if (i !== idx) return row;
         const updated = { ...row, [key]: val };
-        // ── When unit changes, recalculate rate from basePiecePrice ──
         if (key === 'unit' && updated.product) {
           const piecePrice = updated.product.basePiecePrice ?? updated.rate;
           const cortanSize = updated.product.cortanSize || 1;
-          updated.rate     = val === 'ctn' ? piecePrice * cortanSize : piecePrice;
+          updated.rate = val === 'ctn' ? piecePrice * cortanSize : piecePrice;
         }
         return updated;
       })
@@ -392,9 +469,8 @@ const AddInvoice = () => {
     setRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
 
   /* ── totals ── */
-  const activeRows    = rows.filter((r) => r.product);
-  const subTotal      = activeRows.reduce((s, r) => s + r.qty * r.rate, 0);
-  // ── discount per row can be % of gross, or a flat Rs. amount ──
+  const activeRows = rows.filter((r) => r.product);
+  const subTotal = activeRows.reduce((s, r) => s + r.qty * r.rate, 0);
   const totalDiscount = activeRows.reduce((s, r) => {
     const gross = r.qty * r.rate;
     return s + (r.discType === 'percent' ? gross * (r.discPercent / 100) : Number(r.discAmount) || 0);
@@ -405,16 +481,16 @@ const AddInvoice = () => {
   /* ── validate ── */
   const validate = () => {
     const e = {};
-    if (!form.RetailerUser)    e.RetailerUser    = 'Customer is required';
-    if (!form.SaleUser)        e.SaleUser        = 'Sales person is required';
-    if (!form.city)            e.city            = 'City is required';
-    if (!form.phoneNumber)     e.phoneNumber     = 'Phone number is required';
+    if (!form.RetailerUser) e.RetailerUser = 'Customer is required';
+    if (!form.SaleUser) e.SaleUser = 'Sales person is required';
+    if (!form.city) e.city = 'City is required';
+    if (!form.phoneNumber) e.phoneNumber = 'Phone number is required';
     if (!form.shippingAddress) e.shippingAddress = 'Shipping address is required';
-    if (!activeRows.length)    e.items           = 'Add at least one product';
+    if (!activeRows.length) e.items = 'Add at least one product';
 
     activeRows.forEach((r, idx) => {
       const unitsOrdered = r.unit === 'ctn' ? r.qty * (r.product?.cortanSize || 1) : r.qty;
-      const liveStock    = products.find((p) => p._id === r.product?.productId)?.stock ?? r.product?.stock;
+      const liveStock = products.find((p) => p._id === r.product?.productId)?.stock ?? r.product?.stock;
       if (liveStock != null && unitsOrdered > liveStock) {
         e[`stock_${idx}`] = `Only ${liveStock} in stock for "${r.product?.productName}"`;
       }
@@ -430,17 +506,17 @@ const AddInvoice = () => {
     await Promise.allSettled(
       orderedRows.map(async (r) => {
         const unitsToDeduct = r.unit === 'ctn' ? r.qty * (r.product.cortanSize || 1) : r.qty;
-        const matched       = productList.find((p) => p._id === r.product.productId);
+        const matched = productList.find((p) => p._id === r.product.productId);
         if (!matched) return;
         const newStock = Math.max((matched.stock ?? 0) - unitsToDeduct, 0);
         return updateProduct(
           {
             ...matched,
-            id:         matched._id,
-            stock:      newStock,
-            brandID:    matched.brand?._id    || matched.brand,
+            id: matched._id,
+            stock: newStock,
+            brandID: matched.brand?._id || matched.brand,
             categoryID: matched.category?._id || matched.category,
-            cityID:     matched.cityID?._id   || matched.cityID,
+            cityID: matched.cityID?._id || matched.cityID,
           },
           token
         );
@@ -449,68 +525,71 @@ const AddInvoice = () => {
   };
 
   /* ── submit ── */
- const handleSubmit = async () => {
-  if (!validate()) return;
-  try {
-    setSubmitting(true);
-    const freshProducts = await reloadProducts();
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    try {
+      setSubmitting(true);
+      const freshProducts = await reloadProducts();
 
-    const payload = {
-      RetailerUser:    form.RetailerUser,
-      SaleUser:        form.SaleUser,
-      shippingAddress: form.shippingAddress,
-      phoneNumber:     form.phoneNumber,
-      city:            form.city,
-      paymentType:     form.paymentType,
-      ...(form.couponCode && { couponCode: form.couponCode }),
-      ...(deductionAmt > 0 && { deduction: deductionAmt }),
-      items: activeRows.map((r) => {
-        const gross          = r.qty * r.rate;
-        const discAmt        = r.discType === 'percent' ? gross * (r.discPercent / 100) : Number(r.discAmount) || 0;
-        const net            = Math.max(gross - discAmt, 0);
-        const effectivePrice = r.qty ? net / r.qty : r.rate;
-        return {
-          productId: r.product.productId,
-          quantity:  Number(r.qty),
-          price:     Number(r.rate),
-          type:      r.unit,
-          ...(discAmt > 0 && { discountedPrice: Number(effectivePrice.toFixed(2)) }),
-        };
-      }),
-    };
+      const payload = {
+        RetailerUser: form.RetailerUser,
+        SaleUser: form.SaleUser,
+        shippingAddress: form.shippingAddress,
+        phoneNumber: form.phoneNumber,
+        city: form.city,
+        paymentType: form.paymentType,
+        status: 'Completed',
+        ...(form.couponCode && { couponCode: form.couponCode }),
+        ...(deductionAmt > 0 && { deduction: deductionAmt }),
+        items: activeRows.map((r) => {
+          const gross = r.qty * r.rate;
+          const discAmt = r.discType === 'percent' ? gross * (r.discPercent / 100) : Number(r.discAmount) || 0;
+          const net = Math.max(gross - discAmt, 0);
+          const effectivePrice = r.qty ? net / r.qty : r.rate;
+          return {
+            productId: r.product.productId,
+            quantity: Number(r.qty),
+            price: Number(r.rate),
+            type: r.unit,
+            ...(discAmt > 0 && { discountedPrice: Number(effectivePrice.toFixed(2)) }),
+          };
+        }),
+      };
 
-    const orderRes = await createOrder(payload, token);
-    const orderId  = orderRes.data?.data?._id || orderRes.data?._id;
+      const orderRes = await createOrder(payload, token);
+      const orderId = orderRes.data?.data?._id || orderRes.data?._id;
 
-    if (orderId) {
-      await updateOrderStatus({ id: orderId, status: 'Completed' });
+      if (orderId) {
+        await updateOrderStatus({ id: orderId, status: 'Completed' });
+      }
+
+      await decrementStock(activeRows, freshProducts);
+
+      toast.success('Invoice created successfully — order marked Completed and stock updated.');
+      navigate('/Sales/Invoices');
+    } catch (err) {
+      console.error('Order creation error:', err);
+      toast.error(
+        err.response?.data?.errors?.[0]?.msg ||
+        err.response?.data?.error ||
+        err.response?.data?.msg ||
+        err.message ||
+        'Failed to create invoice'
+      );
+    } finally {
+      setSubmitting(false);
     }
-
-    // Stock deduction and retailer ledger debit are already handled
-    // server-side inside addOrder() — no need to repeat them here.
-
-    toast.success('Invoice created successfully!');
-    navigate('/Sales/Invoices');
-  } catch (err) {
-    console.error('Order creation error:', err);
-    toast.error(
-      err.response?.data?.errors?.[0]?.msg ||
-      err.response?.data?.error ||
-      err.response?.data?.msg ||
-      err.message ||
-      'Failed to create invoice'
-    );
-  } finally {
-    setSubmitting(false);
-  }
-};
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white border-b border-gray-100 sticky top-0 z-30 px-6">
         <div className="mx-auto py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3 ">
-            <button onClick={() => navigate(-1)} className="w-9 h-9 rounded-xl border border-gray-200 hover:bg-gray-50 flex items-center justify-center text-gray-500 transition-colors">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(-1)}
+              className="w-9 h-9 rounded-xl border border-gray-200 hover:bg-gray-50 flex items-center justify-center text-gray-500 transition-colors"
+            >
               <MdArrowBack size={17} />
             </button>
             <div>
@@ -518,20 +597,10 @@ const AddInvoice = () => {
               <h1 className="text-lg font-bold text-gray-900 leading-tight">Add Invoice</h1>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            {/* <button onClick={() => navigate(-1)} className="h-10 px-5 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-colors">Cancel</button>
-            <button
-              onClick={handleSubmit} disabled={submitting}
-              className="h-10 px-6 rounded-xl text-white text-sm font-bold flex items-center gap-2 transition-all disabled:opacity-60"
-              style={{ background: ACCENT, boxShadow: `0 4px 14px ${ACCENT}55` }}
-            >
-              {submitting ? <><Spinner /> Saving…</> : <><MdAdd size={16} /> Save Invoice</>}
-            </button> */}
-          </div>
         </div>
       </div>
 
-      <div className=" mx-auto px-6 py-6 flex flex-col gap-5">
+      <div className="mx-auto px-6 py-6 flex flex-col gap-5">
 
         {/* Customer Details */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -543,9 +612,17 @@ const AddInvoice = () => {
             <div className="col-span-12 md:col-span-4">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Customer <span style={{ color: ACCENT }}>*</span></p>
               <div className="relative">
-                <select value={form.RetailerUser} onChange={(e) => sf('RetailerUser', e.target.value)} className={selectCls + (errors.RetailerUser ? ' border-red-300' : '')}>
+                <select
+                  value={form.RetailerUser}
+                  onChange={(e) => sf('RetailerUser', e.target.value)}
+                  className={selectCls + (errors.RetailerUser ? ' border-red-300' : '')}
+                >
                   <option value="">Select…</option>
-                  {retailers.map((r) => <option key={r._id} value={r._id}>{r.name}</option>)}
+                  {retailers.map((r) => (
+                    <option key={r._id} value={r._id}>
+                      {r.name}
+                    </option>
+                  ))}
                 </select>
                 <MdExpandMore size={15} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               </div>
@@ -555,12 +632,24 @@ const AddInvoice = () => {
             <div className="col-span-12 md:col-span-4">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Sales Person <span style={{ color: ACCENT }}>*</span></p>
               <div className="relative">
-                <select value={form.SaleUser} onChange={(e) => sf('SaleUser', e.target.value)} disabled={loadingSP} className={selectCls + (errors.SaleUser ? ' border-red-300' : '')}>
+                <select
+                  value={form.SaleUser}
+                  onChange={(e) => sf('SaleUser', e.target.value)}
+                  disabled={loadingSP}
+                  className={selectCls + (errors.SaleUser ? ' border-red-300' : '')}
+                >
                   <option value="">{loadingSP ? 'Loading…' : 'Select…'}</option>
-                  {salesPersons.map((sp) => <option key={sp._id} value={sp._id}>{sp.name}</option>)}
-                  {selectedRetailer?.salesPersonID && !salesPersons.some((sp) => sp._id === selectedRetailer.salesPersonID._id) && (
-                    <option value={selectedRetailer.salesPersonID._id}>{selectedRetailer.salesPersonID.name}</option>
-                  )}
+                  {salesPersons.map((sp) => (
+                    <option key={sp._id} value={sp._id}>
+                      {sp.name}
+                    </option>
+                  ))}
+                  {selectedRetailer?.salesPersonID &&
+                    !salesPersons.some((sp) => sp._id === selectedRetailer.salesPersonID._id) && (
+                      <option value={selectedRetailer.salesPersonID._id}>
+                        {selectedRetailer.salesPersonID.name}
+                      </option>
+                    )}
                 </select>
                 <MdExpandMore size={15} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               </div>
@@ -570,9 +659,17 @@ const AddInvoice = () => {
             <div className="col-span-12 md:col-span-4">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Location / Site <span style={{ color: ACCENT }}>*</span></p>
               <div className="relative">
-                <select value={form.city} onChange={(e) => sf('city', e.target.value)} className={selectCls + (errors.city ? ' border-red-300' : '')}>
+                <select
+                  value={form.city}
+                  onChange={(e) => sf('city', e.target.value)}
+                  className={selectCls + (errors.city ? ' border-red-300' : '')}
+                >
                   <option value="">Select…</option>
-                  {cities.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+                  {cities.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {c.name}
+                    </option>
+                  ))}
                 </select>
                 <MdExpandMore size={15} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               </div>
@@ -581,13 +678,24 @@ const AddInvoice = () => {
 
             <div className="col-span-12 md:col-span-4">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Phone Number <span style={{ color: ACCENT }}>*</span></p>
-              <input value={form.phoneNumber} onChange={(e) => sf('phoneNumber', e.target.value)} placeholder="03XX-XXXXXXX" className={inputCls + (errors.phoneNumber ? ' border-red-300' : '')} />
+              <input
+                value={form.phoneNumber}
+                onChange={(e) => sf('phoneNumber', e.target.value)}
+                placeholder="03XX-XXXXXXX"
+                className={inputCls + (errors.phoneNumber ? ' border-red-300' : '')}
+              />
               {errors.phoneNumber && <p className="text-red-400 text-[11px] mt-1">{errors.phoneNumber}</p>}
             </div>
 
             <div className="col-span-12 md:col-span-8 row-span-2">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Shipping Address <span style={{ color: ACCENT }}>*</span></p>
-              <textarea value={form.shippingAddress} onChange={(e) => sf('shippingAddress', e.target.value)} placeholder="Full delivery address…" rows={3} className={inputCls + ' resize-none ' + (errors.shippingAddress ? 'border-red-300' : '')} />
+              <textarea
+                value={form.shippingAddress}
+                onChange={(e) => sf('shippingAddress', e.target.value)}
+                placeholder="Full delivery address…"
+                rows={3}
+                className={inputCls + ' resize-none ' + (errors.shippingAddress ? 'border-red-300' : '')}
+              />
               {errors.shippingAddress && <p className="text-red-400 text-[11px] mt-1">{errors.shippingAddress}</p>}
             </div>
 
@@ -598,7 +706,13 @@ const AddInvoice = () => {
 
             <div className="col-span-6 md:col-span-2">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Term Days</p>
-              <input type="number" min="0" value={form.termDays} onChange={(e) => sf('termDays', Number(e.target.value))} className={inputCls} />
+              <input
+                type="number"
+                min="0"
+                value={form.termDays}
+                onChange={(e) => sf('termDays', Number(e.target.value))}
+                className={inputCls}
+              />
             </div>
 
             <div className="col-span-12 md:col-span-2">
@@ -608,22 +722,38 @@ const AddInvoice = () => {
 
             <div className="col-span-6 md:col-span-2">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Credit Limit</p>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-[13px] text-gray-400">{fmt(selectedRetailer?.creditLimit || 0)}</div>
+              <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-[13px] text-gray-400">
+                {fmt(selectedRetailer?.creditLimit || 0)}
+              </div>
             </div>
 
             <div className="col-span-6 md:col-span-2">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Balance</p>
-              <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-[13px] text-gray-400">{fmt(selectedRetailer?.balance || 0)}</div>
+              <div className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-[13px] text-gray-400">
+                {fmt(selectedRetailer?.balance || 0)}
+              </div>
             </div>
 
             <div className="col-span-12 md:col-span-4">
               <p className="text-[11px] font-semibold text-gray-500 mb-1">Payment Type <span style={{ color: ACCENT }}>*</span></p>
               <div className="grid grid-cols-2 gap-2">
-                {[{ v: 'cod', l: 'Cash on Delivery' }, { v: 'bank_transfer', l: 'Bank Transfer' }].map((opt) => (
-                  <button key={opt.v} type="button" onClick={() => sf('paymentType', opt.v)}
+                {[
+                  { v: 'cod', l: 'Cash on Delivery' },
+                  { v: 'bank_transfer', l: 'Bank Transfer' },
+                ].map((opt) => (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => sf('paymentType', opt.v)}
                     className="h-9 rounded-lg border text-[12px] font-semibold transition-all"
-                    style={form.paymentType === opt.v ? { background: ACCENT, borderColor: ACCENT, color: '#fff' } : { background: '#fff', borderColor: '#e5e7eb', color: '#4b5563' }}
-                  >{opt.l}</button>
+                    style={
+                      form.paymentType === opt.v
+                        ? { background: ACCENT, borderColor: ACCENT, color: '#fff' }
+                        : { background: '#fff', borderColor: '#e5e7eb', color: '#4b5563' }
+                    }
+                  >
+                    {opt.l}
+                  </button>
                 ))}
               </div>
             </div>
@@ -634,46 +764,102 @@ const AddInvoice = () => {
         {/* Products Details */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/70 flex items-center justify-between rounded-t-2xl">
-    <p className="text-[12.5px] font-bold text-gray-700">Products Details</p>
-            {loadingProducts && <span className="text-[11px] text-gray-400 flex items-center gap-1.5"><Spinner /> loading catalogue…</span>}
+            <p className="text-[12.5px] font-bold text-gray-700">Products Details</p>
+            {loadingProducts && (
+              <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
+                <Spinner /> loading catalogue…
+              </span>
+            )}
           </div>
 
           {errors.items && <p className="text-red-400 text-[11px] px-5 pt-3">{errors.items}</p>}
-          {Object.keys(errors).filter((k) => k.startsWith('stock_')).map((k) => (
-            <p key={k} className="text-red-400 text-[11px] px-5 pt-1">⚠ {errors[k]}</p>
-          ))}
+          {Object.keys(errors)
+            .filter((k) => k.startsWith('stock_'))
+            .map((k) => (
+              <p key={k} className="text-red-400 text-[11px] px-5 pt-1">
+                ⚠ {errors[k]}
+              </p>
+            ))}
 
           <div className="overflow-x-auto" style={{ overflowY: 'visible' }}>
-  <table className="w-full border-collapse" style={{ minWidth: 960 }}>
+            <table className="w-full border-collapse" style={{ minWidth: 1100 }}>
               <thead>
                 <tr style={{ background: ACCENT }}>
-                  {['Product', 'Description', 'Unit', 'Qty', 'Rate', 'Amount', 'Discount', 'Net'].map((h, i) => (
-                    <th key={h} className={`text-[10.5px] font-bold text-white uppercase tracking-wide px-2 py-3.5 ${i >= 3 ? 'text-right' : 'text-left'}`}>{h}</th>
+                  {[
+                    'Product',
+                    'Description',
+                    'Unit',
+                    'Qty',
+                    'Rate',
+                    'Amount',
+                    'Discount',
+                    'Disc. Calc.',
+                    'TO/Unit',
+                    'TO Calc.',
+                    'Net',
+                  ].map((h, i) => (
+                    <th
+                      key={h}
+                      className={`text-[10.5px] font-bold text-white uppercase tracking-wide px-2 py-3.5 ${
+                        i >= 3 ? 'text-right' : 'text-left'
+                      }`}
+                    >
+                      {h}
+                    </th>
                   ))}
                   <th className="px-2 py-3.5" style={{ width: 40 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, idx) => (
-                  <LineRow key={idx} row={row} idx={idx} products={products} loadingProducts={loadingProducts} onPick={pickProduct} onChange={changeRow} onRemove={removeRow} canRemove={rows.length > 1} />
+                  <LineRow
+                    key={idx}
+                    row={row}
+                    idx={idx}
+                    products={products}
+                    loadingProducts={loadingProducts}
+                    onPick={pickProduct}
+                    onChange={changeRow}
+                    onRemove={removeRow}
+                    canRemove={rows.length > 1}
+                  />
                 ))}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-gray-100">
-                  <td colSpan={3} className="px-2 py-3 text-[12px] font-bold text-gray-500">Total</td>
-                  <td className="px-1 py-3 text-right text-[12px] font-bold text-gray-700">{activeRows.reduce((s, r) => s + Number(r.qty), 0)}</td>
-                  <td></td>
+                  <td colSpan={3} className="px-2 py-3 text-[12px] font-bold text-gray-500">
+                    Total
+                  </td>
+                  <td className="px-1 py-3 text-right text-[12px] font-bold text-gray-700">
+                    {activeRows.reduce((s, r) => s + Number(r.qty), 0)}
+                  </td>
+                  <td />
                   <td className="px-2 py-3 text-right text-[12px] font-bold text-gray-700">{fmt(subTotal)}</td>
-                  <td className="px-2 py-3 text-right text-[12px] font-bold text-gray-700">{fmt(totalDiscount)}</td>
-                  <td className="px-2 py-3 text-right text-[13px] font-bold" style={{ color: ACCENT }}>{fmt(grandTotal)}</td>
-                  <td></td>
+                  <td />
+                  <td className="px-2 py-3 text-right text-[12px] font-bold text-amber-500">{fmt(totalDiscount)}</td>
+                  <td />
+                  <td className="px-2 py-3 text-right text-[12px] font-bold text-emerald-600">
+                    +{activeRows.reduce((s, r) => {
+                      const toUnit = Number(r.toUnit) || 0;
+                      return s + (toUnit > 0 ? Math.floor(r.qty / toUnit) : 0);
+                    }, 0)}
+                  </td>
+                  <td className="px-2 py-3 text-right text-[13px] font-bold" style={{ color: ACCENT }}>
+                    {fmt(grandTotal)}
+                  </td>
+                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
 
           <div className="py-3 border-t border-gray-100">
-            <button type="button" onClick={() => setRows((prev) => [...prev, emptyRow()])} className="flex items-center gap-1.5 text-[12.5px] font-semibold transition-colors" style={{ color: ACCENT }}>
+            <button
+              type="button"
+              onClick={() => setRows((prev) => [...prev, emptyRow()])}
+              className="flex items-center gap-1.5 text-[12.5px] font-semibold transition-colors"
+              style={{ color: ACCENT }}
+            >
               <MdAdd size={15} /> Add more
             </button>
           </div>
@@ -685,11 +871,24 @@ const AddInvoice = () => {
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 h-full grid grid-cols-2 gap-4">
               <div>
                 <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Coupon Code</p>
-                <input value={form.couponCode} onChange={(e) => sf('couponCode', e.target.value.toUpperCase())} placeholder="e.g. SAVE10" className={inputCls + ' font-mono tracking-wider'} />
+                <input
+                  value={form.couponCode}
+                  onChange={(e) => sf('couponCode', e.target.value.toUpperCase())}
+                  placeholder="e.g. SAVE10"
+                  className={inputCls + ' font-mono tracking-wider'}
+                />
               </div>
               <div>
                 <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Deduction (Rs.)</p>
-                <input type="number" min="0" step="0.01" value={form.deduction} onChange={(e) => sf('deduction', Number(e.target.value))} placeholder="0.00" className={inputCls} />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.deduction}
+                  onChange={(e) => sf('deduction', Number(e.target.value))}
+                  placeholder="0.00"
+                  className={inputCls}
+                />
               </div>
             </div>
           </div>
@@ -715,19 +914,32 @@ const AddInvoice = () => {
                 <span className="text-[12px] font-bold uppercase tracking-wide text-white/80">Total</span>
                 <span className="text-xl font-bold text-white">Rs. {fmt(grandTotal)}</span>
               </div>
-
             </div>
           </div>
         </div>
 
         <div className="flex items-center justify-end gap-3 pb-6">
-          <button onClick={() => navigate(-1)} className="h-11 px-6 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-colors">Cancel</button>
           <button
-            onClick={handleSubmit} disabled={submitting}
+            onClick={() => navigate(-1)}
+            className="h-11 px-6 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting}
             className="h-11 px-7 rounded-xl text-white text-sm font-bold flex items-center gap-2 transition-all disabled:opacity-60"
             style={{ background: ACCENT, boxShadow: `0 4px 14px ${ACCENT}55` }}
           >
-            {submitting ? <><Spinner /> Saving…</> : <><MdAdd size={16} /> Save Invoice</>}
+            {submitting ? (
+              <>
+                <Spinner /> Saving…
+              </>
+            ) : (
+              <>
+                <MdAdd size={16} /> Save Invoice
+              </>
+            )}
           </button>
         </div>
 

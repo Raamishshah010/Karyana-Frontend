@@ -17,6 +17,15 @@ const LIMIT = 25;
 const fmtPKR = (n) =>
   `PKR ${Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Safe date → epoch ms helper. Invalid/missing dates fall back to 0 so they
+// never randomly interleave with real dates during sort (they consistently
+// sink to the "oldest" end instead of jumping around).
+const toTime = (val) => {
+  if (!val) return 0;
+  const t = new Date(val).getTime();
+  return Number.isNaN(t) ? 0 : t;
+};
+
 const typeBadge = (type) => {
   const map = {
     PURCHASE:    { bg: 'bg-blue-50',   text: 'text-blue-600',   ring: 'ring-blue-200',   label: 'Purchase'    },
@@ -75,27 +84,33 @@ const SupplierLedger = () => {
         .map((t) => sig(t.date || t.createdAt, t.amount))
     );
 
-    const txnRows = txnList.map((t) => ({
-      _id:         t._id,
-      date:        t.date || t.createdAt,
-      type:        t.type || 'PURCHASE',
-      description: t.details || t.description || '—',
-      debit:       t.type === 'PAYMENT' ? 0 : Number(t.amount || 0),
-      credit:      t.type === 'PAYMENT' ? Number(t.amount || 0) : 0,
-      // server already returns a running balance for ledger rows — trust it
-      apiBalance:  t.balance ?? null,
-      ref:         t.voucherNo || t.billNo || '—',
-    }));
+    // Convention: PURCHASE → Cr (increases payable, what we owe supplier)
+    //             PAYMENT  → Dr (reduces payable)
+    const txnRows = txnList.map((t, i) => ({
+  _id:         t._id,
+  seq:         i,
+  date:        t.date || t.createdAt,
+  type:        t.type || 'PURCHASE',
+  description: t.details || t.description || '—',
+  debit:       t.type === 'PAYMENT' ? Number(t.amount || 0) : 0,
+  credit:      t.type === 'PAYMENT' ? 0 : Number(t.amount || 0),
+  apiBalance:  t.balance ?? null,
+  ref:         t.voucherNo
+                || t.billNo
+                || (t._id ? `LEDG-${String(t._id).slice(-6).toUpperCase()}` : '—'),  // ← fallback
+}));
+
 
     const pmtRows = pmtList
       .filter((p) => !alreadyInLedger.has(p._id)) // skip duplicates of ledger PAYMENT rows
-      .map((p) => ({
+      .map((p, i) => ({
         _id:         p._id,
+        seq:         i,
         date:        p.date || p.createdAt,
         type:        'PAYMENT',
         description: p.description || `Payment via ${p.bank?.bankName || 'bank'}`,
-        debit:       0,
-        credit:      Number(p.amount || 0),
+        debit:       Number(p.amount || 0),
+        credit:      0,
         apiBalance:  null, // /payments doesn't carry a running balance
         ref:         p.voucherNo || '—',
       }));
@@ -104,46 +119,65 @@ const SupplierLedger = () => {
       .filter((inv) => !nonPaymentLedgerSignatures.has(
         sig(inv.date || inv.createdAt, inv.totalAmount ?? inv.amount)
       ))
-      .map((inv) => ({
+      .map((inv, i) => ({
         _id:         inv._id,
+        seq:         i,
         date:        inv.date || inv.createdAt,
         type:        'PURCHASE',
         description: inv.details || 'Purchase Invoice',
-        debit:       Number(inv.totalAmount ?? inv.amount ?? 0),
-        credit:      0,
+        debit:       0,
+        credit:      Number(inv.totalAmount ?? inv.amount ?? 0),
         apiBalance:  null, // /purchase-invoices doesn't carry a running balance
         ref:         inv.invoiceId || '—',
       }));
 
     // A purchase credit note is a return to the supplier — it reduces what
-    // you owe them, so it posts as a Credit, same direction as a payment.
+    // you owe them, so under the Cr-as-payable convention it now posts as
+    // a Debit (opposite direction to a purchase, same direction as a payment).
     const creditNoteRows = cnList
       .filter((cn) => !nonPaymentLedgerSignatures.has(
         sig(cn.date || cn.createdAt, cn.totalAmount ?? cn.payable)
       ))
-      .map((cn) => ({
+      .map((cn, i) => ({
         _id:         cn._id,
+        seq:         i,
         date:        cn.date || cn.createdAt,
         type:        'CREDIT_NOTE',
         description: cn.details || 'Purchase Credit Note (Return)',
-        debit:       0,
-        credit:      Number(cn.totalAmount ?? cn.payable ?? 0),
+        debit:       Number(cn.totalAmount ?? cn.payable ?? 0),
+        credit:      0,
         apiBalance:  null, // /purchase-credit-note doesn't carry a running balance
         ref:         cn.purchaseCreditNoteId || cn.billNo || '—',
       }));
 
-    const combined = [...txnRows, ...pmtRows, ...invoiceRows, ...creditNoteRows].sort(
-      (a, b) => new Date(a.date) - new Date(b.date)
-    );
+    // Sort strictly oldest → newest using a safe epoch comparison (missing
+    // or invalid dates sink to time 0 instead of producing NaN, which
+    // sort() handles unpredictably). Same-timestamp rows keep their
+    // original insertion order via `seq` so re-renders don't reshuffle them.
+    const combined = [...txnRows, ...pmtRows, ...invoiceRows, ...creditNoteRows];
+    combined.sort((a, b) => {
+      const diff = toTime(a.date) - toTime(b.date);
+      if (diff !== 0) return diff;
+      return a.seq - b.seq;
+    });
 
     // Running balance must be computed oldest → newest (each row builds on
-    // the one before it), but the table itself should display newest first.
+    // the one before it). Convention: Cr (payable) increases balance,
+    // Dr (payment/return) decreases it — so balance = +credit -debit.
+    //
+    // CAVEAT: rows with apiBalance (from /transactions) use whatever value
+    // the backend already computed. If the backend's own balance formula
+    // still uses the old debit/credit direction, that server-supplied
+    // number won't match this new convention and the backend should be
+    // updated too so both sides agree.
     let running = 0;
     const withBalance = combined.map((row) => {
-      running = row.apiBalance != null ? row.apiBalance : running + row.debit - row.credit;
+      running = row.apiBalance != null ? row.apiBalance : running + row.credit - row.debit;
       return { ...row, runningBalance: running };
     });
 
+    // Display newest → oldest: top of the table = latest transaction,
+    // bottom of the table = earliest transaction.
     return withBalance.slice().reverse();
   }, []);
 
@@ -158,13 +192,19 @@ const SupplierLedger = () => {
       ]);
 
       const txnRaw = txnRes.status === 'fulfilled' ? txnRes.value : null;
-      const txns =
-        Array.isArray(txnRaw)               ? txnRaw               :
-        Array.isArray(txnRaw?.transactions) ? txnRaw.transactions  :
-        Array.isArray(txnRaw?.ledgers)      ? txnRaw.ledgers       :
-        Array.isArray(txnRaw?.data?.data)   ? txnRaw.data.data     :
-        Array.isArray(txnRaw?.data)         ? txnRaw.data          :
-        [];
+const txns =
+  Array.isArray(txnRaw)                    ? txnRaw                    :
+  Array.isArray(txnRaw?.transactions)      ? txnRaw.transactions       :
+  Array.isArray(txnRaw?.ledgers)           ? txnRaw.ledgers            :
+  Array.isArray(txnRaw?.ledger)            ? txnRaw.ledger             :   // ← add
+  Array.isArray(txnRaw?.data?.transactions)? txnRaw.data.transactions  :   // ← add
+  Array.isArray(txnRaw?.data?.ledgers)     ? txnRaw.data.ledgers       :   // ← add
+  Array.isArray(txnRaw?.data?.data)        ? txnRaw.data.data          :
+  Array.isArray(txnRaw?.data)              ? txnRaw.data               :
+  [];
+
+console.log('✅ parsed txns count:', txns.length, 'sample:', txns[0]);
+
 
       const pmtRaw = pmtRes.status === 'fulfilled' ? pmtRes.value : null;
       const pmts =
@@ -201,6 +241,7 @@ const SupplierLedger = () => {
       const built = buildLedger(txns, pmts, invoices, creditNotes);
       setLedger(built);
       setTotalPages(Math.ceil(built.length / LIMIT) || 1);
+      setCurrentPage(1); // reset to page 1 (newest entries) on every fresh load/refresh
     } catch (err) {
       toast.error('Failed to load ledger');
       console.error(err);
@@ -212,9 +253,10 @@ const SupplierLedger = () => {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // ── totals ──
+  // Under the new convention: Cr (credit) = payable (purchases), Dr (debit) = payments/returns.
   const totalDebit  = ledger.reduce((s, r) => s + r.debit, 0);
   const totalCredit = ledger.reduce((s, r) => s + r.credit, 0);
-  const balance     = totalDebit - totalCredit;
+  const balance     = totalCredit - totalDebit;
 
   // ── paginated rows ──
   const start         = (currentPage - 1) * LIMIT;
@@ -268,8 +310,8 @@ const SupplierLedger = () => {
           {/* ── Summary Cards ── */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
-              { label: 'Total Purchases (Dr.)', value: fmtPKR(totalDebit),  color: 'text-red-500',     bg: 'bg-red-50',     border: 'border-red-100'     },
-              { label: 'Total Payments (Cr.)',  value: fmtPKR(totalCredit), color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
+              { label: 'Total Purchases (Cr.)', value: fmtPKR(totalCredit), color: 'text-red-500',     bg: 'bg-red-50',     border: 'border-red-100'     },
+              { label: 'Total Payments (Dr.)',  value: fmtPKR(totalDebit),  color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
               { label: 'Balance (Payable)',      value: fmtPKR(Math.abs(balance)),
                 color: balance > 0 ? 'text-[#FF5934]' : 'text-emerald-600',
                 bg: balance > 0 ? 'bg-orange-50' : 'bg-emerald-50',
@@ -358,7 +400,7 @@ const SupplierLedger = () => {
                         <span className={`text-[13px] font-bold ${row.runningBalance > 0 ? 'text-[#FF5934]' : 'text-emerald-600'}`}>
                           {fmtPKR(Math.abs(row.runningBalance))}
                           <span className="text-[10px] font-normal ml-1">
-                            {row.runningBalance > 0 ? 'Dr' : row.runningBalance < 0 ? 'Cr' : ''}
+                            {row.runningBalance > 0 ? 'Cr' : row.runningBalance < 0 ? 'Dr' : ''}
                           </span>
                         </span>
                       </td>
@@ -375,7 +417,7 @@ const SupplierLedger = () => {
                       <td className="px-4 py-3 text-right text-[13px] font-bold text-emerald-600">{fmtPKR(totalCredit)}</td>
                       <td className="px-4 py-3 text-right text-[13px] font-bold" style={{ color: ACCENT }}>
                         {fmtPKR(Math.abs(balance))}
-                        <span className="text-[10px] font-normal ml-1">{balance > 0 ? 'Dr' : balance < 0 ? 'Cr' : ''}</span>
+                        <span className="text-[10px] font-normal ml-1">{balance > 0 ? 'Cr' : balance < 0 ? 'Dr' : ''}</span>
                       </td>
                     </tr>
                   </tfoot>
