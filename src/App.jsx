@@ -77,6 +77,7 @@ import PurchaseCreditNote from './pages/PurchaseCreditNote.jsx';
 import AddPayments from './pages/AddPayments.jsx';
 import Payments from './pages/Payments.jsx';
 import SupplierLedger from './pages/SupplierLedger.jsx';
+import AddMultiInvoice from './pages/AddMultiInvoice.jsx';
 
 const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -207,6 +208,7 @@ const App = () => {
 
               <Route path="/Add-Orders" element={<AddOrderPage />} />
               <Route path="/Add-Invoice" element={<AddInvoice />} />
+              <Route path="/Add-Multi-Invoice" element={<AddMultiInvoice />} />
               <Route path="/Add-Credit-Note" element={<AddCreditNote />} />
               <Route path="/Add-Purchase" element={<AddPurchase />} />
               <Route path="/Add-Purchase-Note" element={<AddPurchaseNote />} />
